@@ -11,18 +11,28 @@ function useFixtures() {
   return localStorage.getItem("useTestFixtures") === "1";
 }
 
+// fetch() resout les chemins relatifs par rapport a la page (index.html),
+// pas par rapport a ce module -- contrairement a import()/import.meta.url.
+// Sur un hebergement a la racine (ex: localhost:8123/), les deux se
+// confondent par coincidence ; sous GitHub Pages, servi depuis un
+// sous-dossier (ex: /livraison/), ça diverge et fetch() 404. On force donc
+// une resolution explicite relative a ce module via import.meta.url.
+function moduleRelativeUrl(relativePath) {
+  return new URL(relativePath, import.meta.url).href;
+}
+
 function assetUrls() {
   if (useFixtures()) {
     return {
-      graph: "../../test-fixtures/mini-graph.json",
-      ban: "../../test-fixtures/mini-ban.json",
+      graph: moduleRelativeUrl("../../test-fixtures/mini-graph.json"),
+      ban: moduleRelativeUrl("../../test-fixtures/mini-ban.json"),
       manifest: null,
     };
   }
   return {
-    graph: "../../assets/graph.json",
-    ban: "../../assets/ban.json",
-    manifest: "../../assets/manifest-content.json",
+    graph: moduleRelativeUrl("../../assets/graph.json"),
+    ban: moduleRelativeUrl("../../assets/ban.json"),
+    manifest: moduleRelativeUrl("../../assets/manifest-content.json"),
   };
 }
 
