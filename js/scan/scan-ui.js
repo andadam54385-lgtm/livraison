@@ -16,6 +16,7 @@ export async function mount(container) {
   containerRef = container;
   if (!fabBound) {
     document.getElementById("scan-fab").addEventListener("click", () => startScanFlow());
+    document.getElementById("scan-manual-btn").addEventListener("click", () => startManualEntry());
     fabBound = true;
   }
   await renderList();
@@ -23,6 +24,14 @@ export async function mount(container) {
 
 function escapeAttr(s) {
   return String(s ?? "").replace(/"/g, "&quot;");
+}
+
+// La validation croisee OCR (telConfidence) n'a pas de sens pour un colis
+// saisi a la main : il n'y a pas de 2eme occurrence a comparer, et le
+// chiffre vient directement de l'utilisateur, donc on le considere fiable
+// par defaut des qu'il est rempli.
+function isTelTrusted(colis) {
+  return colis.source === "manuel" || colis.telConfidence === "haute";
 }
 
 function badgeForStatut(statut) {
@@ -91,6 +100,28 @@ async function startScanFlow() {
   }
 }
 
+// Repli quand le scan/OCR ne fonctionne pas ou pas bien (mauvaise photo,
+// pas d'appareil photo, colis hors UPS...) : ouvre directement la fiche
+// vide, sans passer par capture/recadrage/OCR.
+function startManualEntry() {
+  const colis = {
+    id: uuid(),
+    tracking: null,
+    trackingConfidence: null,
+    nom: "",
+    tel: "",
+    telConfidence: "a_verifier",
+    adresseRaw: { rue: "", cp: "", ville: "" },
+    geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
+    avant12h: false,
+    statut: "a_verifier",
+    source: "manuel",
+    ocrRawText: "",
+    dateScan: new Date().toISOString(),
+  };
+  renderReviewForm(colis, { isNew: true, duplicate: false });
+}
+
 async function showCropStep(canvas) {
   return new Promise((resolve) => {
     containerRef.innerHTML = `
@@ -149,6 +180,7 @@ async function runOcrPipeline(file) {
     geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
     avant12h: false,
     statut: "a_verifier",
+    source: "ocr",
     ocrRawText: text,
     ocrConfidence: confidence,
     dateScan: new Date().toISOString(),
@@ -159,9 +191,11 @@ async function runOcrPipeline(file) {
 
 function renderReviewForm(colis, { isNew, duplicate = false }) {
   const telBadge =
-    colis.telConfidence === "haute"
-      ? '<span class="badge badge-ok">confiance haute</span>'
-      : '<span class="badge badge-warn">à vérifier</span>';
+    colis.source === "manuel"
+      ? "" // saisie directe par l'utilisateur : pas de validation croisee a afficher
+      : colis.telConfidence === "haute"
+        ? '<span class="badge badge-ok">confiance haute</span>'
+        : '<span class="badge badge-warn">à vérifier</span>';
 
   containerRef.innerHTML = `
     ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>⚠ Ce tracking a déjà été scanné.</strong></div>` : ""}
@@ -244,7 +278,7 @@ async function runGeocodeAndSave(colis) {
     colis.geocode = { status: "non_geocode", lat: null, lon: null, candidates: [] };
   }
 
-  colis.statut = colis.geocode.status === "ok" && colis.telConfidence === "haute" ? "pret" : "a_verifier";
+  colis.statut = colis.geocode.status === "ok" && isTelTrusted(colis) ? "pret" : "a_verifier";
 
   await saveColis(colis);
   emit("colis:saved", { colis });
@@ -271,7 +305,7 @@ function renderGeocodePicker(colis) {
 
   async function acceptEntry(entry) {
     colis.geocode = { status: "ok", lat: entry.lat, lon: entry.lon, candidates: [] };
-    colis.statut = colis.telConfidence === "haute" ? "pret" : "a_verifier";
+    colis.statut = isTelTrusted(colis) ? "pret" : "a_verifier";
     await saveColis(colis);
     emit("colis:saved", { colis });
     renderList();
