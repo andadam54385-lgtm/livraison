@@ -2,6 +2,14 @@
 // tools/gen-precache-manifest.js (execute en local, jamais au runtime) et ecrite
 // dans precache-manifest.json, qui contient aussi un hash de version pour
 // invalider le cache quand le contenu change.
+//
+// IMPORTANT : les navigateurs ne detectent une mise a jour du service worker
+// qu'en comparant les OCTETS de ce fichier sw.js lui-meme -- pas ceux des
+// fichiers qu'il precache. Toute correction qui doit atteindre les appareils
+// ayant deja installe une version anterieure DOIT donc modifier ce fichier
+// (ex: incrementer SW_BUILD ci-dessous), meme si le bug corrige se trouve
+// ailleurs. Sans ca, le service worker reste bloque sur son ancien cache.
+const SW_BUILD = 2;
 
 const FALLBACK_ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./css/app.css", "./js/app.js"];
 
