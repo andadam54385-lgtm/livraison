@@ -1,11 +1,9 @@
 {
-  "version": "0c24d96dbfb2",
-  "generatedAt": "2026-07-14T14:17:18.291Z",
+  "version": "8db5c3cc8542",
+  "generatedAt": "2026-07-15T20:05:49.939Z",
   "assets": [
     "./",
     "./README.md",
-    "./assets/ban.json",
-    "./assets/graph.json",
     "./assets/manifest-content.json",
     "./css/app.css",
     "./icons/apple-touch-icon.png",
@@ -25,6 +23,7 @@
     "./js/lib/geo-utils.js",
     "./js/lib/id.js",
     "./js/lib/idb.js",
+    "./js/map/map-ui.js",
     "./js/routing/dijkstra.js",
     "./js/routing/graph-loader.js",
     "./js/routing/matrix-builder.js",

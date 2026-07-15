@@ -2,7 +2,7 @@ import { openDb } from "./db/schema.js";
 import { runImportIfNeeded } from "./import/import-data.js";
 import { renderImportProgress } from "./import/import-ui.js";
 
-const VIEWS = ["scan", "routing", "tour", "settings"];
+const VIEWS = ["scan", "routing", "tour", "map", "settings"];
 const viewModules = {};
 
 async function loadViewModule(name) {
@@ -11,6 +11,7 @@ async function loadViewModule(name) {
   if (name === "scan") mod = await import("./scan/scan-ui.js");
   else if (name === "routing") mod = await import("./routing/routing-ui.js");
   else if (name === "tour") mod = await import("./tour/tour-ui.js");
+  else if (name === "map") mod = await import("./map/map-ui.js");
   else if (name === "settings") mod = await import("./settings/settings-ui.js");
   viewModules[name] = mod;
   return mod;

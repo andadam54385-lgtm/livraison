@@ -2,10 +2,11 @@ import { openCamera } from "./capture.js";
 import { loadImageToCanvas, cropCanvas, preprocessForOcr, attachCropSelector } from "./preprocess.js";
 import { recognizeCanvas } from "./ocr.js";
 import { parseUpsLabel } from "./parse-ups-label.js";
-import { saveColis, isDuplicateTracking, listAllColis, getColis } from "./colis-store.js";
+import { saveColis, deleteColis, isDuplicateTracking, listAllColis, getColis } from "./colis-store.js";
 import { matchAddress } from "../geocode/match-address.js";
 import { renderCandidatePicker, renderManualAddressSearch } from "../geocode/geocode-ui.js";
 import { getSetting } from "../settings/settings-store.js";
+import { markColisDeliveredDirect } from "../routing/tour-store.js";
 import { emit } from "../lib/event-bus.js";
 import { uuid } from "../lib/id.js";
 
@@ -26,13 +27,13 @@ function escapeAttr(s) {
   return String(s ?? "").replace(/"/g, "&quot;");
 }
 
-// La validation croisee OCR (telConfidence) n'a pas de sens pour un colis
-// saisi a la main : il n'y a pas de 2eme occurrence a comparer, et le
-// chiffre vient directement de l'utilisateur, donc on le considere fiable
-// par defaut des qu'il est rempli.
-function isTelTrusted(colis) {
-  return colis.source === "manuel" || colis.telConfidence === "haute";
-}
+// La validation croisee OCR du telephone (telConfidence) reste affichee comme
+// badge informatif sur la fiche (pour inciter a verifier ce champ), mais ne
+// bloque plus le passage au statut "pret" : en pratique, Ref.1 ne contient
+// pas toujours un telephone sur une vraie etiquette (parfois une autre
+// reference), et la comparaison echoue alors systematiquement meme quand le
+// numero SHIP TO est correct -- l'utilisateur voit et corrige deja le champ
+// dans la fiche editable avant de valider, ce qui est la vraie verification.
 
 function badgeForStatut(statut) {
   if (statut === "pret") return `<span class="badge badge-ok">Prêt</span>`;
@@ -43,25 +44,33 @@ function badgeForStatut(statut) {
 
 function renderColisCard(c) {
   const adresse = `${c.adresseRaw?.rue || "(adresse à vérifier)"}, ${c.adresseRaw?.cp || ""} ${c.adresseRaw?.ville || ""}`;
+  const canDeliver = c.statut === "pret" || c.statut === "en_tournee";
   return `
     <div class="card" data-colis-id="${escapeAttr(c.id)}">
-      <div class="card-row">
+      <div class="card-row" data-open-review>
         <div class="card-title">${c.nom || "(nom inconnu)"}</div>
         ${badgeForStatut(c.statut)}
       </div>
-      <div class="muted">${adresse}</div>
-      ${c.avant12h ? `<span class="badge badge-warn" style="margin-top:4px;">Avant 12h</span>` : ""}
+      <div class="muted" data-open-review>${adresse}</div>
+      <div class="stats-row">
+        ${c.avant12h ? `<span class="badge badge-warn">Avant 12h</span>` : ""}
+        ${c.quantite > 1 ? `<span class="badge badge-pending">${c.quantite} colis</span>` : ""}
+      </div>
+      <div class="button-row" style="margin-top:10px;">
+        ${canDeliver ? `<button type="button" data-mark-delivered>✓ Livré</button>` : ""}
+        <button type="button" class="danger" data-delete-colis>🗑 Supprimer</button>
+      </div>
     </div>
   `;
 }
 
 async function renderList() {
   const colis = await listAllColis();
-  const total = colis.length;
+  const totalColis = colis.reduce((sum, c) => sum + (c.quantite || 1), 0);
   const issues = colis.filter((c) => c.statut === "a_verifier").length;
   const totalEl = document.getElementById("scan-count-total");
   const issuesEl = document.getElementById("scan-count-issues");
-  if (totalEl) totalEl.textContent = `${total} colis`;
+  if (totalEl) totalEl.textContent = `${totalColis} colis`;
   if (issuesEl) issuesEl.textContent = `${issues} à vérifier`;
 
   if (colis.length === 0) {
@@ -75,8 +84,28 @@ async function renderList() {
     .map((c) => renderColisCard(c))
     .join("");
 
-  containerRef.querySelectorAll("[data-colis-id]").forEach((el) => {
-    el.addEventListener("click", () => reviewExistingColis(el.dataset.colisId));
+  containerRef.querySelectorAll("[data-open-review]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const id = el.closest("[data-colis-id]").dataset.colisId;
+      reviewExistingColis(id);
+    });
+  });
+
+  containerRef.querySelectorAll("[data-mark-delivered]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const id = el.closest("[data-colis-id]").dataset.colisId;
+      await markColisDeliveredDirect(id);
+      renderList();
+    });
+  });
+
+  containerRef.querySelectorAll("[data-delete-colis]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const id = el.closest("[data-colis-id]").dataset.colisId;
+      if (!confirm("Supprimer ce colis ? Cette action est irréversible.")) return;
+      await deleteColis(id);
+      renderList();
+    });
   });
 }
 
@@ -114,6 +143,7 @@ function startManualEntry() {
     adresseRaw: { rue: "", cp: "", ville: "" },
     geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
     avant12h: false,
+    quantite: 1,
     statut: "a_verifier",
     source: "manuel",
     ocrRawText: "",
@@ -179,6 +209,7 @@ async function runOcrPipeline(file) {
     adresseRaw: { rue: parsed.rue || "", cp: parsed.cp || "", ville: parsed.ville || "" },
     geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
     avant12h: false,
+    quantite: 1,
     statut: "a_verifier",
     source: "ocr",
     ocrRawText: text,
@@ -223,6 +254,10 @@ function renderReviewForm(colis, { isNew, duplicate = false }) {
       <label>Tracking</label>
       <input type="text" id="f-tracking" value="${escapeAttr(colis.tracking)}">
     </div>
+    <div class="field">
+      <label>Nombre de colis à cette adresse</label>
+      <input type="number" id="f-quantite" inputmode="numeric" min="1" step="1" value="${colis.quantite || 1}">
+    </div>
     <div class="toggle-row">
       <label for="f-avant12h">Livrer avant 12h</label>
       <input type="checkbox" id="f-avant12h" ${colis.avant12h ? "checked" : ""} style="width:24px;height:24px;">
@@ -248,6 +283,8 @@ function renderReviewForm(colis, { isNew, duplicate = false }) {
     }
     colis.tracking = trackingInput || null;
     colis.avant12h = containerRef.querySelector("#f-avant12h").checked;
+    const quantiteInput = parseInt(containerRef.querySelector("#f-quantite").value, 10);
+    colis.quantite = Number.isFinite(quantiteInput) && quantiteInput > 0 ? quantiteInput : 1;
 
     containerRef.innerHTML = `<div class="empty-state">Géocodage…</div>`;
     await runGeocodeAndSave(colis);
@@ -278,7 +315,7 @@ async function runGeocodeAndSave(colis) {
     colis.geocode = { status: "non_geocode", lat: null, lon: null, candidates: [] };
   }
 
-  colis.statut = colis.geocode.status === "ok" && isTelTrusted(colis) ? "pret" : "a_verifier";
+  colis.statut = colis.geocode.status === "ok" ? "pret" : "a_verifier";
 
   await saveColis(colis);
   emit("colis:saved", { colis });
@@ -305,7 +342,7 @@ function renderGeocodePicker(colis) {
 
   async function acceptEntry(entry) {
     colis.geocode = { status: "ok", lat: entry.lat, lon: entry.lon, candidates: [] };
-    colis.statut = isTelTrusted(colis) ? "pret" : "a_verifier";
+    colis.statut = "pret";
     await saveColis(colis);
     emit("colis:saved", { colis });
     renderList();

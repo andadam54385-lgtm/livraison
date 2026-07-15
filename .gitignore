@@ -1,3 +1,9 @@
 .DS_Store
 Thumbs.db
 *.log
+
+# Sources non compressees des donnees (trop grosses pour Git au-dela d'une
+# petite zone -- seules les versions .gz sont commitees et deployees, voir
+# tools/compress-assets.js). Copiees depuis data-prep/output/ localement.
+assets/graph.json
+assets/ban.json

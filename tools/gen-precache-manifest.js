@@ -1,7 +1,17 @@
 // Script Node local (jamais execute par la PWA elle-meme) qui scanne pwa/ et
 // ecrit precache-manifest.json a la racine, consomme par sw.js pour son
 // installation cache-first. A relancer a chaque modification des fichiers
-// de l'app (nouveau module JS, mise a jour de graph.json/ban.json, etc).
+// de l'app (nouveau module JS, etc).
+//
+// assets/graph.json.gz et assets/ban.json.gz sont volontairement EXCLUS du
+// precache : import-data.js les telecharge et les decompresse lui-meme au
+// premier lancement pour les mettre en IndexedDB, ce qui est leur seule
+// destination utile (une fois importes, plus jamais relus tels quels). Les
+// precacher EN PLUS via le SW ferait telecharger/ecrire ces gros fichiers
+// deux fois en parallele au premier lancement (SW + import), doublant
+// inutilement la charge disque/reseau sans aucun benefice (voir mesures :
+// l'ecriture concurrente du cache HTTP + de l'IndexedDB a cause un vrai
+// ralentissement lors des tests).
 //
 // Usage: node tools/gen-precache-manifest.js
 
@@ -12,7 +22,7 @@ const crypto = require("crypto");
 const ROOT = path.join(__dirname, "..");
 
 const EXCLUDE_DIRS = new Set(["tools", "test-fixtures", "node_modules", ".git"]);
-const EXCLUDE_FILES = new Set(["precache-manifest.json"]);
+const EXCLUDE_FILES = new Set(["precache-manifest.json", "graph.json.gz", "ban.json.gz"]);
 
 function walk(dir, files) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

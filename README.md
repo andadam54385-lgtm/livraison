@@ -15,9 +15,12 @@ npx http-server -p 8123
 ```
 
 Puis ouvre `http://localhost:8123/index.html` dans un navigateur. Le premier
-chargement importe `assets/graph.json` (~11 Mo) et `assets/ban.json` (~10 Mo)
-dans IndexedDB — ça prend quelques secondes, une barre de progression
-s'affiche.
+chargement télécharge `assets/graph.json.gz`/`assets/ban.json.gz`
+(compressés, décompressés nativement dans le navigateur via
+`DecompressionStream`) puis les importe dans IndexedDB. Sur une grosse zone
+(60km+), ça peut prendre plusieurs minutes (essentiellement le temps
+d'écriture IndexedDB des dizaines/centaines de milliers d'adresses, pas le
+téléchargement) — une barre de progression s'affiche.
 
 Pour tester avec les petites fixtures (`test-fixtures/`) sans charger les
 vrais fichiers : `http://localhost:8123/index.html?fixtures=1`.
@@ -48,18 +51,42 @@ build-graph && npm run build-ban` avec une `config/zone.json` mise à jour) :
 ```
 cp ../data-prep/output/graph.json assets/graph.json
 cp ../data-prep/output/ban.json assets/ban.json
-node tools/gen-data-manifest.js       # recalcule assets/manifest-content.json
+node tools/compress-assets.js         # genere assets/graph.json.gz et ban.json.gz
+rm assets/graph.json assets/ban.json  # sources non compressees, jetables (pas deployees, trop grosses pour Git au-dela d'une petite zone)
+node tools/gen-data-manifest.js       # recalcule assets/manifest-content.json (hash des .gz)
 node tools/gen-precache-manifest.js   # regenere precache-manifest.json pour le service worker
 ```
 
-Redéploie les fichiers modifiés. L'app détecte le changement de version au
-prochain lancement (comparaison `manifest-content.json` vs IndexedDB) et
-réimporte automatiquement, avec écran de progression.
+**Pourquoi la compression** : `graph.json` peut largement dépasser la limite
+de taille de fichier de GitHub (100 Mo) au-delà d'une petite zone (~30km). Le
+gzip réduit le graphe d'environ 3.6x et les adresses d'environ 11.7x (JSON
+numérique/textuel très répétitif) — largement suffisant pour rester sous la
+limite sur une zone raisonnable (~60-80km). Seuls les `.gz` sont commités
+dans Git et déployés ; `assets/graph.json`/`ban.json` non compressés sont
+dans `.gitignore` (sources locales jetables, régénérées à la demande depuis
+`data-prep/output/`).
+
+**Pourquoi ces 2 fichiers ne sont PAS dans le précache du service worker** :
+`import-data.js` les télécharge et les décompresse lui-même au premier
+lancement pour les mettre en IndexedDB — une fois importés, ils ne sont plus
+jamais relus tels quels. Les précacher en plus via le service worker
+ferait télécharger/écrire ces gros fichiers deux fois en parallèle au
+premier lancement (mesuré : ralentissement sévère par contention disque).
+`tools/gen-precache-manifest.js` les exclut explicitement.
+
+Redéploie les fichiers modifiés (dont les `.gz`, dans `assets/`).
+L'app détecte le changement de version au prochain lancement (comparaison
+`manifest-content.json` vs IndexedDB) et réimporte automatiquement, avec
+écran de progression.
 
 Si tu modifies le code de l'app (n'importe quel fichier sous `js/`, `css/`,
-`index.html`...), relance uniquement `node tools/gen-precache-manifest.js`
-avant de redéployer, sinon le service worker continuera de servir une
-version en cache.
+`index.html`...), relance `node tools/gen-precache-manifest.js` avant de
+redéployer. **Important** : les navigateurs ne détectent une mise à jour du
+service worker qu'en comparant les octets de `sw.js` lui-même (pas ceux des
+fichiers qu'il précache) — si ton changement ne touche pas `sw.js`,
+incrémente manuellement `SW_BUILD` en haut de ce fichier, sinon les
+appareils ayant déjà installé une version antérieure resteront bloqués sur
+leur ancien cache indéfiniment.
 
 ## Structure
 

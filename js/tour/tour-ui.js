@@ -32,6 +32,7 @@ function renderStopCard(stop, colis, navApp) {
         ${colis.avant12h ? '<span class="badge badge-warn">Avant 12h</span>' : ""}
       </div>
       <div class="muted">${adresse}</div>
+      ${colis.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:4px;">${colis.quantite} colis</span>` : ""}
       <div class="button-row">
         ${colis.tel ? `<a class="btn-link" href="tel:${colis.tel}">📞 Appeler</a>` : ""}
         ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">🧭 Naviguer</a>` : ""}

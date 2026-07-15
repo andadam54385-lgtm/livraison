@@ -1,8 +1,8 @@
-// Calcule un hash de version pour assets/graph.json et assets/ban.json et
-// ecrit assets/manifest-content.json, utilise par import-data.js pour savoir
-// si les donnees deja en IndexedDB sont a jour (evite de reimporter a chaque
-// lancement). A relancer a chaque fois que graph.json/ban.json sont
-// remplaces (ex: zone data-prep elargie).
+// Calcule un hash de version pour assets/graph.json.gz et assets/ban.json.gz
+// et ecrit assets/manifest-content.json, utilise par import-data.js pour
+// savoir si les donnees deja en IndexedDB sont a jour (evite de reimporter a
+// chaque lancement). A relancer a chaque fois que ces fichiers sont
+// remplaces (ex: zone data-prep elargie) -- APRES compress-assets.js.
 //
 // Usage: node tools/gen-data-manifest.js
 
@@ -18,12 +18,13 @@ function hashFile(filePath) {
 }
 
 function main() {
-  const graphPath = path.join(ASSETS_DIR, "graph.json");
-  const banPath = path.join(ASSETS_DIR, "ban.json");
+  const graphPath = path.join(ASSETS_DIR, "graph.json.gz");
+  const banPath = path.join(ASSETS_DIR, "ban.json.gz");
 
   if (!fs.existsSync(graphPath) || !fs.existsSync(banPath)) {
     throw new Error(
-      `Fichiers manquants dans ${ASSETS_DIR}. Copie d'abord data-prep/output/graph.json et ban.json vers pwa/assets/.`
+      `Fichiers manquants dans ${ASSETS_DIR}. Copie data-prep/output/graph.json et ban.json vers pwa/assets/, ` +
+        `puis lance "node tools/compress-assets.js" avant celui-ci.`
     );
   }
 
