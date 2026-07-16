@@ -1,7 +1,7 @@
 import { openDatabase } from "../lib/idb.js";
 
 export const DB_NAME = "delivery-tour";
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -31,6 +31,14 @@ function upgrade(db) {
   }
   if (!db.objectStoreNames.contains("settings")) {
     db.createObjectStore("settings", { keyPath: "key" });
+  }
+  // Adresses favorites + notes (ex: "code portail 1234", "livrer a l'arriere").
+  // Store distinct de colis/tours : le bouton "Effacer tous les colis et
+  // tournees" des Reglages ne touche jamais ce store, les favoris et leurs
+  // notes survivent donc a un reset.
+  if (!db.objectStoreNames.contains("favoris")) {
+    const store = db.createObjectStore("favoris", { keyPath: "id" });
+    store.createIndex("by_cp", "cp", { unique: false });
   }
 }
 

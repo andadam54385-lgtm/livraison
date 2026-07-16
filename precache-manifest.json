@@ -1,6 +1,6 @@
 {
-  "version": "8db5c3cc8542",
-  "generatedAt": "2026-07-15T20:05:49.939Z",
+  "version": "6748e794c4af",
+  "generatedAt": "2026-07-16T15:54:25.992Z",
   "assets": [
     "./",
     "./README.md",
@@ -13,6 +13,7 @@
     "./index.html",
     "./js/app.js",
     "./js/db/schema.js",
+    "./js/favoris/favoris-store.js",
     "./js/geocode/ban-index.js",
     "./js/geocode/geocode-ui.js",
     "./js/geocode/match-address.js",
@@ -23,6 +24,7 @@
     "./js/lib/geo-utils.js",
     "./js/lib/id.js",
     "./js/lib/idb.js",
+    "./js/lib/toast.js",
     "./js/map/map-ui.js",
     "./js/routing/dijkstra.js",
     "./js/routing/graph-loader.js",
@@ -36,6 +38,7 @@
     "./js/scan/colis-store.js",
     "./js/scan/ocr.js",
     "./js/scan/parse-ups-label.js",
+    "./js/scan/parse-ups-label.test.mjs",
     "./js/scan/preprocess.js",
     "./js/scan/scan-ui.js",
     "./js/settings/settings-store.js",

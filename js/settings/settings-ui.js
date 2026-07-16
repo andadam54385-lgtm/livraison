@@ -1,6 +1,11 @@
 import { getAllSettings, setSetting } from "./settings-store.js";
 import { getDb } from "../db/schema.js";
 import { clear } from "../lib/idb.js";
+import { listFavoris, updateFavori, deleteFavori } from "../favoris/favoris-store.js";
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 
 let containerRef = null;
 
@@ -25,6 +30,25 @@ async function render() {
   if (navigator.storage?.persisted) {
     persisted = await navigator.storage.persisted();
   }
+
+  const favoris = await listFavoris();
+  const favorisHtml =
+    favoris.length === 0
+      ? `<p class="muted">Aucune adresse favorite pour l'instant. Marque un colis livré comme favori depuis sa fiche (bouton ⭐).</p>`
+      : favoris
+          .map(
+            (f) => `
+        <div class="card" data-favori-id="${escapeHtml(f.id)}" style="margin-top:8px;">
+          <div class="card-title">${escapeHtml(f.rue) || "(adresse)"}</div>
+          <p class="muted">${escapeHtml(f.cp)} ${escapeHtml(f.ville)}</p>
+          ${f.note ? `<p>${escapeHtml(f.note)}</p>` : `<p class="muted">Pas de note.</p>`}
+          <div class="button-row">
+            <button type="button" data-favori-edit>✏ Note</button>
+            <button type="button" class="danger" data-favori-delete>🗑 Supprimer</button>
+          </div>
+        </div>`
+          )
+          .join("");
 
   containerRef.innerHTML = `
     <div class="field">
@@ -59,8 +83,13 @@ async function render() {
       <button type="button" class="primary" id="s-save">Enregistrer</button>
     </div>
     <div class="card" style="margin-top:20px;">
+      <div class="card-title">Adresses favorites</div>
+      <p class="muted">Conservées même après "Effacer tous les colis et tournées".</p>
+      ${favorisHtml}
+    </div>
+    <div class="card" style="margin-top:20px;">
       <div class="card-title">Zone dangereuse</div>
-      <p class="muted">Efface tous les colis et tournées (le graphe routier et les adresses restent, pas besoin de réimporter).</p>
+      <p class="muted">Efface tous les colis et tournées (le graphe routier, les adresses et les favoris restent, pas besoin de réimporter).</p>
       <button type="button" class="danger" id="s-reset">Effacer tous les colis et tournées</button>
     </div>
   `;
@@ -81,5 +110,25 @@ async function render() {
     await clear(db, "tours");
     alert("Données effacées.");
     render();
+  });
+
+  containerRef.querySelectorAll("[data-favori-edit]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const id = el.closest("[data-favori-id]").dataset.favoriId;
+      const favori = favoris.find((f) => f.id === id);
+      const note = prompt("Note pour cette adresse favorite :", favori?.note || "");
+      if (note === null) return;
+      await updateFavori(id, { note });
+      render();
+    });
+  });
+
+  containerRef.querySelectorAll("[data-favori-delete]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const id = el.closest("[data-favori-id]").dataset.favoriId;
+      if (!confirm("Supprimer cette adresse favorite ?")) return;
+      await deleteFavori(id);
+      render();
+    });
   });
 }

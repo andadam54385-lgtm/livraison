@@ -7,6 +7,8 @@ import { matchAddress } from "../geocode/match-address.js";
 import { renderCandidatePicker, renderManualAddressSearch } from "../geocode/geocode-ui.js";
 import { getSetting } from "../settings/settings-store.js";
 import { markColisDeliveredDirect } from "../routing/tour-store.js";
+import { addFavori, updateFavori, findNearbyFavori } from "../favoris/favoris-store.js";
+import { showToast } from "../lib/toast.js";
 import { emit } from "../lib/event-bus.js";
 import { uuid } from "../lib/id.js";
 
@@ -45,6 +47,7 @@ function badgeForStatut(statut) {
 function renderColisCard(c) {
   const adresse = `${c.adresseRaw?.rue || "(adresse à vérifier)"}, ${c.adresseRaw?.cp || ""} ${c.adresseRaw?.ville || ""}`;
   const canDeliver = c.statut === "pret" || c.statut === "en_tournee";
+  const canFavori = c.geocode?.status === "ok";
   return `
     <div class="card" data-colis-id="${escapeAttr(c.id)}">
       <div class="card-row" data-open-review>
@@ -58,6 +61,7 @@ function renderColisCard(c) {
       </div>
       <div class="button-row" style="margin-top:10px;">
         ${canDeliver ? `<button type="button" data-mark-delivered>✓ Livré</button>` : ""}
+        ${canFavori ? `<button type="button" data-mark-favori>⭐ Favori</button>` : ""}
         <button type="button" class="danger" data-delete-colis>🗑 Supprimer</button>
       </div>
     </div>
@@ -107,6 +111,36 @@ async function renderList() {
       renderList();
     });
   });
+
+  containerRef.querySelectorAll("[data-mark-favori]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const id = el.closest("[data-colis-id]").dataset.colisId;
+      const c = await getColis(id);
+      if (!c || c.geocode?.status !== "ok") return;
+      await promptSaveFavori(c);
+    });
+  });
+}
+
+// Cree ou met a jour (si une adresse favorite existe deja a proximite) le
+// favori correspondant a un colis geocode, en demandant la note au vol.
+async function promptSaveFavori(c) {
+  const existing = await findNearbyFavori(c.geocode.lat, c.geocode.lon);
+  const note = prompt("Note pour cette adresse favorite (ex: code portail, consigne...) :", existing?.note || "");
+  if (note === null) return; // annule
+  if (existing) {
+    await updateFavori(existing.id, { note });
+  } else {
+    await addFavori({
+      rue: c.adresseRaw.rue,
+      cp: c.adresseRaw.cp,
+      ville: c.adresseRaw.ville,
+      lat: c.geocode.lat,
+      lon: c.geocode.lon,
+      note,
+    });
+  }
+  showToast("⭐ Adresse enregistrée en favori.");
 }
 
 async function reviewExistingColis(id) {
@@ -321,9 +355,19 @@ async function runGeocodeAndSave(colis) {
   emit("colis:saved", { colis });
 
   if (colis.geocode.status === "ok") {
+    await warnIfFavoriMatch(colis);
     renderList();
   } else {
     renderGeocodePicker(colis);
+  }
+}
+
+// Alerte le livreur quand un colis fraichement geocode correspond a une
+// adresse deja notee en favori (ex: code portail, consigne de livraison).
+async function warnIfFavoriMatch(colis) {
+  const fav = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
+  if (fav && fav.note) {
+    showToast(`⭐ Adresse favorite : ${fav.note}`, { variant: "warn", durationMs: 7000 });
   }
 }
 
@@ -345,6 +389,7 @@ function renderGeocodePicker(colis) {
     colis.statut = "pret";
     await saveColis(colis);
     emit("colis:saved", { colis });
+    await warnIfFavoriMatch(colis);
     renderList();
   }
 
