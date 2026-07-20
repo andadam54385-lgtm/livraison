@@ -20,9 +20,14 @@ export function tourCost(order, matrix, startIdx, penaltyWeight, avant12hFlags) 
   return cost;
 }
 
-export function nearestNeighborOrder(matrix, startIdx, indices) {
+// fixedEndIdx (optionnel) : force cet index a rester le tout dernier arret
+// (ex: retour au depot en fin de tournee) -- exclu du parcours glouton et
+// rajoute a la fin.
+export function nearestNeighborOrder(matrix, startIdx, indices, options = {}) {
+  const { fixedEndIdx = null } = options;
   const remaining = new Set(indices);
   remaining.delete(startIdx);
+  if (fixedEndIdx != null) remaining.delete(fixedEndIdx);
   const order = [];
   let current = startIdx;
 
@@ -47,6 +52,7 @@ export function nearestNeighborOrder(matrix, startIdx, indices) {
     remaining.delete(best);
     current = best;
   }
+  if (fixedEndIdx != null) order.push(fixedEndIdx);
   return order;
 }
 
@@ -60,19 +66,23 @@ function reverseInPlace(arr, i, j) {
   }
 }
 
+// lockTailCount (optionnel) : nombre d'arrets en fin de liste exclus des
+// permutations (ex: 1 pour garder le retour au depot fixe en derniere
+// position, voir fixedEndIdx dans optimizeTourOrder/nearestNeighborOrder).
 export function twoOpt(initialOrder, matrix, startIdx, options = {}) {
-  const { avant12hFlags = {}, penaltyWeight = 0, timeBudgetMs = 4000 } = options;
+  const { avant12hFlags = {}, penaltyWeight = 0, timeBudgetMs = 4000, lockTailCount = 0 } = options;
   let order = initialOrder.slice();
+  const limit = order.length - lockTailCount; // [0, limit) est permutable, la queue verrouillee ne bouge jamais
   let bestCost = tourCost(order, matrix, startIdx, penaltyWeight, avant12hFlags);
   const deadline = (typeof performance !== "undefined" ? performance.now() : Date.now()) + timeBudgetMs;
   const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
-  let improved = order.length >= 4;
+  let improved = limit >= 4;
   while (improved && now() < deadline) {
     improved = false;
-    for (let i = 0; i < order.length - 1; i++) {
+    for (let i = 0; i < limit - 1; i++) {
       if (now() > deadline) break;
-      for (let j = i + 1; j < order.length; j++) {
+      for (let j = i + 1; j < limit; j++) {
         reverseInPlace(order, i, j);
         const cost = tourCost(order, matrix, startIdx, penaltyWeight, avant12hFlags);
         if (cost < bestCost - 1e-9) {
@@ -88,7 +98,11 @@ export function twoOpt(initialOrder, matrix, startIdx, options = {}) {
   return { order, cost: bestCost };
 }
 
+// fixedEndIdx (optionnel) : cet index (ex: point "retour au depot") reste
+// toujours le dernier arret ; seul l'ordre des autres arrets est optimise.
 export function optimizeTourOrder(matrix, startIdx, stopIndices, options = {}) {
-  const nnOrder = nearestNeighborOrder(matrix, startIdx, stopIndices);
-  return twoOpt(nnOrder, matrix, startIdx, options);
+  const { fixedEndIdx = null, ...rest } = options;
+  const nnOrder = nearestNeighborOrder(matrix, startIdx, stopIndices, { fixedEndIdx });
+  const lockTailCount = fixedEndIdx != null ? 1 : 0;
+  return twoOpt(nnOrder, matrix, startIdx, { ...rest, lockTailCount });
 }

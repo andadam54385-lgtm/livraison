@@ -1,172 +1,57 @@
 import { openCamera } from "./capture.js";
+import { startBarcodeViewfinder } from "./viewfinder-ui.js";
 import { loadImageToCanvas, cropCanvas, preprocessForOcr, attachCropSelector } from "./preprocess.js";
 import { recognizeCanvas } from "./ocr.js";
 import { parseUpsLabel } from "./parse-ups-label.js";
-import { saveColis, deleteColis, isDuplicateTracking, listAllColis, getColis } from "./colis-store.js";
+import { saveColis, isDuplicateTracking } from "./colis-store.js";
 import { matchAddress } from "../geocode/match-address.js";
-import { renderCandidatePicker, renderManualAddressSearch } from "../geocode/geocode-ui.js";
+import { renderCandidatePicker, renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
+import { listDistinctCities } from "../geocode/ban-index.js";
+import { normalizeCity } from "../geocode/normalize-address.js";
 import { getSetting } from "../settings/settings-store.js";
-import { markColisDeliveredDirect } from "../routing/tour-store.js";
-import { addFavori, updateFavori, findNearbyFavori } from "../favoris/favoris-store.js";
+import { findNearbyFavori } from "../favoris/favoris-store.js";
+import { googleMapsSearchUrl } from "../tour/deep-links.js";
 import { showToast } from "../lib/toast.js";
 import { emit } from "../lib/event-bus.js";
 import { uuid } from "../lib/id.js";
 
-let fabBound = false;
-let containerRef = null;
-
-export async function mount(container) {
-  containerRef = container;
-  if (!fabBound) {
-    document.getElementById("scan-fab").addEventListener("click", () => startScanFlow());
-    document.getElementById("scan-manual-btn").addEventListener("click", () => startManualEntry());
-    fabBound = true;
-  }
-  await renderList();
-}
+// Flux de capture/validation d'un colis (photo -> OCR -> fiche editable ->
+// geocodage), independant de tout onglet : utilise a la fois par le bouton
+// flottant camera (Etat A/B de l'ecran Tournee, voir tour-ui.js) et par le
+// bouton "Corriger" de la fiche colis (colis-detail-ui.js). Chaque fonction
+// est parametree par son `container` (pas de conteneur global module-level)
+// pour rester appelable depuis n'importe quel ecran.
 
 function escapeAttr(s) {
   return String(s ?? "").replace(/"/g, "&quot;");
 }
-
-// La validation croisee OCR du telephone (telConfidence) reste affichee comme
-// badge informatif sur la fiche (pour inciter a verifier ce champ), mais ne
-// bloque plus le passage au statut "pret" : en pratique, Ref.1 ne contient
-// pas toujours un telephone sur une vraie etiquette (parfois une autre
-// reference), et la comparaison echoue alors systematiquement meme quand le
-// numero SHIP TO est correct -- l'utilisateur voit et corrige deja le champ
-// dans la fiche editable avant de valider, ce qui est la vraie verification.
-
-function badgeForStatut(statut) {
-  if (statut === "pret") return `<span class="badge badge-ok">Prêt</span>`;
-  if (statut === "en_tournee") return `<span class="badge badge-ok">En tournée</span>`;
-  if (statut === "livre") return `<span class="badge badge-ok">Livré</span>`;
-  return `<span class="badge badge-warn">À vérifier</span>`;
+function escapeHtml(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function renderColisCard(c) {
-  const adresse = `${c.adresseRaw?.rue || "(adresse à vérifier)"}, ${c.adresseRaw?.cp || ""} ${c.adresseRaw?.ville || ""}`;
-  const canDeliver = c.statut === "pret" || c.statut === "en_tournee";
-  const canFavori = c.geocode?.status === "ok";
-  return `
-    <div class="card" data-colis-id="${escapeAttr(c.id)}">
-      <div class="card-row" data-open-review>
-        <div class="card-title">${c.nom || "(nom inconnu)"}</div>
-        ${badgeForStatut(c.statut)}
-      </div>
-      <div class="muted" data-open-review>${adresse}</div>
-      <div class="stats-row">
-        ${c.avant12h ? `<span class="badge badge-warn">Avant 12h</span>` : ""}
-        ${c.quantite > 1 ? `<span class="badge badge-pending">${c.quantite} colis</span>` : ""}
-      </div>
-      <div class="button-row" style="margin-top:10px;">
-        ${canDeliver ? `<button type="button" data-mark-delivered>✓ Livré</button>` : ""}
-        ${canFavori ? `<button type="button" data-mark-favori>⭐ Favori</button>` : ""}
-        <button type="button" class="danger" data-delete-colis>🗑 Supprimer</button>
-      </div>
-    </div>
-  `;
-}
-
-async function renderList() {
-  const colis = await listAllColis();
-  const totalColis = colis.reduce((sum, c) => sum + (c.quantite || 1), 0);
-  const issues = colis.filter((c) => c.statut === "a_verifier").length;
-  const totalEl = document.getElementById("scan-count-total");
-  const issuesEl = document.getElementById("scan-count-issues");
-  if (totalEl) totalEl.textContent = `${totalColis} colis`;
-  if (issuesEl) issuesEl.textContent = `${issues} à vérifier`;
-
-  if (colis.length === 0) {
-    containerRef.innerHTML = `<div class="empty-state">Aucun colis scanné. Appuie sur 📷 pour commencer.</div>`;
-    return;
-  }
-
-  containerRef.innerHTML = colis
-    .slice()
-    .reverse()
-    .map((c) => renderColisCard(c))
-    .join("");
-
-  containerRef.querySelectorAll("[data-open-review]").forEach((el) => {
-    el.addEventListener("click", () => {
-      const id = el.closest("[data-colis-id]").dataset.colisId;
-      reviewExistingColis(id);
-    });
-  });
-
-  containerRef.querySelectorAll("[data-mark-delivered]").forEach((el) => {
-    el.addEventListener("click", async () => {
-      const id = el.closest("[data-colis-id]").dataset.colisId;
-      await markColisDeliveredDirect(id);
-      renderList();
-    });
-  });
-
-  containerRef.querySelectorAll("[data-delete-colis]").forEach((el) => {
-    el.addEventListener("click", async () => {
-      const id = el.closest("[data-colis-id]").dataset.colisId;
-      if (!confirm("Supprimer ce colis ? Cette action est irréversible.")) return;
-      await deleteColis(id);
-      renderList();
-    });
-  });
-
-  containerRef.querySelectorAll("[data-mark-favori]").forEach((el) => {
-    el.addEventListener("click", async () => {
-      const id = el.closest("[data-colis-id]").dataset.colisId;
-      const c = await getColis(id);
-      if (!c || c.geocode?.status !== "ok") return;
-      await promptSaveFavori(c);
-    });
-  });
-}
-
-// Cree ou met a jour (si une adresse favorite existe deja a proximite) le
-// favori correspondant a un colis geocode, en demandant la note au vol.
-async function promptSaveFavori(c) {
-  const existing = await findNearbyFavori(c.geocode.lat, c.geocode.lon);
-  const note = prompt("Note pour cette adresse favorite (ex: code portail, consigne...) :", existing?.note || "");
-  if (note === null) return; // annule
-  if (existing) {
-    await updateFavori(existing.id, { note });
-  } else {
-    await addFavori({
-      rue: c.adresseRaw.rue,
-      cp: c.adresseRaw.cp,
-      ville: c.adresseRaw.ville,
-      lat: c.geocode.lat,
-      lon: c.geocode.lon,
-      note,
-    });
-  }
-  showToast("⭐ Adresse enregistrée en favori.");
-}
-
-async function reviewExistingColis(id) {
-  const colis = await getColis(id);
-  if (!colis) return;
-  renderReviewForm(colis, { isNew: false });
-}
-
-async function startScanFlow() {
+export async function startScanFlow(container, { onSaved } = {}) {
   try {
+    // Scan live du code-barres d'abord (plus fiable que l'OCR pour le
+    // tracking, suite exacte de chiffres/lettres) ; barcodeTracking vaut
+    // null si rien n'est detecte / camera live indisponible / l'utilisateur
+    // choisit "Prendre une photo à la place" -- dans tous ces cas on
+    // enchaine quand meme sur la photo+OCR habituelle pour le nom/adresse.
+    const barcodeTracking = await startBarcodeViewfinder(container);
     const file = await openCamera();
-    await runOcrPipeline(file);
+    await runOcrPipeline(container, file, { onSaved, barcodeTracking });
   } catch (err) {
-    if (err.message !== "Aucune photo sélectionnée.") {
+    if (err.message !== "Aucune photo sélectionnée." && err.message !== "Scan annulé.") {
       console.error(err);
-      containerRef.innerHTML = `<div class="empty-state">Erreur photo: ${err.message}</div>`;
-    } else {
-      renderList();
+      container.innerHTML = `<div class="empty-state">Erreur photo: ${err.message}</div>`;
     }
+    // Annulation (scan ou photo) : on laisse l'ecran appelant tel quel (pas de reset ici).
   }
 }
 
 // Repli quand le scan/OCR ne fonctionne pas ou pas bien (mauvaise photo,
 // pas d'appareil photo, colis hors UPS...) : ouvre directement la fiche
 // vide, sans passer par capture/recadrage/OCR.
-function startManualEntry() {
+export function startManualEntry(container, { onSaved } = {}) {
   const colis = {
     id: uuid(),
     tracking: null,
@@ -175,6 +60,7 @@ function startManualEntry() {
     tel: "",
     telConfidence: "a_verifier",
     adresseRaw: { rue: "", cp: "", ville: "" },
+    adresseAffichage: null,
     geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
     avant12h: false,
     quantite: 1,
@@ -183,12 +69,12 @@ function startManualEntry() {
     ocrRawText: "",
     dateScan: new Date().toISOString(),
   };
-  renderReviewForm(colis, { isNew: true, duplicate: false });
+  renderReviewForm(container, colis, { isNew: true, duplicate: false, onSaved });
 }
 
-async function showCropStep(canvas) {
+async function showCropStep(container, canvas) {
   return new Promise((resolve) => {
-    containerRef.innerHTML = `
+    container.innerHTML = `
       <p class="muted">Recadre l'étiquette si besoin (glisse un rectangle), ou passe directement.</p>
       <div id="crop-overlay" style="position:relative; touch-action:none;">
         <canvas id="crop-preview" style="width:100%; display:block; border-radius:12px;"></canvas>
@@ -198,13 +84,13 @@ async function showCropStep(canvas) {
         <button type="button" class="primary" id="crop-confirm" disabled>Valider le cadrage</button>
       </div>
     `;
-    const previewCanvas = containerRef.querySelector("#crop-preview");
+    const previewCanvas = container.querySelector("#crop-preview");
     previewCanvas.width = canvas.width;
     previewCanvas.height = canvas.height;
     previewCanvas.getContext("2d").drawImage(canvas, 0, 0);
 
-    const overlay = containerRef.querySelector("#crop-overlay");
-    const confirmBtn = containerRef.querySelector("#crop-confirm");
+    const overlay = container.querySelector("#crop-overlay");
+    const confirmBtn = container.querySelector("#crop-confirm");
     let currentRect = null;
 
     attachCropSelector(overlay, canvas, (rect) => {
@@ -212,35 +98,40 @@ async function showCropStep(canvas) {
       confirmBtn.disabled = !rect;
     });
 
-    containerRef.querySelector("#crop-skip").addEventListener("click", () => resolve(null));
+    container.querySelector("#crop-skip").addEventListener("click", () => resolve(null));
     confirmBtn.addEventListener("click", () => resolve(currentRect));
   });
 }
 
-async function runOcrPipeline(file) {
-  containerRef.innerHTML = `<div class="empty-state">Chargement de la photo…</div>`;
+async function runOcrPipeline(container, file, { onSaved, barcodeTracking } = {}) {
+  container.innerHTML = `<div class="empty-state">Chargement de la photo…</div>`;
   const rawCanvas = await loadImageToCanvas(file);
 
-  const cropRect = await showCropStep(rawCanvas);
+  const cropRect = await showCropStep(container, rawCanvas);
   const working = cropRect ? cropCanvas(rawCanvas, cropRect) : rawCanvas;
 
-  containerRef.innerHTML = `<div class="empty-state">Lecture de l'étiquette (OCR)…</div>`;
+  container.innerHTML = `<div class="empty-state">Lecture de l'étiquette (OCR)…</div>`;
   preprocessForOcr(working);
 
   const ocrLangs = (await getSetting("ocrLangs")) || "fra";
   const { text, confidence } = await recognizeCanvas(working, { langs: ocrLangs });
   const parsed = parseUpsLabel(text);
+  // Le code-barres scanne en direct (suite exacte de caracteres) prime sur
+  // le tracking devine par l'OCR (chiffres/lettres facilement confondus) --
+  // voir viewfinder-ui.js.
+  const tracking = barcodeTracking || parsed.tracking;
 
-  const duplicate = parsed.tracking ? await isDuplicateTracking(parsed.tracking) : false;
+  const duplicate = tracking ? await isDuplicateTracking(tracking) : false;
 
   const colis = {
-    id: parsed.tracking || uuid(),
-    tracking: parsed.tracking,
-    trackingConfidence: parsed.tracking ? "haute" : null,
+    id: tracking || uuid(),
+    tracking,
+    trackingConfidence: barcodeTracking ? "code_barre" : parsed.tracking ? "haute" : null,
     nom: parsed.nom || "",
     tel: parsed.tel || "",
     telConfidence: parsed.telConfidence,
     adresseRaw: { rue: parsed.rue || "", cp: parsed.cp || "", ville: parsed.ville || "" },
+    adresseAffichage: null,
     geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
     avant12h: false,
     quantite: 1,
@@ -251,81 +142,139 @@ async function runOcrPipeline(file) {
     dateScan: new Date().toISOString(),
   };
 
-  renderReviewForm(colis, { isNew: true, duplicate });
+  renderReviewForm(container, colis, { isNew: true, duplicate, onSaved });
 }
 
-function renderReviewForm(colis, { isNew, duplicate = false }) {
+// Suggestions de ville au fil de la frappe (prefixe, communes connues de la
+// BAN locale) : purement une aide a la saisie, ne bloque rien -- le
+// geocodage final revalide toujours via matchAddress independamment de ce
+// qui est tape ici. datalist HTML n'est pas utilisable (pas de suggestions
+// sur Safari iOS), d'ou cette liste custom.
+function bindVilleAutocomplete(container) {
+  const input = container.querySelector("#f-ville");
+  const list = container.querySelector("#f-ville-suggestions");
+  const cpInput = container.querySelector("#f-cp");
+  let debounceTimer = null;
+
+  function hide() {
+    list.innerHTML = "";
+  }
+
+  async function showMatches(prefix) {
+    const cities = await listDistinctCities();
+    const matches = cities.filter((c) => c.cn.startsWith(prefix)).slice(0, 6);
+    if (matches.length === 0) {
+      hide();
+      return;
+    }
+    list.innerHTML = matches
+      .map((c, i) => `<button type="button" class="candidate-item" data-idx="${i}">${escapeHtml(c.c)} <span class="muted">${escapeHtml(c.cp)}</span></button>`)
+      .join("");
+    list.querySelectorAll(".candidate-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const picked = matches[Number(btn.dataset.idx)];
+        input.value = picked.c;
+        if (!cpInput.value.trim()) cpInput.value = picked.cp;
+        hide();
+      });
+    });
+  }
+
+  input.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    const prefix = normalizeCity(input.value.trim());
+    if (prefix.length < 2) {
+      hide();
+      return;
+    }
+    debounceTimer = setTimeout(() => showMatches(prefix), 150);
+  });
+  input.addEventListener("blur", () => {
+    // Laisse le temps au clic sur une suggestion de se declencher avant de
+    // la faire disparaitre (blur tire avant click sinon).
+    setTimeout(hide, 150);
+  });
+}
+
+export function renderReviewForm(container, colis, { isNew, duplicate = false, onSaved } = {}) {
   const telBadge =
     colis.source === "manuel"
       ? "" // saisie directe par l'utilisateur : pas de validation croisee a afficher
       : colis.telConfidence === "haute"
         ? '<span class="badge badge-ok">confiance haute</span>'
-        : '<span class="badge badge-warn">à vérifier</span>';
+        : '<span class="badge badge-pending">à vérifier</span>';
 
-  containerRef.innerHTML = `
+  container.innerHTML = `
     ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>⚠ Ce tracking a déjà été scanné.</strong></div>` : ""}
     <div class="field">
       <label>Nom</label>
-      <input type="text" id="f-nom" value="${escapeAttr(colis.nom)}">
+      <input type="text" id="f-nom" class="field-lg" value="${escapeAttr(colis.nom)}">
     </div>
     <div class="field">
       <label>Téléphone ${telBadge}</label>
-      <input type="tel" id="f-tel" value="${escapeAttr(colis.tel)}">
+      <input type="tel" id="f-tel" class="field-lg" value="${escapeAttr(colis.tel)}">
     </div>
     <div class="field">
       <label>Rue</label>
-      <input type="text" id="f-rue" value="${escapeAttr(colis.adresseRaw.rue)}">
+      <input type="text" id="f-rue" class="field-lg" value="${escapeAttr(colis.adresseRaw.rue)}">
     </div>
     <div class="field">
       <label>Code postal</label>
-      <input type="text" id="f-cp" inputmode="numeric" value="${escapeAttr(colis.adresseRaw.cp)}">
+      <input type="text" id="f-cp" class="field-lg" inputmode="numeric" value="${escapeAttr(colis.adresseRaw.cp)}">
     </div>
     <div class="field">
       <label>Ville</label>
-      <input type="text" id="f-ville" value="${escapeAttr(colis.adresseRaw.ville)}">
+      <input type="text" id="f-ville" class="field-lg" value="${escapeAttr(colis.adresseRaw.ville)}" autocomplete="off">
+      <div id="f-ville-suggestions" class="candidate-list"></div>
     </div>
     <div class="field">
       <label>Tracking</label>
-      <input type="text" id="f-tracking" value="${escapeAttr(colis.tracking)}">
+      <input type="text" id="f-tracking" class="field-lg" value="${escapeAttr(colis.tracking)}">
     </div>
     <div class="field">
       <label>Nombre de colis à cette adresse</label>
-      <input type="number" id="f-quantite" inputmode="numeric" min="1" step="1" value="${colis.quantite || 1}">
+      <input type="number" id="f-quantite" class="field-lg" inputmode="numeric" min="1" step="1" value="${colis.quantite || 1}">
     </div>
     <div class="toggle-row">
       <label for="f-avant12h">Livrer avant 12h</label>
-      <input type="checkbox" id="f-avant12h" ${colis.avant12h ? "checked" : ""} style="width:24px;height:24px;">
+      <input type="checkbox" id="f-avant12h" ${colis.avant12h ? "checked" : ""} style="width:26px;height:26px;">
     </div>
     <div class="button-row">
       <button type="button" id="f-rescan">Rescanner</button>
-      <button type="button" class="primary" id="f-valider">Valider</button>
+      <button type="button" class="primary btn-lg" id="f-valider">Valider</button>
     </div>
   `;
 
-  containerRef.querySelector("#f-rescan").addEventListener("click", () => startScanFlow());
-  containerRef.querySelector("#f-valider").addEventListener("click", async () => {
-    colis.nom = containerRef.querySelector("#f-nom").value.trim();
-    colis.tel = containerRef.querySelector("#f-tel").value.trim();
+  bindVilleAutocomplete(container);
+
+  container.querySelector("#f-rescan").addEventListener("click", () => startScanFlow(container, { onSaved }));
+  container.querySelector("#f-valider").addEventListener("click", async () => {
+    colis.nom = container.querySelector("#f-nom").value.trim();
+    colis.tel = container.querySelector("#f-tel").value.trim();
     colis.adresseRaw = {
-      rue: containerRef.querySelector("#f-rue").value.trim(),
-      cp: containerRef.querySelector("#f-cp").value.trim(),
-      ville: containerRef.querySelector("#f-ville").value.trim(),
+      rue: container.querySelector("#f-rue").value.trim(),
+      cp: container.querySelector("#f-cp").value.trim(),
+      ville: container.querySelector("#f-ville").value.trim(),
     };
-    const trackingInput = containerRef.querySelector("#f-tracking").value.trim();
+    // Champs corriges a la main : l'ancienne adresse canonique (si un
+    // geocodage precedent en avait pose une) ne correspond plus forcement,
+    // on la laisse etre recalculee par le prochain geocodage reussi.
+    colis.adresseAffichage = null;
+    const trackingInput = container.querySelector("#f-tracking").value.trim();
     if (isNew && trackingInput && trackingInput !== colis.tracking) {
       colis.id = trackingInput; // corrige a la main avant 1ere sauvegarde -> aligne la cle
     }
     colis.tracking = trackingInput || null;
-    colis.avant12h = containerRef.querySelector("#f-avant12h").checked;
-    const quantiteInput = parseInt(containerRef.querySelector("#f-quantite").value, 10);
+    colis.avant12h = container.querySelector("#f-avant12h").checked;
+    const quantiteInput = parseInt(container.querySelector("#f-quantite").value, 10);
     colis.quantite = Number.isFinite(quantiteInput) && quantiteInput > 0 ? quantiteInput : 1;
 
-    containerRef.innerHTML = `<div class="empty-state">Géocodage…</div>`;
-    await runGeocodeAndSave(colis);
+    container.innerHTML = `<div class="empty-state">Géocodage…</div>`;
+    await runGeocodeAndSave(container, colis, { onSaved });
   });
 }
 
-async function runGeocodeAndSave(colis) {
+export async function runGeocodeAndSave(container, colis, { onSaved } = {}) {
   const numeroMatch = (colis.adresseRaw.rue || "").match(/^(\d+)/);
   const numero = numeroMatch ? numeroMatch[1] : null;
 
@@ -338,6 +287,11 @@ async function runGeocodeAndSave(colis) {
 
   if (best) {
     colis.geocode = { status: "ok", lat: best.entry.lat, lon: best.entry.lon, candidates: [] };
+    // Adresse canonique de la BAN (bien casee, complete) : remplace
+    // l'affichage par cette forme confirmee plutot que le texte OCR/saisi
+    // brut, qui peut etre tronque ou mal casse. Ne touche jamais adresseRaw
+    // (sert au matching/a l'edition), ni une quelconque forme normalisee.
+    colis.adresseAffichage = formatEntry(best.entry);
   } else if (candidates.length > 0) {
     colis.geocode = {
       status: "ambigu",
@@ -349,6 +303,11 @@ async function runGeocodeAndSave(colis) {
     colis.geocode = { status: "non_geocode", lat: null, lon: null, candidates: [] };
   }
 
+  // Le nom n'est PAS bloquant (retour utilisateur : une adresse correcte
+  // suffit, le nom peut se determiner sur place) -- seul le geocodage
+  // conditionne "pret". Absence de nom : la carte affiche l'adresse en titre
+  // a la place (voir renderPrepCard/renderStopCard/renderHeroCard), simple
+  // repli d'affichage, pas un blocage de statut.
   colis.statut = colis.geocode.status === "ok" ? "pret" : "a_verifier";
 
   await saveColis(colis);
@@ -356,9 +315,9 @@ async function runGeocodeAndSave(colis) {
 
   if (colis.geocode.status === "ok") {
     await warnIfFavoriMatch(colis);
-    renderList();
+    onSaved?.(colis);
   } else {
-    renderGeocodePicker(colis);
+    renderGeocodePicker(container, colis, { onSaved });
   }
 }
 
@@ -371,33 +330,70 @@ async function warnIfFavoriMatch(colis) {
   }
 }
 
-function renderGeocodePicker(colis) {
-  containerRef.innerHTML = `
+// Parse "48.6921, 6.1844" (ou variantes d'espacement) -- format qu'on
+// retrouve tel quel quand on fait un appui long sur un point Google Maps puis
+// "Copier les coordonnees". Retourne null si la latitude/longitude n'est pas
+// un nombre plausible plutot que de planter le geocodage manuel.
+function parseLatLon(text) {
+  const parts = String(text || "").split(",").map((s) => parseFloat(s.trim()));
+  if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n))) return null;
+  const [lat, lon] = parts;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return { lat, lon };
+}
+
+function renderGeocodePicker(container, colis, { onSaved }) {
+  const rawQuery = `${colis.adresseRaw.rue} ${colis.adresseRaw.cp} ${colis.adresseRaw.ville}`.trim();
+  container.innerHTML = `
     <div class="card">
       <div class="card-title">Adresse à confirmer</div>
       <p class="muted">${escapeAttr(colis.adresseRaw.rue)}, ${escapeAttr(colis.adresseRaw.cp)} ${escapeAttr(colis.adresseRaw.ville)}</p>
     </div>
     <div id="geocode-picker-slot"></div>
+    <div class="card" style="margin-top:8px;">
+      <div class="card-title">Introuvable ? (entreprise, zone industrielle…)</div>
+      <p class="muted">La BAN ne connaît que les adresses officielles, pas les noms d'entreprise. Cherche sur Google Maps, puis fais un appui long sur le point → "Copier les coordonnées", et colle-les ici.</p>
+      <a class="btn-link" href="${googleMapsSearchUrl(rawQuery)}" target="_blank" rel="noopener">🔍 Chercher "${escapeHtml(rawQuery)}" sur Google Maps</a>
+      <div class="field" style="margin-top:10px;">
+        <label>Coordonnées GPS collées</label>
+        <input type="text" id="geocode-manual-coords" class="field-lg" placeholder="ex: 48.6921, 6.1844" inputmode="decimal">
+      </div>
+      <button type="button" id="geocode-manual-coords-btn">Valider ces coordonnées</button>
+    </div>
     <div class="button-row">
       <button type="button" id="geocode-later">Plus tard (revoir dans la liste)</button>
     </div>
   `;
-  const slot = containerRef.querySelector("#geocode-picker-slot");
+  const slot = container.querySelector("#geocode-picker-slot");
 
   async function acceptEntry(entry) {
     colis.geocode = { status: "ok", lat: entry.lat, lon: entry.lon, candidates: [] };
+    colis.adresseAffichage = formatEntry(entry);
+    colis.statut = "pret"; // adresse confirmee ici (choix manuel/candidat) -> le nom n'est pas bloquant
+    await saveColis(colis);
+    emit("colis:saved", { colis });
+    await warnIfFavoriMatch(colis);
+    onSaved?.(colis);
+  }
+
+  // Meme chemin que acceptEntry mais sans entree BAN (pas de nom d'entreprise
+  // dans ce registre) : adresseAffichage reste null, formatAdresseAffichage()
+  // se rabat alors sur adresseRaw (le texte scanne/tape, ex: le nom de
+  // l'entreprise) pour l'affichage.
+  async function acceptManualCoords(lat, lon) {
+    colis.geocode = { status: "ok", lat, lon, candidates: [], manual: true };
     colis.statut = "pret";
     await saveColis(colis);
     emit("colis:saved", { colis });
     await warnIfFavoriMatch(colis);
-    renderList();
+    onSaved?.(colis);
   }
 
   function showManual() {
     renderManualAddressSearch(slot, {
       initialQuery: `${colis.adresseRaw.rue} ${colis.adresseRaw.cp}`.trim(),
       onPick: acceptEntry,
-      onCancel: () => renderGeocodePicker(colis),
+      onCancel: () => renderGeocodePicker(container, colis, { onSaved }),
     });
   }
 
@@ -411,5 +407,13 @@ function renderGeocodePicker(colis) {
     showManual();
   }
 
-  containerRef.querySelector("#geocode-later").addEventListener("click", () => renderList());
+  container.querySelector("#geocode-manual-coords-btn").addEventListener("click", () => {
+    const parsed = parseLatLon(container.querySelector("#geocode-manual-coords").value);
+    if (!parsed) {
+      showToast("⚠ Coordonnées invalides (format attendu : 48.6921, 6.1844)");
+      return;
+    }
+    acceptManualCoords(parsed.lat, parsed.lon);
+  });
+  container.querySelector("#geocode-later").addEventListener("click", () => onSaved?.(colis));
 }

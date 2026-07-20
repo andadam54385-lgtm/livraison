@@ -1,5 +1,6 @@
-// Calcule un hash de version pour assets/graph.json.gz et assets/ban.json.gz
-// et ecrit assets/manifest-content.json, utilise par import-data.js pour
+// Calcule un hash de version pour assets/graph.json.gz, assets/ban.json.gz et
+// assets/map.pmtiles (si present), et ecrit assets/manifest-content.json,
+// utilise par import-data.js pour
 // savoir si les donnees deja en IndexedDB sont a jour (evite de reimporter a
 // chaque lancement). A relancer a chaque fois que ces fichiers sont
 // remplaces (ex: zone data-prep elargie) -- APRES compress-assets.js.
@@ -20,6 +21,7 @@ function hashFile(filePath) {
 function main() {
   const graphPath = path.join(ASSETS_DIR, "graph.json.gz");
   const banPath = path.join(ASSETS_DIR, "ban.json.gz");
+  const mapPath = path.join(ASSETS_DIR, "map.pmtiles");
 
   if (!fs.existsSync(graphPath) || !fs.existsSync(banPath)) {
     throw new Error(
@@ -31,6 +33,9 @@ function main() {
   const manifest = {
     graphVersion: hashFile(graphPath),
     banVersion: hashFile(banPath),
+    // map.pmtiles est optionnel (chantier C) : absent, la carte MapLibre
+    // reste indisponible mais le reste de l'appli fonctionne normalement.
+    mapVersion: fs.existsSync(mapPath) ? hashFile(mapPath) : null,
     generatedAt: new Date().toISOString(),
   };
 

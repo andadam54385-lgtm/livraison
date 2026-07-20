@@ -77,8 +77,16 @@ function classifyShipToBlock(lines) {
       continue;
     }
 
+    // Une adresse francaise commence quasi-toujours par le numero ("6 Rue de
+    // l'Eglise") : ne teste donc qu'un chiffre EN DEBUT de ligne, pas un
+    // chiffre n'importe ou. Avec /\d/ (n'importe ou), un simple bruit OCR
+    // isole dans le nom (ex: "S0PHIE" au lieu de "SOPHIE", confusion
+    // frequente O/0, l/1, S/5) faisait basculer toute la ligne en "rue" et
+    // faisait disparaitre le nom -- cause probable du "(nom inconnu)"
+    // systematique constate sur le terrain (voir historique de discussion).
     const hasStreetWord = STREET_KEYWORDS.some((k) => line.toUpperCase().includes(k));
-    if (/\d/.test(line) || hasStreetWord) {
+    const startsWithNumber = /^\d/.test(line);
+    if (startsWithNumber || hasStreetWord) {
       result.streets.push(line);
     } else {
       result.names.push(line);
@@ -88,7 +96,13 @@ function classifyShipToBlock(lines) {
   return result;
 }
 
-export function parseUpsLabel(rawText) {
+// Variante "detaillee" qui expose les etapes intermediaires (lignes brutes,
+// bloc SHIP TO retenu, classification ligne par ligne) -- utilisee par
+// l'ecran de debug OCR des Reglages pour diagnostiquer un echec de parsing
+// avec une vraie photo, sans avoir a deviner. parseUpsLabel() (export
+// original, utilise par le flux de scan et les tests) en est un simple
+// emballage qui ne renvoie que `result`.
+export function parseUpsLabelDetailed(rawText) {
   const text = (rawText || "").replace(/\r/g, "");
   const lines = text
     .split("\n")
@@ -138,7 +152,7 @@ export function parseUpsLabel(rawText) {
   }
   if (telConfidence === "moyenne" || telConfidence === "basse") telConfidence = "a_verifier";
 
-  return {
+  const result = {
     tracking,
     nom,
     tel: phoneEntry ? phoneEntry.phone : null,
@@ -147,4 +161,10 @@ export function parseUpsLabel(rawText) {
     cp: classified.cp,
     ville: classified.ville,
   };
+
+  return { lines, block: relevantBlock, classified, result };
+}
+
+export function parseUpsLabel(rawText) {
+  return parseUpsLabelDetailed(rawText).result;
 }

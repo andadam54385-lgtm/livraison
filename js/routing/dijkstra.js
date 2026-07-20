@@ -38,13 +38,16 @@ function swapHeap(heap, heapPos, i, j) {
 // A creer une fois par worker et reutiliser sur les ~100 appels d'une
 // tournee (evite de reallouer des typed arrays a la taille du graphe a
 // chaque run). Dimensionne sur le nombre d'ARETES (le graphe de recherche),
-// pas le nombre de noeuds.
+// pas le nombre de noeuds. `prev` ne sert qu'a dijkstraSingleTargetPath
+// (reconstruction du trace pour la carte), inutilise par les autres
+// recherches mais son cout d'allocation est negligeable.
 export function createDijkstraScratch(edgeCount) {
   return {
     dist: new Float64Array(edgeCount),
     heap: new Int32Array(edgeCount),
     heapPos: new Int32Array(edgeCount),
     settled: new Uint8Array(edgeCount),
+    prev: new Int32Array(edgeCount),
   };
 }
 
@@ -196,4 +199,103 @@ export function dijkstraNodeToNode(csr, sourceNodeIdx, targetNodeIdxs, scratch, 
   }
 
   return results;
+}
+
+/**
+ * Dijkstra source unique / cible unique, avec reconstruction du chemin
+ * emprunte (suite de noeuds) -- utilise uniquement par la carte pour
+ * dessiner le trajet reel le long des rues entre deux arrets consecutifs
+ * (contrairement a dijkstraNodeToNode, qui ne calcule que des durees pour la
+ * matrice de tri). Recherche a but unique avec arret des que la cible est
+ * atteinte, donc largement sous la milliseconde entre deux points proches.
+ *
+ * @returns {number[] | null} suite d'index de noeuds du depart a l'arrivee (inclus), ou null si inatteignable
+ */
+export function dijkstraSingleTargetPath(csr, sourceNodeIdx, targetNodeIdx, scratch, options = {}) {
+  if (sourceNodeIdx === targetNodeIdx) return [sourceNodeIdx];
+
+  const { adjOffsets, adjNeighbors, edgeWeight, outOffsets, outValues, inOffsets, inValues, edgeFromNode, edgeToNode } = csr;
+  const maxSeconds = options.maxSeconds ?? Infinity;
+  const { dist, heap, heapPos, settled, prev } = scratch;
+
+  dist.fill(Infinity);
+  heapPos.fill(-1);
+  settled.fill(0);
+  prev.fill(-1);
+
+  const targetStates = new Set();
+  for (let i = inOffsets[targetNodeIdx]; i < inOffsets[targetNodeIdx + 1]; i++) targetStates.add(inValues[i]);
+  if (targetStates.size === 0) return null; // noeud cible sans arete entrante : inatteignable
+
+  let size = 0;
+  const push = (state, d) => {
+    dist[state] = d;
+    heap[size] = state;
+    heapPos[state] = size;
+    size++;
+    siftUp(heap, heapPos, dist, size - 1);
+  };
+  const pop = () => {
+    const top = heap[0];
+    size--;
+    if (size > 0) {
+      heap[0] = heap[size];
+      heapPos[heap[0]] = 0;
+      siftDown(heap, heapPos, dist, 0, size);
+    }
+    heapPos[top] = -1;
+    return top;
+  };
+  const decreaseKey = (state, d) => {
+    dist[state] = d;
+    siftUp(heap, heapPos, dist, heapPos[state]);
+  };
+
+  for (let i = outOffsets[sourceNodeIdx]; i < outOffsets[sourceNodeIdx + 1]; i++) {
+    const edgeId = outValues[i];
+    const d = edgeWeight[edgeId];
+    if (heapPos[edgeId] === -1) {
+      if (dist[edgeId] === Infinity) push(edgeId, d);
+    } else if (d < dist[edgeId]) {
+      decreaseKey(edgeId, d);
+    }
+  }
+  if (size === 0) return null; // noeud source sans arete sortante
+
+  let winnerState = -1;
+  while (size > 0) {
+    const state = pop();
+    if (settled[state]) continue;
+    settled[state] = 1;
+    if (targetStates.has(state)) {
+      winnerState = state;
+      break;
+    }
+    const d = dist[state];
+    if (d > maxSeconds) continue;
+
+    const start = adjOffsets[state];
+    const end = adjOffsets[state + 1];
+    for (let e = start; e < end; e++) {
+      const next = adjNeighbors[e];
+      if (settled[next]) continue;
+      const nd = d + edgeWeight[next];
+      if (nd > maxSeconds || nd >= dist[next]) continue;
+      prev[next] = state;
+      if (heapPos[next] === -1) {
+        push(next, nd);
+      } else {
+        decreaseKey(next, nd);
+      }
+    }
+  }
+  if (winnerState === -1) return null;
+
+  const edgeChain = [];
+  for (let s = winnerState; s !== -1; s = prev[s]) edgeChain.push(s);
+  edgeChain.reverse();
+
+  const nodes = [edgeFromNode[edgeChain[0]]];
+  for (const e of edgeChain) nodes.push(edgeToNode[e]);
+  return nodes;
 }

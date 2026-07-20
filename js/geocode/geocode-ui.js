@@ -1,6 +1,8 @@
 import { queryByCp } from "./ban-index.js";
 
-function formatEntry(entry) {
+// Exportee : sert aussi a construire adresseAffichage (adresse canonique,
+// bien casee) une fois un colis geocode -- voir colis-store.js.
+export function formatEntry(entry) {
   const numero = entry.n ? `${entry.n}${entry.rep || ""} ` : "";
   return `${numero}${entry.r}, ${entry.cp} ${entry.c}`;
 }
@@ -15,7 +17,7 @@ export function renderCandidatePicker(container, { candidates, onPick, onManual 
               (c, i) => `
             <button type="button" class="candidate-item" data-idx="${i}">
               ${formatEntry(c.entry)}
-              <span class="muted">confiance ${Math.round(c.score * 100)}%</span>
+              <span class="muted">confiance ${Math.min(100, Math.round(c.score * 100))}%</span>
             </button>`
             )
             .join("")}
@@ -61,8 +63,19 @@ export function renderManualAddressSearch(container, { initialQuery = "", onPick
     }
     const pool = await queryByCp(cpMatch[0]);
     const rest = query.replace(cpMatch[0], "").trim().toLowerCase();
-    const firstTerm = rest.split(/\s+/).find(Boolean);
-    const filtered = firstTerm ? pool.filter((e) => `${e.n} ${e.r} ${e.c}`.toLowerCase().includes(firstTerm)) : pool;
+    // Tous les mots tapes filtrent (ET logique), pas seulement le premier --
+    // avec une adresse du genre "6 rue de l'eglise", ne garder que le premier
+    // mot ("6") ne filtrait quasiment rien (un numero de porte revient dans
+    // des dizaines d'entrees) et rendait impossible d'affiner la recherche en
+    // tapant le nom de rue/commune (bug reel : correction jamais possible sur
+    // un nom de rue courant partage par plusieurs communes du meme CP).
+    const terms = rest.split(/\s+/).filter(Boolean);
+    const filtered = terms.length
+      ? pool.filter((e) => {
+          const haystack = `${e.n}${e.rep || ""} ${e.r} ${e.c}`.toLowerCase();
+          return terms.every((t) => haystack.includes(t));
+        })
+      : pool;
 
     results.innerHTML =
       filtered.length === 0

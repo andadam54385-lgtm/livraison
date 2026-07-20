@@ -51,6 +51,42 @@ export function streetSimilarity(a, b) {
 
 const CONFIDENCE_THRESHOLD = 0.72;
 
+// Bug reel corrige ici (retour terrain : "6 rue de l'eglise" a Ansauville
+// remontait Rembercourt-sur-Mad, meme apres correction manuelle repetee) :
+// "Rue de l'Eglise"/"Place de l'Eglise" existe dans des dizaines de communes
+// differentes partageant le meme code postal en zone rurale --
+// streetSimilarity(+numero) atteint facilement 1.0+ a elle seule des que la
+// rue/numero correspondent exactement, PEU IMPORTE la commune. Plafonner le
+// score total a 1 (ancien code) ecrasait alors totalement le bonus commune
+// cense departager ces cas : deux communes a 1.15/1.20 avant plafonnage
+// ressortaient toutes les deux a 1.0 apres, rendant le tri quasi arbitraire
+// (ordre de depart du pool) des que le nom de rue est courant. Le bonus
+// commune est aussi renforce (0.05 -> 0.35) : une ville correctement
+// reconnue doit trancher nettement, pas ajouter un dixieme de point qu'un
+// simple ecart d'accentuation OCR peut deja combler. Pas de plafond sur le
+// score total : il ne sert qu'au tri/seuil relatif, jamais affiche comme une
+// probabilite brute (voir geocode-ui.js qui clampe l'affichage a 100%).
+const COMMUNE_MATCH_BONUS = 0.35;
+const NUMERO_MATCH_BONUS = 0.15;
+
+// Extrait de matchAddress() pour rester testable sans IndexedDB (voir
+// match-address.test.mjs) : prend le pool BAN deja recupere en entree plutot
+// que d'aller le chercher lui-meme.
+export function scoreCandidates(pool, { normRue, normCommune, numero }) {
+  const scored = pool.map((entry) => {
+    let score = streetSimilarity(normRue, entry.rn);
+    if (numero && entry.n && String(numero).trim() === String(entry.n).trim()) {
+      score += NUMERO_MATCH_BONUS;
+    }
+    if (normCommune && entry.cn === normCommune) {
+      score += COMMUNE_MATCH_BONUS;
+    }
+    return { entry, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
+
 /**
  * @param {{rue:string, cp:string, commune:string, numero?:string}} address
  * @returns {Promise<{best: {entry:object, score:number} | null, candidates: {entry:object, score:number}[]}>}
@@ -67,18 +103,7 @@ export async function matchAddress({ rue, cp, commune, numero }) {
     return { best: null, candidates: [] };
   }
 
-  const scored = pool.map((entry) => {
-    let score = streetSimilarity(normRue, entry.rn);
-    if (numero && entry.n && String(numero).trim() === String(entry.n).trim()) {
-      score += 0.15;
-    }
-    if (normCommune && entry.cn === normCommune) {
-      score += 0.05;
-    }
-    return { entry, score: Math.min(score, 1) };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
+  const scored = scoreCandidates(pool, { normRue, normCommune, numero });
   const candidates = scored.slice(0, 5);
   const best = candidates.length > 0 && candidates[0].score >= CONFIDENCE_THRESHOLD ? candidates[0] : null;
 

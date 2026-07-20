@@ -116,5 +116,19 @@ console.log("\n=== Regression : prefixes internationaux varies ===");
   }
 }
 
+// --- Regression : bruit OCR (chiffre isole dans le nom, confusion O/0)
+// faisait disparaitre le nom avant ce correctif (toute la ligne partait en
+// "rue" a cause d'un test /\d/ trop large -- voir historique de discussion,
+// bug terrain "(nom inconnu)" systematique) ---
+console.log("\n=== Regression : bruit OCR O/0 dans le nom (ne doit plus le faire disparaitre) ===");
+{
+  const text = ["MARTIN S0PHIE", "0642158790", "6 RUE DE L EGLISE", "54470 ANSAUVILLE"].join("\n");
+  const r = parseUpsLabel(`SHIP TO:\n${text}`);
+  assertEqual(r.nom, "MARTIN S0PHIE", "nom (present malgre le chiffre parasite)");
+  assertEqual(r.rue, "6 RUE DE L EGLISE", "rue (pas contaminee par le nom)");
+  assertEqual(r.cp, "54470", "cp");
+  assertEqual(r.ville, "ANSAUVILLE", "ville");
+}
+
 console.log(`\n${failures === 0 ? "TOUS LES TESTS SONT PASSES" : `${failures} ECHEC(S)`}`);
 process.exit(failures === 0 ? 0 : 1);

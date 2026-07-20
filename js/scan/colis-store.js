@@ -37,3 +37,19 @@ export async function listColisByStatut(statut) {
   const db = await getDb();
   return getAllFromIndex(db, "colis", "by_statut", statut);
 }
+
+// Adresse a AFFICHER (toute l'UI doit passer par ici, jamais reconstruire a
+// la main depuis adresseRaw) : une fois le colis geocode, adresseAffichage
+// contient l'adresse canonique de la BAN (bien casee, complete -- voir
+// geocode-ui.js/formatEntry, pose au moment du match dans scan-ui.js). Avant
+// geocodage, repli sur adresseRaw (texte OCR/saisie tel quel, jamais une
+// forme normalisee : normalizeStreet/normalizeCity ne servent qu'au matching
+// interne, voir geocode/normalize-address.js).
+export function formatAdresseAffichage(colis) {
+  if (colis.adresseAffichage) return colis.adresseAffichage;
+  const rue = colis.adresseRaw?.rue || "";
+  const cp = colis.adresseRaw?.cp || "";
+  const ville = colis.adresseRaw?.ville || "";
+  if (!rue && !cp && !ville) return "(adresse à vérifier)";
+  return `${rue}, ${cp} ${ville}`.trim();
+}

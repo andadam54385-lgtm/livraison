@@ -7,3 +7,8 @@ Thumbs.db
 # tools/compress-assets.js). Copiees depuis data-prep/output/ localement.
 assets/graph.json
 assets/ban.json
+
+# Graphe de connaissance du code (Graphify), usage consultatif local pour
+# les sessions Claude Code -- pas un artefact de l'app, ne doit pas etre
+# deploye ni publie (voir CLAUDE.md).
+graphify-out/

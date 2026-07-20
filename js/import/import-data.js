@@ -1,6 +1,7 @@
 import { getDb } from "../db/schema.js";
 import { get, put, clear, bulkPutChunked } from "../lib/idb.js";
 import { buildCsrFromRawGraph } from "../routing/graph-loader.js";
+import { ensureMapDownloaded } from "../map/pmtiles-store.js";
 
 // Mode dev : ?fixtures=1 (persiste dans localStorage) charge les petites
 // fixtures de test-fixtures/ au lieu des vrais graph.json/ban.json (6.5+ Mo).
@@ -83,13 +84,20 @@ export async function runImportIfNeeded(onProgress) {
 
   const graphMeta = await get(db, "graphMeta", "current");
   const banMeta = await get(db, "banMeta", "current");
+  const mapMeta = await get(db, "mapMeta", "current");
 
   const graphUpToDate = Boolean(
     targetVersion && graphMeta && graphMeta.version === targetVersion.graphVersion
   );
   const banUpToDate = Boolean(targetVersion && banMeta && banMeta.version === targetVersion.banVersion);
+  // targetVersion.mapVersion peut etre null (chantier C non deploye sur ce
+  // build) : dans ce cas "a jour" par definition, ensureMapDownloaded ci-
+  // dessous est alors un no-op.
+  const mapUpToDate = Boolean(
+    !targetVersion?.mapVersion || (mapMeta && mapMeta.version === targetVersion.mapVersion)
+  );
 
-  if (graphUpToDate && banUpToDate) {
+  if (graphUpToDate && banUpToDate && mapUpToDate) {
     onProgress?.({ phase: "done", label: "Données déjà prêtes." });
     return;
   }
@@ -125,6 +133,10 @@ export async function runImportIfNeeded(onProgress) {
       count: entries.length,
       version: targetVersion ? targetVersion.banVersion : "fixtures",
     });
+  }
+
+  if (!mapUpToDate) {
+    await ensureMapDownloaded(db, targetVersion?.mapVersion, onProgress);
   }
 
   onProgress?.({ phase: "done", label: "Prêt." });

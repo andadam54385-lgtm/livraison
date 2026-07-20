@@ -22,7 +22,11 @@ const crypto = require("crypto");
 const ROOT = path.join(__dirname, "..");
 
 const EXCLUDE_DIRS = new Set(["tools", "test-fixtures", "node_modules", ".git"]);
-const EXCLUDE_FILES = new Set(["precache-manifest.json", "graph.json.gz", "ban.json.gz"]);
+// map.pmtiles (60+ Mo) est gere par js/map/pmtiles-store.js (import initial
+// vers OPFS, avec sa propre barre de progression), pas par le precache SW --
+// meme raison que graph.json.gz/ban.json.gz : trop gros pour le Cache Storage
+// "installe d'un bloc" du service worker, doit pouvoir etre suivi/repris.
+const EXCLUDE_FILES = new Set(["precache-manifest.json", "graph.json.gz", "ban.json.gz", "map.pmtiles"]);
 
 function walk(dir, files) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

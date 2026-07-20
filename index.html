@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Tournée">
-<meta name="theme-color" content="#0b1220">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0d12">
 <title>Tournée UPS</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -25,32 +26,14 @@
   </div>
 </div>
 
-<div id="scan-view" class="view" data-view="scan" hidden>
-  <header class="view-header">
-    <div class="card-row">
-      <h1>Scan colis</h1>
-      <button id="scan-manual-btn" type="button">✏️ Saisie manuelle</button>
-    </div>
-    <div class="stats-row">
-      <span id="scan-count-total" class="stat-pill">0 colis</span>
-      <span id="scan-count-issues" class="stat-pill stat-pill-warn">0 à vérifier</span>
-    </div>
-  </header>
-  <div id="scan-content" class="view-content"></div>
-  <button id="scan-fab" class="fab" type="button" aria-label="Scanner un colis">📷</button>
-</div>
-
-<div id="routing-view" class="view" data-view="routing" hidden>
-  <header class="view-header"><h1>Trier la tournée</h1></header>
-  <div id="routing-content" class="view-content"></div>
-</div>
-
 <div id="tour-view" class="view" data-view="tour" hidden>
   <header class="view-header">
-    <h1>Ma tournée</h1>
-    <div class="progress-bar"><div id="tour-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
+    <h1 id="tour-header-title">Tournée</h1>
+    <div class="stats-row" id="tour-header-stats" style="flex-wrap:wrap;"></div>
+    <div class="progress-bar" id="tour-header-progress" hidden><div id="tour-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
   </header>
   <div id="tour-content" class="view-content"></div>
+  <button id="scan-fab" class="fab" type="button" aria-label="Scanner un colis">📷</button>
 </div>
 
 <div id="map-view" class="view" data-view="map" hidden>
@@ -64,8 +47,6 @@
 </div>
 
 <nav id="bottom-nav" class="bottom-nav" hidden>
-  <a href="#scan" data-nav="scan">Scan</a>
-  <a href="#routing" data-nav="routing">Trier</a>
   <a href="#tour" data-nav="tour">Tournée</a>
   <a href="#map" data-nav="map">Carte</a>
   <a href="#settings" data-nav="settings">Réglages</a>

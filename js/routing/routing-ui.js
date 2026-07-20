@@ -1,14 +1,24 @@
 import { getDb } from "../db/schema.js";
-import { get } from "../lib/idb.js";
 import { loadCsrFromDb } from "./graph-loader.js";
 import { buildSpatialGrid, findNearestNode } from "./spatial-index.js";
 import { buildTravelTimeMatrix } from "./matrix-builder.js";
-import { optimizeTourOrder, tourCost } from "./tsp.js";
+import { optimizeTourOrder } from "./tsp.js";
 import { listColisByStatut, saveColis } from "../scan/colis-store.js";
-import { createTour, getActiveTour } from "./tour-store.js";
-import { getAllSettings } from "../settings/settings-store.js";
+import { createTour } from "./tour-store.js";
+import { getAllSettings, setSetting } from "../settings/settings-store.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
 import { emit } from "../lib/event-bus.js";
+
+// Colis "eligibles" pour un (re)calcul de tournee : les tout juste geocodes
+// ("pret") ET ceux d'une tournee precedente pas encore livres ("en_tournee").
+// Inclure "en_tournee" est ce qui permet de recalculer une tournee en cours
+// de route (nouveaux colis scannes, retard...) sans avoir a repasser
+// manuellement chaque colis restant au statut "pret" -- seuls les colis deja
+// "livre" sont exclus.
+export async function listColisEligibles() {
+  const [pret, enTournee] = await Promise.all([listColisByStatut("pret"), listColisByStatut("en_tournee")]);
+  return [...pret, ...enTournee];
+}
 
 function getCurrentPosition() {
   return new Promise((resolve, reject) => {
@@ -24,31 +34,42 @@ function getCurrentPosition() {
   });
 }
 
-function routeDurationSeconds(order, matrix, startIdx) {
-  let total = 0;
+// Duree de chaque troncon (etape precedente -> etape courante), alignee sur
+// `order` -- sert a la fois au total (somme) et a l'heure d'arrivee estimee
+// par arret (cumul progressif, voir tour-ui.js).
+function legDurationsSeconds(order, matrix, startIdx) {
+  const legs = [];
   let current = startIdx;
   for (const idx of order) {
-    total += matrix[current][idx];
+    legs.push(matrix[current][idx]);
     current = idx;
   }
-  return total;
+  return legs;
 }
 
-async function runSort(container, { useGps }) {
+// Ecran appelant (tour-ui.js, Etat A) : doit fournir un conteneur avec
+// #routing-status, #routing-progress-fill et les boutons de declenchement
+// (peu importe leur nombre/libelle, seul `useGps`/`depotReturn` importent ici).
+export async function runSort(container, { useGps, depotReturn, onDone, disableButtons = [] }) {
   const statusEl = container.querySelector("#routing-status");
   const progressFill = container.querySelector("#routing-progress-fill");
-  const startButtons = container.querySelectorAll(".routing-start-btn");
-  startButtons.forEach((b) => (b.disabled = true));
+  disableButtons.forEach((b) => (b.disabled = true));
 
   try {
     const settings = await getAllSettings();
-    const readyColis = await listColisByStatut("pret");
+    const eligibles = await listColisEligibles();
 
-    if (readyColis.length === 0) {
+    if (eligibles.length === 0) {
       statusEl.textContent = "Aucun colis prêt à trier (valide et géocode d'abord tes scans).";
-      startButtons.forEach((b) => (b.disabled = false));
+      disableButtons.forEach((b) => (b.disabled = false));
       return;
     }
+
+    // Choix fait ici, au demarrage de CETTE tournee (pas un reglage global
+    // fige a l'avance) -- persiste quand meme comme valeur par defaut pour
+    // pre-cocher la case au prochain calcul.
+    const depotReturnChecked = Boolean(depotReturn);
+    await setSetting("depotReturn", depotReturnChecked);
 
     let start = { lat: settings.depotLat, lon: settings.depotLon, label: settings.depotLabel };
     if (useGps) {
@@ -67,14 +88,24 @@ async function runSort(container, { useGps }) {
     const csr = await loadCsrFromDb(db);
     if (!csr) {
       statusEl.textContent = "Graphe routier indisponible. Réimporte les données dans les réglages.";
-      startButtons.forEach((b) => (b.disabled = false));
+      disableButtons.forEach((b) => (b.disabled = false));
       return;
     }
 
     statusEl.textContent = "Positionnement des arrêts sur le réseau routier…";
     const grid = buildSpatialGrid(csr.nodeLat, csr.nodeLon);
 
-    const points = [start, ...readyColis.map((c) => ({ lat: c.geocode.lat, lon: c.geocode.lon }))];
+    // Si "revenir au depot" est active, le depot est ajoute une seconde fois
+    // en tant que point d'arrivee fixe (voir fixedEndIdx plus bas) -- distinct
+    // du point de depart, qui peut etre le depot ou la position GPS.
+    const depotReturnPoint = depotReturnChecked ? { lat: settings.depotLat, lon: settings.depotLon } : null;
+    const points = [
+      start,
+      ...eligibles.map((c) => ({ lat: c.geocode.lat, lon: c.geocode.lon })),
+      ...(depotReturnPoint ? [depotReturnPoint] : []),
+    ];
+    const depotEndIdx = depotReturnPoint ? points.length - 1 : null;
+
     const pointNodeIndices = [];
     const unsnapped = [];
     for (let i = 0; i < points.length; i++) {
@@ -99,81 +130,58 @@ async function runSort(container, { useGps }) {
     });
 
     statusEl.textContent = "Optimisation de l'ordre de tournée…";
-    const stopIndices = readyColis.map((_, i) => i + 1);
+    const stopIndices = eligibles.map((_, i) => i + 1);
     const avant12hFlags = {};
-    readyColis.forEach((c, i) => {
+    eligibles.forEach((c, i) => {
       avant12hFlags[i + 1] = Boolean(c.avant12h);
     });
     const penaltyWeight = (settings.avant12hPenaltyMinutes || 0) * 60;
 
-    const { order } = optimizeTourOrder(matrix, 0, stopIndices, {
+    const { order } = optimizeTourOrder(matrix, 0, depotEndIdx != null ? [...stopIndices, depotEndIdx] : stopIndices, {
       avant12hFlags,
       penaltyWeight,
       timeBudgetMs: 5000,
+      fixedEndIdx: depotEndIdx,
     });
 
-    const totalDureeSec = routeDurationSeconds(order, matrix, 0);
+    const legs = legDurationsSeconds(order, matrix, 0);
+    const totalDureeSec = legs.reduce((a, b) => a + b, 0);
+    // fixedEndIdx (voir tsp.js) garantit que le point de retour au depot,
+    // s'il existe, est toujours le tout dernier element de `order` -- les
+    // legs des arrets de livraison correspondent donc directement aux
+    // memes positions dans `order` (pas besoin de les re-associer).
+    const deliveryOrder = depotEndIdx != null ? order.slice(0, -1) : order;
 
-    const stops = order.map((pointIdx, i) => {
-      const colis = readyColis[pointIdx - 1];
+    const stops = deliveryOrder.map((pointIdx, i) => {
+      const colis = eligibles[pointIdx - 1];
       return {
         colisId: colis.id,
         ordre: i + 1,
         statutLivraison: "a_livrer",
         heureLivraison: null,
+        legDureeSec: legs[i],
       };
     });
 
-    const tour = await createTour({ depot: start, stops, totalDureeSec });
+    const tour = await createTour({
+      depot: start,
+      stops,
+      totalDureeSec,
+      returnToDepot: Boolean(depotReturnPoint),
+      depotArrivee: depotReturnPoint ? { lat: settings.depotLat, lon: settings.depotLon, label: settings.depotLabel } : null,
+    });
 
-    for (const colis of readyColis) {
+    for (const colis of eligibles) {
       await saveColis({ ...colis, statut: "en_tournee" });
     }
 
     emit("tour:computed", { tour });
     statusEl.textContent = `Tournée prête (${formatDurationShort(totalDureeSec)} estimées).`;
-    location.hash = "#tour";
+    onDone?.(tour);
   } catch (err) {
     console.error(err);
     statusEl.textContent = `Erreur: ${err.message || err}`;
   } finally {
-    startButtons.forEach((b) => (b.disabled = false));
+    disableButtons.forEach((b) => (b.disabled = false));
   }
-}
-
-export async function mount(container) {
-  const activeTour = await getActiveTour();
-  const readyColis = await listColisByStatut("pret");
-
-  if (activeTour) {
-    container.innerHTML = `
-      <div class="card">
-        <div class="card-title">Tournée en cours</div>
-        <p class="muted">${activeTour.stops.length} arrêts, ${formatDurationShort(activeTour.totalDureeSec)} estimées.</p>
-        <div class="button-row">
-          <button type="button" class="primary" id="go-to-tour">Voir la tournée</button>
-        </div>
-      </div>
-    `;
-    container.querySelector("#go-to-tour").addEventListener("click", () => {
-      location.hash = "#tour";
-    });
-    return;
-  }
-
-  container.innerHTML = `
-    <div class="card">
-      <div class="card-title">${readyColis.length} colis prêts à trier</div>
-      <p class="muted">Les colis "à vérifier" doivent d'abord être validés et géocodés dans l'onglet Scan.</p>
-    </div>
-    <div class="button-row">
-      <button type="button" class="primary routing-start-btn" id="sort-from-depot">Trier depuis le dépôt</button>
-      <button type="button" class="routing-start-btn" id="sort-from-gps">Trier depuis ma position</button>
-    </div>
-    <p id="routing-status" class="muted" style="margin-top:12px;"></p>
-    <div class="progress-bar"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
-  `;
-
-  container.querySelector("#sort-from-depot").addEventListener("click", () => runSort(container, { useGps: false }));
-  container.querySelector("#sort-from-gps").addEventListener("click", () => runSort(container, { useGps: true }));
 }

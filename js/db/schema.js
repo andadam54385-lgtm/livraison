@@ -1,13 +1,21 @@
 import { openDatabase } from "../lib/idb.js";
 
 export const DB_NAME = "delivery-tour";
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 let dbPromise = null;
 
 function upgrade(db) {
   if (!db.objectStoreNames.contains("graphMeta")) {
     db.createObjectStore("graphMeta", { keyPath: "key" });
+  }
+  // Fond de carte assets/map.pmtiles (60+ Mo, voir js/map/pmtiles-store.js) :
+  // le Blob lui-meme est stocke directement dans le champ "file" de ce
+  // record, a cote de sa version -- pas en OPFS (essaye d'abord, abandonne :
+  // navigator.storage.getDirectory()/createWritable() se sont reveles
+  // indisponibles sur au moins un appareil de test reel).
+  if (!db.objectStoreNames.contains("mapMeta")) {
+    db.createObjectStore("mapMeta", { keyPath: "key" });
   }
   if (!db.objectStoreNames.contains("graphCSR")) {
     db.createObjectStore("graphCSR", { keyPath: "key" });

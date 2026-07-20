@@ -2,15 +2,16 @@ import { openDb } from "./db/schema.js";
 import { runImportIfNeeded } from "./import/import-data.js";
 import { renderImportProgress } from "./import/import-ui.js";
 
-const VIEWS = ["scan", "routing", "tour", "map", "settings"];
+// Tournee est l'ecran d'accueil et heberge le scan (bouton flottant camera,
+// voir tour-ui.js) : machine a 2 etats (preparation/execution), plus de tab
+// Scan separe. Carte/Reglages restent a 1 tap.
+const VIEWS = ["tour", "map", "settings"];
 const viewModules = {};
 
 async function loadViewModule(name) {
   if (viewModules[name]) return viewModules[name];
   let mod;
-  if (name === "scan") mod = await import("./scan/scan-ui.js");
-  else if (name === "routing") mod = await import("./routing/routing-ui.js");
-  else if (name === "tour") mod = await import("./tour/tour-ui.js");
+  if (name === "tour") mod = await import("./tour/tour-ui.js");
   else if (name === "map") mod = await import("./map/map-ui.js");
   else if (name === "settings") mod = await import("./settings/settings-ui.js");
   viewModules[name] = mod;
@@ -42,9 +43,9 @@ async function navigate(name) {
 }
 
 function onHashChange() {
-  const name = (location.hash || "#scan").slice(1);
+  const name = (location.hash || "#tour").slice(1);
   if (!VIEWS.includes(name)) {
-    location.hash = "#scan";
+    location.hash = "#tour";
     return Promise.resolve();
   }
   return navigate(name);
@@ -67,9 +68,9 @@ async function boot() {
 
   window.addEventListener("hashchange", onHashChange);
   // Attend que la vue initiale soit montee (et ses ecouteurs, notamment le
-  // FAB de scan qui vit dans le HTML statique, branches) avant de reveler la
-  // nav -- sinon un tap rapide juste apres l'affichage peut ne rien faire
-  // (import dynamique de scan-ui.js pas encore resolu).
+  // FAB de scan qui vit dans le HTML statique de #tour-view, branches) avant
+  // de reveler la nav -- sinon un tap rapide juste apres l'affichage peut ne
+  // rien faire (import dynamique de tour-ui.js pas encore resolu).
   await onHashChange();
   document.getElementById("bottom-nav").hidden = false;
 
