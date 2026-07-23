@@ -14,9 +14,18 @@ const SMS_TEMPLATE_LABELS = ["Arrivée imminente", "Colis déposé", "Absent au 
 
 let containerRef = null;
 let showDebugOcr = false;
+// Copie de travail des 3 templates (menu deroulant : un seul visible/edite a
+// la fois, voir plus bas) -- initialisee une fois par mount() pour survivre
+// aux re-rendus internes (suppression d'un favori, etc.) sans perdre une
+// modification pas encore enregistree.
+let smsDraft = null;
+let smsActiveIndex = 0;
 
 export async function mount(container) {
   containerRef = container;
+  const settings = await getAllSettings();
+  smsDraft = settings.smsTemplates.slice();
+  smsActiveIndex = 0;
   await render();
 }
 
@@ -101,15 +110,16 @@ async function render() {
         disponible seulement sur l'arrêt courant d'une tournée active). Au moment d'envoyer, un choix entre les 3
         s'affiche. Le SMS s'ouvre pré-rempli dans Messages — jamais envoyé automatiquement.
       </p>
-      ${SMS_TEMPLATE_LABELS.map(
-        (label, i) => `
-        <div class="field">
-          <label>${label}</label>
-          <textarea id="s-sms-template-${i}" class="field-lg" rows="2" style="min-height:0;">${escapeHtml(settings.smsTemplates[i] || "")}</textarea>
-        </div>
-      `
-      ).join("")}
-      <button type="button" id="s-sms-template-reset">Réinitialiser les 3 modèles</button>
+      <div class="field">
+        <label>Modèle à modifier</label>
+        <select id="s-sms-template-select">
+          ${SMS_TEMPLATE_LABELS.map((label, i) => `<option value="${i}" ${i === smsActiveIndex ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <textarea id="s-sms-template-active" class="field-lg" rows="3" style="min-height:0;">${escapeHtml(smsDraft[smsActiveIndex] || "")}</textarea>
+      </div>
+      <button type="button" id="s-sms-template-reset">Réinitialiser ce modèle</button>
     </div>
     <div class="card">
       <div class="card-title">Stockage local</div>
@@ -139,6 +149,21 @@ async function render() {
     </div>
   `;
 
+  const smsSelect = containerRef.querySelector("#s-sms-template-select");
+  const smsTextarea = containerRef.querySelector("#s-sms-template-active");
+
+  smsTextarea.addEventListener("input", () => {
+    smsDraft[smsActiveIndex] = smsTextarea.value;
+  });
+  smsSelect.addEventListener("change", () => {
+    smsActiveIndex = Number(smsSelect.value);
+    smsTextarea.value = smsDraft[smsActiveIndex] || "";
+  });
+  containerRef.querySelector("#s-sms-template-reset").addEventListener("click", () => {
+    smsDraft[smsActiveIndex] = DEFAULTS.smsTemplates[smsActiveIndex];
+    smsTextarea.value = smsDraft[smsActiveIndex];
+  });
+
   containerRef.querySelector("#s-save").addEventListener("click", async () => {
     await setSetting("depotLat", parseFloat(containerRef.querySelector("#s-depot-lat").value));
     await setSetting("depotLon", parseFloat(containerRef.querySelector("#s-depot-lon").value));
@@ -147,17 +172,9 @@ async function render() {
     await setSetting("autoNavAfterDeliver", containerRef.querySelector("#s-auto-nav").checked);
     await setSetting("avant12hPenaltyMinutes", parseFloat(containerRef.querySelector("#s-penalty").value));
     await setSetting("dureeArretMinutes", parseFloat(containerRef.querySelector("#s-duree-arret").value));
-    await setSetting(
-      "smsTemplates",
-      SMS_TEMPLATE_LABELS.map((_, i) => containerRef.querySelector(`#s-sms-template-${i}`).value.trim())
-    );
+    smsDraft[smsActiveIndex] = smsTextarea.value.trim(); // capture le modele affiche au moment d'enregistrer
+    await setSetting("smsTemplates", smsDraft.slice());
     alert("Réglages enregistrés.");
-  });
-
-  containerRef.querySelector("#s-sms-template-reset").addEventListener("click", () => {
-    SMS_TEMPLATE_LABELS.forEach((_, i) => {
-      containerRef.querySelector(`#s-sms-template-${i}`).value = DEFAULTS.smsTemplates[i];
-    });
   });
 
   // Bascule immediate (pas besoin de cliquer "Enregistrer" apres) : un
