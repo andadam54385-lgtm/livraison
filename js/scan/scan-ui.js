@@ -226,13 +226,17 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
         ? '<span class="badge badge-ok">confiance haute</span>'
         : '<span class="badge badge-pending">à vérifier</span>';
 
-  // Ordre retour terrain : adresse d'abord (rue -> ville -> code postal ->
-  // numero), le nom en dernier -- seule l'adresse conditionne le geocodage
+  // Ordre retour terrain : adresse d'abord (numero -> rue -> ville -> code
+  // postal), le nom en dernier -- seule l'adresse conditionne le geocodage
   // (voir colis-ready-rule), le nom peut se determiner sur place.
   const { numero, rue: rueSansNumero } = splitNumeroRue(colis.adresseRaw.rue);
 
   container.innerHTML = `
     ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>⚠ Ce tracking a déjà été scanné.</strong></div>` : ""}
+    <div class="field">
+      <label>Numéro</label>
+      <input type="text" id="f-numero" class="field-lg" inputmode="numeric" value="${escapeAttr(numero)}">
+    </div>
     <div class="field">
       <label>Rue</label>
       <input type="text" id="f-rue" class="field-lg" value="${escapeAttr(rueSansNumero)}">
@@ -245,10 +249,6 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     <div class="field">
       <label>Code postal</label>
       <input type="text" id="f-cp" class="field-lg" inputmode="numeric" value="${escapeAttr(colis.adresseRaw.cp)}">
-    </div>
-    <div class="field">
-      <label>Numéro</label>
-      <input type="text" id="f-numero" class="field-lg" inputmode="numeric" value="${escapeAttr(numero)}">
     </div>
     <div class="field">
       <label>Nom</label>
