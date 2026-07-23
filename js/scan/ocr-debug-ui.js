@@ -1,11 +1,14 @@
 import { listAllColis } from "./colis-store.js";
 import { parseUpsLabelDetailed } from "./parse-ups-label.js";
+import { renderReviewForm } from "./scan-ui.js";
 
 // Ecran de diagnostic (Reglages) : montre le texte OCR brut d'un colis
 // scanne et le detail de la classification ligne par ligne (nom / rue /
 // telephone / cp+ville), pour comprendre EXACTEMENT ou un parsing rate sur
-// une vraie photo -- plutot que de deviner a distance. Lecture seule, ne
-// modifie jamais le colis.
+// une vraie photo -- plutot que de deviner a distance. Vu le volume
+// d'erreurs OCR reel, un bouton "Corriger ce colis" ouvre directement la
+// fiche d'edition habituelle (scan-ui.js's renderReviewForm) dans ce meme
+// ecran -- diagnostiquer puis corriger sans changer d'onglet.
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -85,7 +88,19 @@ export async function renderOcrDebug(container) {
   const detail = container.querySelector("#ocr-debug-detail");
 
   function showSelected() {
-    detail.innerHTML = renderClassificationDetail(scans[Number(select.value)]);
+    const colis = scans[Number(select.value)];
+    detail.innerHTML = `
+      ${renderClassificationDetail(colis)}
+      <div class="button-row" style="margin-top:10px;">
+        <button type="button" id="ocr-debug-correct">✏️ Corriger ce colis</button>
+      </div>
+    `;
+    detail.querySelector("#ocr-debug-correct").addEventListener("click", () => {
+      renderReviewForm(detail, colis, {
+        isNew: false,
+        onSaved: () => showSelected(), // revient au diagnostic (donnees a jour, meme reference d'objet)
+      });
+    });
   }
 
   select.addEventListener("change", showSelected);
