@@ -17,9 +17,6 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Doit matcher settings-ui.js's SMS_TEMPLATE_LABELS (ordre des 3 modeles).
-const SMS_TEMPLATE_LABELS = ["Arrivée imminente", "Colis déposé", "Absent au passage"];
-
 function badgeForStatut(statut) {
   if (statut === "pret") return `<span class="badge badge-ok">Prêt</span>`;
   if (statut === "en_tournee") return `<span class="badge badge-ok">En tournée</span>`;
@@ -89,7 +86,7 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
               ${smsOptions
                 .map(
                   (o) =>
-                    `<a class="candidate-item btn-link" href="${o.href}">${escapeHtml(SMS_TEMPLATE_LABELS[o.index] || `Modèle ${o.index + 1}`)}<span class="muted">${escapeHtml(o.body)}</span></a>`
+                    `<a class="candidate-item btn-link" href="${o.href}">${escapeHtml(o.label || `Modèle ${o.index + 1}`)}<span class="muted">${escapeHtml(o.body)}</span></a>`
                 )
                 .join("")}
             </div>`

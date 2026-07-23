@@ -24,12 +24,18 @@ export function smsUrl(tel, body) {
 }
 
 // 3 modeles minimum (retour terrain : une seule situation-type ne suffit
-// pas -- arrivee/depose/absent n'ont rien a voir). Retourne des donnees
-// brutes (pas de HTML ici : chaque UI appelante a sa propre fonction
-// d'echappement) pour construire un petit choix au moment d'envoyer.
+// pas -- arrivee/depose/absent n'ont rien a voir), titre ET texte
+// modifiables. Retourne des donnees brutes (pas de HTML ici : chaque UI
+// appelante a sa propre fonction d'echappement) pour construire un petit
+// choix au moment d'envoyer. Accepte aussi l'ancien format (simple chaine,
+// sans titre) pour ne pas casser un reglage deja enregistre avant l'ajout
+// des titres modifiables -- `label` vaut alors undefined, a l'appelant de
+// prevoir un repli ("Modèle N").
 export function buildSmsOptions(templates, tel, vars) {
   return (templates || []).map((template, index) => {
-    const body = renderSmsTemplate(template, vars);
-    return { index, body, href: smsUrl(tel, body) };
+    const isObj = template && typeof template === "object";
+    const label = isObj ? template.label : undefined;
+    const body = renderSmsTemplate(isObj ? template.body : template, vars);
+    return { index, label, body, href: smsUrl(tel, body) };
   });
 }

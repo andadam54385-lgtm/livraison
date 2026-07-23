@@ -56,9 +56,6 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Doit matcher settings-ui.js's SMS_TEMPLATE_LABELS (ordre des 3 modeles).
-const SMS_TEMPLATE_LABELS = ["Arrivée imminente", "Colis déposé", "Absent au passage"];
-
 function updateHeader({ title, statsHtml = "", showProgress = false, progressPercent = 0 }) {
   const titleEl = document.getElementById("tour-header-title");
   const statsEl = document.getElementById("tour-header-stats");
@@ -412,7 +409,7 @@ function renderSmsOptionsHtml(smsOptions) {
     <div class="candidate-list" id="hero-sms-options" hidden style="margin-top:8px;">
       ${smsOptions
         .map(
-          (o) => `<a class="candidate-item btn-link" href="${o.href}">${escapeHtml(SMS_TEMPLATE_LABELS[o.index] || `Modèle ${o.index + 1}`)}<span class="muted">${escapeHtml(o.body)}</span></a>`
+          (o) => `<a class="candidate-item btn-link" href="${o.href}">${escapeHtml(o.label || `Modèle ${o.index + 1}`)}<span class="muted">${escapeHtml(o.body)}</span></a>`
         )
         .join("")}
     </div>

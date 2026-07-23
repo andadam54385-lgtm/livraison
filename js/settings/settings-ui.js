@@ -10,8 +10,6 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-const SMS_TEMPLATE_LABELS = ["Arrivée imminente", "Colis déposé", "Absent au passage"];
-
 let containerRef = null;
 let showDebugOcr = false;
 // Copie de travail des 3 templates (menu deroulant : un seul visible/edite a
@@ -21,10 +19,19 @@ let showDebugOcr = false;
 let smsDraft = null;
 let smsActiveIndex = 0;
 
+// Accepte aussi l'ancien format (simple chaine, sans titre modifiable) pour
+// ne pas planter sur un reglage deja enregistre avant l'ajout des titres.
+function normalizeSmsTemplates(raw) {
+  return (raw || []).map((t, i) => {
+    if (typeof t === "string") return { label: DEFAULTS.smsTemplates[i]?.label || `Modèle ${i + 1}`, body: t };
+    return { label: t.label || `Modèle ${i + 1}`, body: t.body || "" };
+  });
+}
+
 export async function mount(container) {
   containerRef = container;
   const settings = await getAllSettings();
-  smsDraft = settings.smsTemplates.slice();
+  smsDraft = normalizeSmsTemplates(settings.smsTemplates);
   smsActiveIndex = 0;
   await render();
 }
@@ -113,11 +120,16 @@ async function render() {
       <div class="field">
         <label>Modèle à modifier</label>
         <select id="s-sms-template-select">
-          ${SMS_TEMPLATE_LABELS.map((label, i) => `<option value="${i}" ${i === smsActiveIndex ? "selected" : ""}>${label}</option>`).join("")}
+          ${smsDraft.map((t, i) => `<option value="${i}" ${i === smsActiveIndex ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("")}
         </select>
       </div>
       <div class="field">
-        <textarea id="s-sms-template-active" class="field-lg" rows="3" style="min-height:0;">${escapeHtml(smsDraft[smsActiveIndex] || "")}</textarea>
+        <label>Titre du modèle</label>
+        <input type="text" id="s-sms-template-label" class="field-lg" value="${escapeHtml(smsDraft[smsActiveIndex].label)}">
+      </div>
+      <div class="field">
+        <label>Message</label>
+        <textarea id="s-sms-template-active" class="field-lg" rows="3" style="min-height:0;">${escapeHtml(smsDraft[smsActiveIndex].body)}</textarea>
       </div>
       <button type="button" id="s-sms-template-reset">Réinitialiser ce modèle</button>
     </div>
@@ -150,18 +162,26 @@ async function render() {
   `;
 
   const smsSelect = containerRef.querySelector("#s-sms-template-select");
+  const smsLabelInput = containerRef.querySelector("#s-sms-template-label");
   const smsTextarea = containerRef.querySelector("#s-sms-template-active");
 
+  smsLabelInput.addEventListener("input", () => {
+    smsDraft[smsActiveIndex].label = smsLabelInput.value;
+    smsSelect.options[smsActiveIndex].text = smsLabelInput.value || `Modèle ${smsActiveIndex + 1}`;
+  });
   smsTextarea.addEventListener("input", () => {
-    smsDraft[smsActiveIndex] = smsTextarea.value;
+    smsDraft[smsActiveIndex].body = smsTextarea.value;
   });
   smsSelect.addEventListener("change", () => {
     smsActiveIndex = Number(smsSelect.value);
-    smsTextarea.value = smsDraft[smsActiveIndex] || "";
+    smsLabelInput.value = smsDraft[smsActiveIndex].label || "";
+    smsTextarea.value = smsDraft[smsActiveIndex].body || "";
   });
   containerRef.querySelector("#s-sms-template-reset").addEventListener("click", () => {
-    smsDraft[smsActiveIndex] = DEFAULTS.smsTemplates[smsActiveIndex];
-    smsTextarea.value = smsDraft[smsActiveIndex];
+    smsDraft[smsActiveIndex] = { ...DEFAULTS.smsTemplates[smsActiveIndex] };
+    smsLabelInput.value = smsDraft[smsActiveIndex].label;
+    smsTextarea.value = smsDraft[smsActiveIndex].body;
+    smsSelect.options[smsActiveIndex].text = smsDraft[smsActiveIndex].label;
   });
 
   containerRef.querySelector("#s-save").addEventListener("click", async () => {
@@ -172,8 +192,11 @@ async function render() {
     await setSetting("autoNavAfterDeliver", containerRef.querySelector("#s-auto-nav").checked);
     await setSetting("avant12hPenaltyMinutes", parseFloat(containerRef.querySelector("#s-penalty").value));
     await setSetting("dureeArretMinutes", parseFloat(containerRef.querySelector("#s-duree-arret").value));
-    smsDraft[smsActiveIndex] = smsTextarea.value.trim(); // capture le modele affiche au moment d'enregistrer
-    await setSetting("smsTemplates", smsDraft.slice());
+    // Capture le modele affiche au moment d'enregistrer (input deja tenu a
+    // jour pour les autres, celui-ci peut avoir le focus sans avoir declenche
+    // son evenement "input" si l'utilisateur clique direct sur Enregistrer).
+    smsDraft[smsActiveIndex] = { label: smsLabelInput.value.trim() || `Modèle ${smsActiveIndex + 1}`, body: smsTextarea.value.trim() };
+    await setSetting("smsTemplates", smsDraft.map((t) => ({ ...t })));
     alert("Réglages enregistrés.");
   });
 
