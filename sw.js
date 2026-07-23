@@ -9,7 +9,7 @@
 // ayant deja installe une version anterieure DOIT donc modifier ce fichier
 // (ex: incrementer SW_BUILD ci-dessous), meme si le bug corrige se trouve
 // ailleurs. Sans ca, le service worker reste bloque sur son ancien cache.
-const SW_BUILD = 30;
+const SW_BUILD = 31;
 
 const FALLBACK_ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./css/app.css", "./js/app.js"];
 

@@ -22,3 +22,14 @@ export function renderSmsTemplate(template, { nom, minutesEstimees, adresse } = 
 export function smsUrl(tel, body) {
   return `sms:${encodeURIComponent(tel)}&body=${encodeURIComponent(body)}`;
 }
+
+// 3 modeles minimum (retour terrain : une seule situation-type ne suffit
+// pas -- arrivee/depose/absent n'ont rien a voir). Retourne des donnees
+// brutes (pas de HTML ici : chaque UI appelante a sa propre fonction
+// d'echappement) pour construire un petit choix au moment d'envoyer.
+export function buildSmsOptions(templates, tel, vars) {
+  return (templates || []).map((template, index) => {
+    const body = renderSmsTemplate(template, vars);
+    return { index, body, href: smsUrl(tel, body) };
+  });
+}

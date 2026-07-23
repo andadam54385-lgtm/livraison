@@ -1,8 +1,8 @@
-import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, getTodayStats } from "../routing/tour-store.js";
+import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, getTodayStats, reporterColisEchec } from "../routing/tour-store.js";
 import { getColis, saveColis, listAllColis, formatAdresseAffichage } from "../scan/colis-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
-import { renderSmsTemplate, smsUrl } from "./sms-template.js";
+import { buildSmsOptions } from "./sms-template.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
 import { runSort } from "../routing/routing-ui.js";
 import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
@@ -35,6 +35,7 @@ let lastTour = null;
 let lastStopsWithColis = [];
 let lastNavApp = "apple";
 let lastEtas = new Map();
+let lastDepotEta = null;
 
 export async function mount(container) {
   containerRef = container;
@@ -54,6 +55,9 @@ function escapeAttr(s) {
 function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+
+// Doit matcher settings-ui.js's SMS_TEMPLATE_LABELS (ordre des 3 modeles).
+const SMS_TEMPLATE_LABELS = ["Arrivée imminente", "Colis déposé", "Absent au passage"];
 
 function updateHeader({ title, statsHtml = "", showProgress = false, progressPercent = 0 }) {
   const titleEl = document.getElementById("tour-header-title");
@@ -163,13 +167,32 @@ function renderPrepCard(c) {
   `;
 }
 
+// Chantier F : un colis en echec (absent, acces impossible...) ne doit pas
+// simplement disparaitre de la vue -- sans ca, le report au lendemain
+// depend de la memoire du livreur plutot que de l'appli.
+function renderEchecCard(c) {
+  const titre = c.nom || formatAdresseAffichage(c);
+  return `
+    <div class="card" style="border-color:var(--warn);">
+      <div class="card-row">
+        <div class="card-title" data-colis-id="${escapeAttr(c.id)}" data-open-detail>${escapeHtml(titre)}</div>
+        <span class="badge badge-warn">Échec</span>
+      </div>
+      <div class="muted" data-colis-id="${escapeAttr(c.id)}" data-open-detail>${escapeHtml(formatAdresseAffichage(c))}</div>
+      <button type="button" class="ok" style="margin-top:8px;width:100%;" data-report-colis="${escapeAttr(c.id)}">🔄 Reporter à cette tournée</button>
+    </div>
+  `;
+}
+
 async function renderEtatA() {
   const [allColis, settings] = await Promise.all([listAllColis(), getAllSettings()]);
-  // Tout ce qui n'est pas encore traite (livre/echec appartiennent a
-  // l'historique d'une tournee precedente, pas a la preparation de la
-  // prochaine) : "a_verifier" reste visible ici pour que l'utilisateur les
-  // corrige avant d'optimiser.
+  // Tout ce qui n'est pas encore traite (livre appartient a l'historique
+  // d'une tournee precedente, pas a la preparation de la prochaine) :
+  // "a_verifier" reste visible ici pour que l'utilisateur les corrige avant
+  // d'optimiser. "echec" est affiche a part (voir echecColis) avec un bouton
+  // de report explicite plutot que de se re-fondre silencieusement ici.
   const prepColis = allColis.filter((c) => c.statut !== "livre" && c.statut !== "echec");
+  const echecColis = allColis.filter((c) => c.statut === "echec");
   const totalQty = prepColis.reduce((s, c) => s + (c.quantite || 1), 0);
   const issues = prepColis.filter((c) => c.statut === "a_verifier").length;
 
@@ -198,6 +221,14 @@ async function renderEtatA() {
     <div class="button-row" style="margin-bottom:14px;">
       <button type="button" id="etatA-manual">✏️ Saisie manuelle</button>
     </div>
+    ${
+      echecColis.length > 0
+        ? `
+      <div class="card-title" style="margin:4px 0 8px;">Non livrés (${echecColis.length}) — à reporter ?</div>
+      <div id="etatA-echec-list">${echecColis.map((c) => renderEchecCard(c)).join("")}</div>
+    `
+        : ""
+    }
     <div id="etatA-list">${listHtml}</div>
     <div class="card" style="margin-top:18px;">
       <div class="card-title">Départ</div>
@@ -216,6 +247,14 @@ async function renderEtatA() {
   `;
 
   containerRef.querySelector("#etatA-manual").addEventListener("click", () => openManualEntry());
+
+  containerRef.querySelectorAll("[data-report-colis]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await reporterColisEchec(btn.dataset.reportColis);
+      showToast("🔄 Colis remis dans la préparation de tournée.");
+      render();
+    });
+  });
 
   containerRef.querySelectorAll("[data-open-detail]").forEach((el) => {
     el.addEventListener("click", () => openDetail(el.dataset.colisId));
@@ -273,21 +312,50 @@ function formatHeure(date) {
 }
 
 // Heure d'arrivee estimee par arret : cumul des temps de trajet (legDureeSec,
-// calcule au moment du tri) + temps moyen passe a chaque arret precedent.
-// Absent sur les tournees creees avant cette fonctionnalite (legDureeSec
-// undefined -> traite comme 0), et devient approximatif apres un
-// reordonnancement manuel ou une insertion (les temps de trajet ne sont pas
-// recalcules pour les arrets deplaces).
+// calcule au moment du tri) + temps moyen passe a chaque arret precedent, a
+// partir du dernier arret REELLEMENT valide (livre/echec) plutot que de la
+// creation de la tournee -- un livreur en avance ou en retard sur le plan
+// initial doit voir des heures qui suivent son rythme reel, pas figees au
+// moment du tri. Sans arret encore valide, repli sur la creation de la
+// tournee (premier depart). Absent sur les tournees creees avant cette
+// fonctionnalite (legDureeSec undefined -> traite comme 0), et devient
+// approximatif apres un reordonnancement manuel ou une insertion (les temps
+// de trajet ne sont pas recalcules pour les arrets deplaces).
+// Retourne aussi l'heure d'arrivee estimee au depot (retour en fin de
+// tournee) quand applicable : le trajet retour n'est pas un "arret" au sens
+// stops[], son temps de trajet se deduit de totalDureeSec (qui inclut TOUS
+// les troncons, y compris le retour) moins la somme des troncons deja
+// comptes pour les arrets -- voir routing-ui.js ou `legs` est calcule.
 function computeEtas(tour, stopsSorted, dwellSec) {
-  const start = new Date(tour.dateCreation).getTime();
+  let anchorTime = new Date(tour.dateCreation).getTime();
+  let anchorIndex = -1;
+  stopsSorted.forEach(({ stop }, i) => {
+    const isTraite = stop.statutLivraison === "livre" || stop.statutLivraison === "echec";
+    if (!isTraite) return;
+    const heure = stop.heureLivraison || stop.heureEchec;
+    if (heure) {
+      anchorTime = new Date(heure).getTime();
+      anchorIndex = i;
+    }
+  });
+
   let cumulative = 0;
   const etas = new Map();
-  for (const { stop } of stopsSorted) {
+  for (let i = anchorIndex + 1; i < stopsSorted.length; i++) {
+    const { stop } = stopsSorted[i];
     cumulative += stop.legDureeSec || 0;
-    etas.set(stop.colisId, new Date(start + cumulative * 1000));
+    etas.set(stop.colisId, new Date(anchorTime + cumulative * 1000));
     cumulative += dwellSec;
   }
-  return etas;
+
+  let depotEta = null;
+  if (tour.returnToDepot) {
+    const sumStopLegs = stopsSorted.reduce((s, { stop }) => s + (stop.legDureeSec || 0), 0);
+    const returnLegSec = Math.max(0, (tour.totalDureeSec || 0) - sumStopLegs);
+    depotEta = new Date(anchorTime + (cumulative + returnLegSec) * 1000);
+  }
+
+  return { etas, depotEta };
 }
 
 async function promptAndMarkFailed(tourId, ordre) {
@@ -338,7 +406,20 @@ function splitAdresseForHero(colis) {
   return { street: full.slice(0, commaIdx).trim(), cityLine: full.slice(commaIdx + 1).trim() };
 }
 
-function renderHeroCard(stop, colis, { navApp, eta, smsTemplate }) {
+function renderSmsOptionsHtml(smsOptions) {
+  if (smsOptions.length === 0) return "";
+  return `
+    <div class="candidate-list" id="hero-sms-options" hidden style="margin-top:8px;">
+      ${smsOptions
+        .map(
+          (o) => `<a class="candidate-item btn-link" href="${o.href}">${escapeHtml(SMS_TEMPLATE_LABELS[o.index] || `Modèle ${o.index + 1}`)}<span class="muted">${escapeHtml(o.body)}</span></a>`
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderHeroCard(stop, colis, { navApp, eta, smsTemplates }) {
   const adresse = formatAdresseAffichage(colis);
   const navUrl = colis.geocode?.lat ? buildNavUrl(navApp, { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse }) : null;
   const { street, cityLine } = splitAdresseForHero(colis);
@@ -346,9 +427,7 @@ function renderHeroCard(stop, colis, { navApp, eta, smsTemplate }) {
   // endroit ou {minutes_estimees} peut etre rempli avec une valeur fraiche
   // (recalculee a chaque render, pas figee au moment du scan).
   const minutesEstimees = eta ? Math.max(0, Math.round((eta.getTime() - Date.now()) / 60000)) : null;
-  const smsHref = colis.tel
-    ? smsUrl(colis.tel, renderSmsTemplate(smsTemplate, { nom: colis.nom, adresse, minutesEstimees }))
-    : null;
+  const smsOptions = colis.tel ? buildSmsOptions(smsTemplates, colis.tel, { nom: colis.nom, adresse, minutesEstimees }) : [];
 
   return `
     <div class="hero-card">
@@ -368,8 +447,9 @@ function renderHeroCard(stop, colis, { navApp, eta, smsTemplate }) {
         <div class="button-row">
           ${navUrl ? `<a class="btn-link primary btn-lg" href="${navUrl}" target="_blank" rel="noopener">🧭 Naviguer</a>` : ""}
           ${colis.tel ? `<a class="btn-link btn-lg" style="flex:0 0 58px;" href="tel:${colis.tel}">📞</a>` : ""}
-          ${smsHref ? `<a class="btn-link btn-lg" style="flex:0 0 58px;" href="${smsHref}">💬</a>` : ""}
+          ${smsOptions.length > 0 ? `<button type="button" class="btn-link btn-lg" style="flex:0 0 58px;" id="hero-sms-toggle">💬</button>` : ""}
         </div>
+        ${renderSmsOptionsHtml(smsOptions)}
         <button type="button" class="ok btn-lg" data-deliver-ordre="${stop.ordre}" data-hero-deliver>✓ Livré</button>
         <button type="button" class="hero-fail-btn" data-fail-ordre="${stop.ordre}">Marquer en échec</button>
       </div>
@@ -432,7 +512,7 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
   `;
 }
 
-function renderDepotReturnCard(tour, navApp) {
+function renderDepotReturnCard(tour, navApp, depotEta) {
   if (!tour.returnToDepot || !tour.depotArrivee) return "";
   const navUrl = buildNavUrl(navApp, {
     lat: tour.depotArrivee.lat,
@@ -442,7 +522,10 @@ function renderDepotReturnCard(tour, navApp) {
   });
   return `
     <div class="card">
-      <div class="card-title">🏠 Retour au dépôt</div>
+      <div class="card-row">
+        <div class="card-title" style="margin-bottom:0;">🏠 Retour au dépôt</div>
+        ${depotEta ? `<span class="badge badge-pending">≈ ${formatHeure(depotEta)}</span>` : ""}
+      </div>
       <div class="muted">${escapeAttr(tour.depotArrivee.label)}</div>
       <div class="button-row">
         <a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">🧭 Naviguer</a>
@@ -505,6 +588,15 @@ function bindActionEvents(tourId) {
       }
     });
   });
+
+  // Choix du modele de SMS (hero card) : simple affichage/masquage, pas de
+  // re-rendu (les liens sms: sont deja construits dans le HTML).
+  const smsToggle = containerRef.querySelector("#hero-sms-toggle");
+  if (smsToggle) {
+    smsToggle.addEventListener("click", () => {
+      containerRef.querySelector("#hero-sms-options")?.toggleAttribute("hidden");
+    });
+  }
 }
 
 function renderStopsList(filterText) {
@@ -553,7 +645,9 @@ async function renderEtatB(tour) {
   lastTour = tour;
   lastStopsWithColis = stopsWithColis;
   lastNavApp = navApp;
-  lastEtas = computeEtas(tour, stopsWithColis, (settings.dureeArretMinutes || 0) * 60);
+  const etaResult = computeEtas(tour, stopsWithColis, (settings.dureeArretMinutes || 0) * 60);
+  lastEtas = etaResult.etas;
+  lastDepotEta = etaResult.depotEta;
 
   const delivered = stopsWithColis.filter((s) => s.stop.statutLivraison === "livre").length;
   const failed = stopsWithColis.filter((s) => s.stop.statutLivraison === "echec").length;
@@ -567,7 +661,7 @@ async function renderEtatB(tour) {
 
   const heroEntry = stopsWithColis.find(({ stop, colis }) => isPending(stop) && colis);
   const heroHtml = heroEntry
-    ? renderHeroCard(heroEntry.stop, heroEntry.colis, { navApp, eta: lastEtas.get(heroEntry.colis.id), smsTemplate: settings.smsTemplate })
+    ? renderHeroCard(heroEntry.stop, heroEntry.colis, { navApp, eta: lastEtas.get(heroEntry.colis.id), smsTemplates: settings.smsTemplates })
     : `<div class="card"><div class="card-title">🎉 Tournée traitée</div><p class="muted">${delivered} livré${delivered > 1 ? "s" : ""}${failed > 0 ? `, ${failed} échec${failed > 1 ? "s" : ""}` : ""}. Plus aucun arrêt en attente.</p></div>`;
 
   containerRef.innerHTML = `
@@ -595,7 +689,7 @@ async function renderEtatB(tour) {
     </div>
     ${total > 0 ? `<p class="muted" style="margin:-4px 0 10px;">Horaires estimés à titre indicatif — recalcule la tournée après un réarrangement pour des horaires exacts.</p>` : ""}
     <div id="stops-container" data-hero-colis-id="${heroEntry ? escapeAttr(heroEntry.colis.id) : ""}"></div>
-    ${renderDepotReturnCard(tour, navApp)}
+    ${renderDepotReturnCard(tour, navApp, lastDepotEta)}
     <div class="button-row">
       <button type="button" class="danger" id="recalc-tour-btn">Recalculer la tournée</button>
     </div>

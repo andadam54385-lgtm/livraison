@@ -1,6 +1,8 @@
 import { openDb } from "./db/schema.js";
 import { runImportIfNeeded } from "./import/import-data.js";
 import { renderImportProgress } from "./import/import-ui.js";
+import { purgeOldTours } from "./routing/tour-store.js";
+import { getSetting } from "./settings/settings-store.js";
 
 // Tournee est l'ecran d'accueil et heberge le scan (bouton flottant camera,
 // voir tour-ui.js) : machine a 2 etats (preparation/execution), plus de tab
@@ -65,6 +67,13 @@ async function boot() {
   await runImportIfNeeded(renderImportProgress);
 
   importView.hidden = true;
+
+  // Menage sur la retention de l'historique de tournees (chantier F) : pas
+  // sur le chemin critique du demarrage, une erreur ici ne doit jamais
+  // bloquer l'affichage de l'appli.
+  getSetting("tourHistoryPurgeMonths")
+    .then((months) => purgeOldTours(months))
+    .catch((err) => console.warn("Purge de l'historique des tournées échouée:", err));
 
   window.addEventListener("hashchange", onHashChange);
   // Attend que la vue initiale soit montee (et ses ecouteurs, notamment le

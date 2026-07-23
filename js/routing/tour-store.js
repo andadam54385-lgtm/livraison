@@ -1,5 +1,5 @@
 import { getDb } from "../db/schema.js";
-import { get, put, getAllFromIndex } from "../lib/idb.js";
+import { get, put, del, getAllFromIndex } from "../lib/idb.js";
 import { uuid } from "../lib/id.js";
 import { getColis, saveColis } from "../scan/colis-store.js";
 
@@ -62,8 +62,7 @@ export async function markStopDelivered(tourId, ordre) {
 
 // Echec de livraison (absent, acces impossible...) : distinct de "livre",
 // avec une raison libre courte -- sert de base au chantier F (report des
-// non-livres au lendemain), pas encore implemente ici (le colis reste tel
-// quel, aucune reintegration automatique).
+// non-livres au lendemain, voir reporterColisEchec ci-dessous).
 export async function markStopFailed(tourId, ordre, raison) {
   const db = await getDb();
   const tour = await get(db, "tours", tourId);
@@ -161,4 +160,35 @@ export async function markColisDeliveredDirect(colisId) {
     }
   }
   return colis;
+}
+
+// Chantier F : reintegre un colis en echec dans la preparation de la
+// prochaine tournee. Remet juste colis.statut a "pret" -- adresse et
+// geocodage restent intacts (aucune ressaisie), le prochain "Optimiser la
+// tournee" l'inclura normalement. L'arret "echec" de l'ancienne tournee
+// (deja archivee ou non) n'est jamais modifie : raisonEchec/heureEchec
+// restent l'historique reel de cette tentative, seul le colis "vit" a nouveau.
+export async function reporterColisEchec(colisId) {
+  const colis = await getColis(colisId);
+  if (!colis) return null;
+  colis.statut = "pret";
+  await saveColis(colis);
+  return colis;
+}
+
+// Purge les tournees archivees plus vieilles que `moisRetention` mois.
+// L'historique recent est garde deliberement (bilan sectoriel V3 B2B a
+// venir, voir roadmap) -- ce n'est qu'un menage sur la retention, pas une
+// suppression immediate apres livraison. Appelee une fois au demarrage
+// (voir app.js).
+export async function purgeOldTours(moisRetention) {
+  const db = await getDb();
+  const archivees = await getAllFromIndex(db, "tours", "by_statut", "archivee");
+  const seuil = new Date();
+  seuil.setMonth(seuil.getMonth() - moisRetention);
+  for (const tour of archivees) {
+    if (new Date(tour.dateCreation) < seuil) {
+      await del(db, "tours", tour.id);
+    }
+  }
 }

@@ -10,6 +10,8 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+const SMS_TEMPLATE_LABELS = ["Arrivée imminente", "Colis déposé", "Absent au passage"];
+
 let containerRef = null;
 let showDebugOcr = false;
 
@@ -38,17 +40,18 @@ async function render() {
   const favoris = await listFavoris();
   const favorisHtml =
     favoris.length === 0
-      ? `<p class="muted">Aucune adresse favorite pour l'instant. Marque un colis livré comme favori depuis sa fiche (bouton ⭐).</p>`
+      ? `<p class="muted">Aucune adresse favorite pour l'instant. Tape une note sur la fiche d'un colis géocodé pour l'enregistrer ici automatiquement.</p>`
       : favoris
           .map(
             (f) => `
         <div class="card" data-favori-id="${escapeHtml(f.id)}" style="margin-top:8px;">
           <div class="card-title">${escapeHtml(f.rue) || "(adresse)"}</div>
           <p class="muted">${escapeHtml(f.cp)} ${escapeHtml(f.ville)}</p>
-          ${f.note ? `<p>${escapeHtml(f.note)}</p>` : `<p class="muted">Pas de note.</p>`}
-          <div class="button-row">
+          <div class="field" style="margin-top:8px;margin-bottom:0;">
+            <textarea data-favori-note class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(f.note)}</textarea>
+          </div>
+          <div class="button-row" style="margin-top:8px;">
             <button type="button" data-favori-addtour>➕ Ajouter à la tournée</button>
-            <button type="button" data-favori-edit>✏ Note</button>
             <button type="button" class="danger" data-favori-delete>🗑 Supprimer</button>
           </div>
         </div>`
@@ -91,16 +94,23 @@ async function render() {
       <input type="number" min="0" step="1" id="s-duree-arret" value="${settings.dureeArretMinutes}">
     </div>
     <p class="muted" style="margin-top:-6px;margin-bottom:12px;">Utilisée pour estimer l'heure d'arrivée à chaque arrêt (sonnette, remise en main propre...).</p>
-    <div class="field">
-      <label>Modèle de SMS</label>
-      <textarea id="s-sms-template" class="field-lg" rows="3" style="min-height:0;">${escapeHtml(settings.smsTemplate)}</textarea>
-      <button type="button" id="s-sms-template-reset" style="margin-top:6px;">Réinitialiser le modèle</button>
+    <div class="card">
+      <div class="card-title">Modèles de SMS</div>
+      <p class="muted" style="margin-top:-4px;">
+        Variables : <code>{nom}</code>, <code>{adresse}</code>, <code>{minutes_estimees}</code> (temps restant estimé,
+        disponible seulement sur l'arrêt courant d'une tournée active). Au moment d'envoyer, un choix entre les 3
+        s'affiche. Le SMS s'ouvre pré-rempli dans Messages — jamais envoyé automatiquement.
+      </p>
+      ${SMS_TEMPLATE_LABELS.map(
+        (label, i) => `
+        <div class="field">
+          <label>${label}</label>
+          <textarea id="s-sms-template-${i}" class="field-lg" rows="2" style="min-height:0;">${escapeHtml(settings.smsTemplates[i] || "")}</textarea>
+        </div>
+      `
+      ).join("")}
+      <button type="button" id="s-sms-template-reset">Réinitialiser les 3 modèles</button>
     </div>
-    <p class="muted" style="margin-top:-6px;margin-bottom:12px;">
-      Variables : <code>{nom}</code>, <code>{adresse}</code>, <code>{minutes_estimees}</code> (temps restant estimé,
-      disponible seulement sur l'arrêt courant d'une tournée active). Le SMS s'ouvre pré-rempli dans Messages —
-      jamais envoyé automatiquement.
-    </p>
     <div class="card">
       <div class="card-title">Stockage local</div>
       <p class="muted">${storageInfo}</p>
@@ -137,12 +147,17 @@ async function render() {
     await setSetting("autoNavAfterDeliver", containerRef.querySelector("#s-auto-nav").checked);
     await setSetting("avant12hPenaltyMinutes", parseFloat(containerRef.querySelector("#s-penalty").value));
     await setSetting("dureeArretMinutes", parseFloat(containerRef.querySelector("#s-duree-arret").value));
-    await setSetting("smsTemplate", containerRef.querySelector("#s-sms-template").value.trim());
+    await setSetting(
+      "smsTemplates",
+      SMS_TEMPLATE_LABELS.map((_, i) => containerRef.querySelector(`#s-sms-template-${i}`).value.trim())
+    );
     alert("Réglages enregistrés.");
   });
 
   containerRef.querySelector("#s-sms-template-reset").addEventListener("click", () => {
-    containerRef.querySelector("#s-sms-template").value = DEFAULTS.smsTemplate;
+    SMS_TEMPLATE_LABELS.forEach((_, i) => {
+      containerRef.querySelector(`#s-sms-template-${i}`).value = DEFAULTS.smsTemplates[i];
+    });
   });
 
   // Bascule immediate (pas besoin de cliquer "Enregistrer" apres) : un
@@ -182,14 +197,15 @@ async function render() {
     });
   });
 
-  containerRef.querySelectorAll("[data-favori-edit]").forEach((el) => {
-    el.addEventListener("click", async () => {
+  // Enregistrement silencieux en quittant le champ (pas de bouton dedie, pas
+  // de boite de dialogue) : uniquement si le texte a change.
+  containerRef.querySelectorAll("[data-favori-note]").forEach((el) => {
+    const initialNote = el.value;
+    el.addEventListener("blur", async () => {
+      if (el.value === initialNote) return;
       const id = el.closest("[data-favori-id]").dataset.favoriId;
-      const favori = favoris.find((f) => f.id === id);
-      const note = prompt("Note pour cette adresse favorite :", favori?.note || "");
-      if (note === null) return;
-      await updateFavori(id, { note });
-      render();
+      await updateFavori(id, { note: el.value });
+      showToast("⭐ Note enregistrée.");
     });
   });
 

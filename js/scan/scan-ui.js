@@ -29,6 +29,28 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Separe le numero de rue (champ dedie dans la saisie manuelle) du reste --
+// gere le numero en tete ("6 Rue de l'Eglise", forme la plus courante) ET en
+// fin ("Rue de l'Eglise 6", forme reelle rencontree sur une etiquette UPS
+// scannee, voir parse-ups-label.test.mjs cas 1). L'ancienne extraction dans
+// runGeocodeAndSave ne gerait que le numero en tete (`/^(\d+)/`) : un vrai
+// bug qui privait matchAddress de son bonus numero pour ce cas reel.
+function splitNumeroRue(rueComplete) {
+  if (!rueComplete) return { numero: "", rue: "" };
+  const s = rueComplete.trim();
+  let m = s.match(/^(\d+\s*(?:bis|ter|quater)?)\s+(.+)$/i);
+  if (m) return { numero: m[1].trim(), rue: m[2].trim() };
+  m = s.match(/^(.+?)\s+(\d+\s*(?:bis|ter|quater)?)$/i);
+  if (m) return { numero: m[2].trim(), rue: m[1].trim() };
+  return { numero: "", rue: s };
+}
+
+function joinNumeroRue(numero, rue) {
+  const n = (numero || "").trim();
+  const r = (rue || "").trim();
+  return n ? `${n} ${r}`.trim() : r;
+}
+
 export async function startScanFlow(container, { onSaved } = {}) {
   try {
     // Scan live du code-barres d'abord (plus fiable que l'OCR pour le
@@ -204,8 +226,30 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
         ? '<span class="badge badge-ok">confiance haute</span>'
         : '<span class="badge badge-pending">à vérifier</span>';
 
+  // Ordre retour terrain : adresse d'abord (rue -> ville -> code postal ->
+  // numero), le nom en dernier -- seule l'adresse conditionne le geocodage
+  // (voir colis-ready-rule), le nom peut se determiner sur place.
+  const { numero, rue: rueSansNumero } = splitNumeroRue(colis.adresseRaw.rue);
+
   container.innerHTML = `
     ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>⚠ Ce tracking a déjà été scanné.</strong></div>` : ""}
+    <div class="field">
+      <label>Rue</label>
+      <input type="text" id="f-rue" class="field-lg" value="${escapeAttr(rueSansNumero)}">
+    </div>
+    <div class="field">
+      <label>Ville</label>
+      <input type="text" id="f-ville" class="field-lg" value="${escapeAttr(colis.adresseRaw.ville)}" autocomplete="off">
+      <div id="f-ville-suggestions" class="candidate-list"></div>
+    </div>
+    <div class="field">
+      <label>Code postal</label>
+      <input type="text" id="f-cp" class="field-lg" inputmode="numeric" value="${escapeAttr(colis.adresseRaw.cp)}">
+    </div>
+    <div class="field">
+      <label>Numéro</label>
+      <input type="text" id="f-numero" class="field-lg" inputmode="numeric" value="${escapeAttr(numero)}">
+    </div>
     <div class="field">
       <label>Nom</label>
       <input type="text" id="f-nom" class="field-lg" value="${escapeAttr(colis.nom)}">
@@ -213,19 +257,6 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     <div class="field">
       <label>Téléphone ${telBadge}</label>
       <input type="tel" id="f-tel" class="field-lg" value="${escapeAttr(colis.tel)}">
-    </div>
-    <div class="field">
-      <label>Rue</label>
-      <input type="text" id="f-rue" class="field-lg" value="${escapeAttr(colis.adresseRaw.rue)}">
-    </div>
-    <div class="field">
-      <label>Code postal</label>
-      <input type="text" id="f-cp" class="field-lg" inputmode="numeric" value="${escapeAttr(colis.adresseRaw.cp)}">
-    </div>
-    <div class="field">
-      <label>Ville</label>
-      <input type="text" id="f-ville" class="field-lg" value="${escapeAttr(colis.adresseRaw.ville)}" autocomplete="off">
-      <div id="f-ville-suggestions" class="candidate-list"></div>
     </div>
     <div class="field">
       <label>Tracking</label>
@@ -252,7 +283,7 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     colis.nom = container.querySelector("#f-nom").value.trim();
     colis.tel = container.querySelector("#f-tel").value.trim();
     colis.adresseRaw = {
-      rue: container.querySelector("#f-rue").value.trim(),
+      rue: joinNumeroRue(container.querySelector("#f-numero").value.trim(), container.querySelector("#f-rue").value.trim()),
       cp: container.querySelector("#f-cp").value.trim(),
       ville: container.querySelector("#f-ville").value.trim(),
     };
@@ -275,11 +306,16 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
 }
 
 export async function runGeocodeAndSave(container, colis, { onSaved } = {}) {
-  const numeroMatch = (colis.adresseRaw.rue || "").match(/^(\d+)/);
-  const numero = numeroMatch ? numeroMatch[1] : null;
+  // Numero retire du texte compare a la BAN (entry.rn n'a jamais le numero,
+  // c'est un champ separe) : le laisser dans `rue` polluait legerement la
+  // similarite de rue (un "6 " ou " 6" en trop compte comme des caracteres
+  // qui ne correspondent a rien), en plus de ne jamais alimenter le bonus
+  // numero pour la forme "rue puis numero" (voir splitNumeroRue).
+  const { numero: extractedNumero, rue: rueSansNumero } = splitNumeroRue(colis.adresseRaw.rue);
+  const numero = extractedNumero || null;
 
   const { best, candidates } = await matchAddress({
-    rue: colis.adresseRaw.rue,
+    rue: rueSansNumero,
     cp: colis.adresseRaw.cp,
     commune: colis.adresseRaw.ville,
     numero,

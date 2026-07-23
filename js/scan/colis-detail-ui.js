@@ -3,7 +3,7 @@ import { addFavori, updateFavori, findNearbyFavori } from "../favoris/favoris-st
 import { getActiveTour, markStopDelivered, markStopFailed } from "../routing/tour-store.js";
 import { getSetting } from "../settings/settings-store.js";
 import { buildNavUrl } from "../tour/deep-links.js";
-import { renderSmsTemplate, smsUrl } from "../tour/sms-template.js";
+import { buildSmsOptions } from "../tour/sms-template.js";
 import { renderReviewForm } from "./scan-ui.js";
 import { showToast } from "../lib/toast.js";
 
@@ -17,6 +17,9 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Doit matcher settings-ui.js's SMS_TEMPLATE_LABELS (ordre des 3 modeles).
+const SMS_TEMPLATE_LABELS = ["Arrivée imminente", "Colis déposé", "Absent au passage"];
+
 function badgeForStatut(statut) {
   if (statut === "pret") return `<span class="badge badge-ok">Prêt</span>`;
   if (statut === "en_tournee") return `<span class="badge badge-ok">En tournée</span>`;
@@ -25,15 +28,16 @@ function badgeForStatut(statut) {
   return `<span class="badge badge-pending">À vérifier</span>`;
 }
 
-// Cree ou met a jour (si une adresse favorite existe deja a proximite) le
-// favori correspondant a un colis geocode, en demandant la note au vol.
-async function promptSaveFavori(colis) {
+// Note par adresse (chantier G, simplifiee suite retour terrain : plus de
+// boite de dialogue navigateur, un champ texte normal dans la fiche qui
+// s'enregistre en quittant le champ). Cree le favori silencieusement au 1er
+// caractere tape s'il n'existait pas encore -- "favori" ici n'est qu'une
+// adresse qui porte une note, pas une action separee a declencher a la main.
+async function saveNote(colis, note) {
   const existing = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
-  const note = prompt("Note pour cette adresse favorite (ex: code portail, consigne...) :", existing?.note || "");
-  if (note === null) return; // annule
   if (existing) {
     await updateFavori(existing.id, { note });
-  } else {
+  } else if (note.trim()) {
     await addFavori({
       rue: colis.adresseRaw.rue,
       cp: colis.adresseRaw.cp,
@@ -43,7 +47,6 @@ async function promptSaveFavori(colis) {
       note,
     });
   }
-  showToast("⭐ Adresse enregistrée en favori.");
 }
 
 export async function renderColisDetail(container, colisId, { onBack, onChange } = {}) {
@@ -64,12 +67,11 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
   const navUrl = colis.geocode?.lat != null ? buildNavUrl(await getSetting("navApp"), { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse }) : null;
   const canFavori = colis.geocode?.status === "ok";
   const titre = colis.nom || adresse;
+  const existingFavori = canFavori ? await findNearbyFavori(colis.geocode.lat, colis.geocode.lon) : null;
   // Pas d'estimation de temps ici (ce calcul vit dans tour-ui.js, couteux a
   // refaire pour une seule fiche) -- {minutes_estimees} reste vide, voir
-  // renderSmsTemplate. Version avec minutes reelles : hero card (arret courant).
-  const smsHref = colis.tel
-    ? smsUrl(colis.tel, renderSmsTemplate(await getSetting("smsTemplate"), { nom: colis.nom, adresse }))
-    : null;
+  // buildSmsOptions. Version avec minutes reelles : hero card (arret courant).
+  const smsOptions = colis.tel ? buildSmsOptions(await getSetting("smsTemplates"), colis.tel, { nom: colis.nom, adresse }) : [];
 
   container.innerHTML = `
     <div class="card-row" style="margin-bottom:10px;">
@@ -80,7 +82,19 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       <div class="card-title" style="font-size:1.2rem;">${escapeHtml(titre)}</div>
       <div class="muted">${escapeHtml(adresse)}</div>
       ${colis.tel ? `<a class="btn-link" style="margin-top:10px;" href="tel:${escapeHtml(colis.tel)}">📞 ${escapeHtml(colis.tel)}</a>` : ""}
-      ${smsHref ? `<a class="btn-link" style="margin-top:8px;" href="${smsHref}">💬 SMS</a>` : ""}
+      ${smsOptions.length > 0 ? `<button type="button" class="btn-link" style="margin-top:8px;" id="detail-sms-toggle">💬 SMS</button>` : ""}
+      ${
+        smsOptions.length > 0
+          ? `<div class="candidate-list" id="detail-sms-options" hidden style="margin-top:8px;">
+              ${smsOptions
+                .map(
+                  (o) =>
+                    `<a class="candidate-item btn-link" href="${o.href}">${escapeHtml(SMS_TEMPLATE_LABELS[o.index] || `Modèle ${o.index + 1}`)}<span class="muted">${escapeHtml(o.body)}</span></a>`
+                )
+                .join("")}
+            </div>`
+          : ""
+      }
       ${colis.tracking ? `<p class="muted" style="margin-top:8px;">Tracking : ${escapeHtml(colis.tracking)}</p>` : ""}
       ${colis.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:6px;">${colis.quantite} colis à cette adresse</span>` : ""}
     </div>
@@ -88,6 +102,16 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       <label for="detail-avant12h">⏰ Livrer avant 12h</label>
       <input type="checkbox" id="detail-avant12h" ${colis.avant12h ? "checked" : ""} style="width:26px;height:26px;">
     </div>
+    ${
+      canFavori
+        ? `
+      <div class="field">
+        <label>⭐ Note pour cette adresse</label>
+        <textarea id="detail-note" class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(existingFavori?.note || "")}</textarea>
+      </div>
+    `
+        : ""
+    }
     ${
       showDeliveryActions
         ? `
@@ -103,7 +127,6 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
     }
     <div class="button-row" style="margin-top:16px;">
       <button type="button" id="detail-correct">✏️ Corriger</button>
-      ${canFavori ? `<button type="button" id="detail-favori">⭐ Favori</button>` : ""}
     </div>
     <div class="button-row">
       <button type="button" class="danger" id="detail-delete">🗑 Supprimer</button>
@@ -117,6 +140,23 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
     await saveColis(colis);
     onChange?.();
   });
+
+  container.querySelector("#detail-sms-toggle")?.addEventListener("click", () => {
+    container.querySelector("#detail-sms-options")?.toggleAttribute("hidden");
+  });
+
+  // Enregistrement silencieux en quittant le champ (pas de bouton dedie, pas
+  // de boite de dialogue) : uniquement si le texte a reellement change, pour
+  // ne pas ecrire/toaster a chaque simple tap dans le champ puis en dehors.
+  const noteEl = container.querySelector("#detail-note");
+  if (noteEl) {
+    const initialNote = noteEl.value;
+    noteEl.addEventListener("blur", async () => {
+      if (noteEl.value === initialNote) return;
+      await saveNote(colis, noteEl.value);
+      showToast("⭐ Note enregistrée.");
+    });
+  }
 
   if (showDeliveryActions) {
     container.querySelector("#detail-deliver").addEventListener("click", async () => {
@@ -142,13 +182,6 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       },
     });
   });
-
-  const favoriBtn = container.querySelector("#detail-favori");
-  if (favoriBtn) {
-    favoriBtn.addEventListener("click", async () => {
-      await promptSaveFavori(colis);
-    });
-  }
 
   container.querySelector("#detail-delete").addEventListener("click", async () => {
     if (!confirm("Supprimer ce colis ? Cette action est irréversible.")) return;
