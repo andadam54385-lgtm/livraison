@@ -4,6 +4,7 @@ import { loadImageToCanvas, cropCanvas, preprocessForOcr, attachCropSelector } f
 import { recognizeCanvas } from "./ocr.js";
 import { parseUpsLabel } from "./parse-ups-label.js";
 import { saveColis, isDuplicateTracking } from "./colis-store.js";
+import { recordCorrectionIfNeeded } from "./ocr-corrections-store.js";
 import { matchAddress } from "../geocode/match-address.js";
 import { renderCandidatePicker, renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
 import { listDistinctCities } from "../geocode/ban-index.js";
@@ -299,6 +300,19 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     colis.avant12h = container.querySelector("#f-avant12h").checked;
     const quantiteInput = parseInt(container.querySelector("#f-quantite").value, 10);
     colis.quantite = Number.isFinite(quantiteInput) && quantiteInput > 0 ? quantiteInput : 1;
+
+    // Journal des corrections OCR (retour terrain : "beaucoup d'erreurs",
+    // le but est d'ameliorer le parser pour les scans suivants, pas juste ce
+    // colis) -- voir ocr-corrections-store.js, no-op silencieux si ce colis
+    // n'a pas de texte OCR ou si rien n'a change par rapport a ce que le
+    // parser produit.
+    await recordCorrectionIfNeeded(colis, {
+      nom: colis.nom,
+      tel: colis.tel,
+      rue: colis.adresseRaw.rue,
+      cp: colis.adresseRaw.cp,
+      ville: colis.adresseRaw.ville,
+    });
 
     container.innerHTML = `<div class="empty-state">Géocodage…</div>`;
     await runGeocodeAndSave(container, colis, { onSaved });

@@ -1,7 +1,7 @@
 import { openDatabase } from "../lib/idb.js";
 
 export const DB_NAME = "delivery-tour";
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 let dbPromise = null;
 
@@ -47,6 +47,14 @@ function upgrade(db) {
   if (!db.objectStoreNames.contains("favoris")) {
     const store = db.createObjectStore("favoris", { keyPath: "id" });
     store.createIndex("by_cp", "cp", { unique: false });
+  }
+  // Historique des corrections manuelles apres un scan OCR (texte brut +
+  // ce que le parser a produit + ce que l'utilisateur a valide a la place) :
+  // sert de journal exploitable pour ameliorer parse-ups-label.js avec de
+  // vrais cas reels, pas juste corriger un colis a la fois -- voir
+  // js/scan/ocr-corrections-store.js.
+  if (!db.objectStoreNames.contains("ocrCorrections")) {
+    db.createObjectStore("ocrCorrections", { keyPath: "id" });
   }
 }
 

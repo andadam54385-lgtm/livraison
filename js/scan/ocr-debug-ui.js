@@ -1,6 +1,7 @@
 import { listAllColis } from "./colis-store.js";
 import { parseUpsLabelDetailed } from "./parse-ups-label.js";
 import { renderReviewForm } from "./scan-ui.js";
+import { listOcrCorrections } from "./ocr-corrections-store.js";
 
 // Ecran de diagnostic (Reglages) : montre le texte OCR brut d'un colis
 // scanne et le detail de la classification ligne par ligne (nom / rue /
@@ -60,14 +61,36 @@ function renderClassificationDetail(colis) {
   `;
 }
 
-export async function renderOcrDebug(container) {
+// Journal exportable des corrections (voir ocr-corrections-store.js) : le but
+// n'est pas de corriger CE colis (deja fait par le bouton ci-dessus) mais
+// d'accumuler des cas reels a partager plus tard pour ameliorer
+// parse-ups-label.js -- copier/coller ce JSON dans une prochaine session.
+function renderCorrectionsSection(corrections) {
+  return `
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">📋 Corrections enregistrées (${corrections.length})</div>
+      <p class="muted">Chaque correction faite via "Corriger ce colis" est journalisée ici (texte OCR brut, ce que le parser a produit, ce que tu as validé) — copie ce texte (tap dedans pour tout sélectionner) et partage-le pour améliorer le parsing.</p>
+      ${
+        corrections.length > 0
+          ? `<textarea id="ocr-corrections-export" readonly class="field-lg" rows="6" style="min-height:0;font-family:monospace;font-size:0.72rem;">${escapeHtml(JSON.stringify(corrections, null, 2))}</textarea>`
+          : `<p class="muted">Aucune correction enregistrée pour l'instant.</p>`
+      }
+    </div>
+  `;
+}
+
+export async function renderOcrDebug(container, { preselectColisId } = {}) {
   const allColis = await listAllColis();
   const scans = allColis.filter((c) => c.source === "ocr").reverse(); // plus recent d'abord
+  const corrections = await listOcrCorrections();
+  const correctionsHtml = renderCorrectionsSection(corrections);
 
   if (scans.length === 0) {
-    container.innerHTML = `<p class="muted">Aucun colis scanné par OCR pour l'instant.</p>`;
+    container.innerHTML = `<p class="muted">Aucun colis scanné par OCR pour l'instant.</p>${correctionsHtml}`;
     return;
   }
+
+  const initialIndex = preselectColisId ? Math.max(0, scans.findIndex((c) => c.id === preselectColisId)) : 0;
 
   container.innerHTML = `
     <div class="field">
@@ -76,16 +99,19 @@ export async function renderOcrDebug(container) {
         ${scans
           .map(
             (c, i) =>
-              `<option value="${i}">${escapeHtml(c.nom || "(nom inconnu)")} — ${new Date(c.dateScan).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</option>`
+              `<option value="${i}" ${i === initialIndex ? "selected" : ""}>${escapeHtml(c.nom || "(nom inconnu)")} — ${new Date(c.dateScan).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</option>`
           )
           .join("")}
       </select>
     </div>
     <div id="ocr-debug-detail"></div>
+    ${correctionsHtml}
   `;
 
   const select = container.querySelector("#ocr-debug-select");
   const detail = container.querySelector("#ocr-debug-detail");
+  const exportEl = container.querySelector("#ocr-corrections-export");
+  exportEl?.addEventListener("click", () => exportEl.select());
 
   function showSelected() {
     const colis = scans[Number(select.value)];
@@ -98,7 +124,11 @@ export async function renderOcrDebug(container) {
     detail.querySelector("#ocr-debug-correct").addEventListener("click", () => {
       renderReviewForm(detail, colis, {
         isNew: false,
-        onSaved: () => showSelected(), // revient au diagnostic (donnees a jour, meme reference d'objet)
+        // Recharge tout l'ecran (pas juste le detail) : la correction vient
+        // de journaliser une nouvelle entree, le compteur/export doivent la
+        // refleter immediatement -- reste sur le meme colis plutot que de
+        // revenir au tout premier de la liste.
+        onSaved: () => renderOcrDebug(container, { preselectColisId: colis.id }),
       });
     });
   }

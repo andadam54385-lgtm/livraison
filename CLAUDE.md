@@ -51,7 +51,19 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   être **en début** de ligne pour classer en "rue" (`/^\d/`, pas `/\d/` — un bruit OCR
   isolé dans un nom ne doit plus faire disparaître ce nom). Écran de debug OCR dans
   Réglages (`js/scan/ocr-debug-ui.js`) pour diagnostiquer un futur échec de parsing avec
-  une vraie photo plutôt qu'à l'aveugle.
+  une vraie photo plutôt qu'à l'aveugle, avec un bouton "Corriger ce colis" (ouvre
+  `renderReviewForm` sur place).
+  **Journal des corrections OCR** (`js/scan/ocr-corrections-store.js`, store IndexedDB
+  `ocrCorrections`, ajouté 2026-07-23 suite retour terrain "beaucoup d'erreurs, faut que ça
+  serve pour les suivants") : chaque fois qu'une correction manuelle change un champ
+  (nom/tel/rue/cp/ville) par rapport à ce que `parse-ups-label.js` produit pour le texte OCR
+  brut de ce colis, un enregistrement `{ocrRawText, parsed, corrected, champsModifies,
+  dateCorrection}` est journalisé silencieusement. **Si l'utilisateur colle un export de ce
+  journal (bouton copier dans le bloc "📋 Corrections enregistrées" du debug OCR) dans une
+  future session : analyser les cas pour repérer des motifs récurrents (ex: un mot-clé mal
+  classé, un format de rue non géré) et corriger `classifyShipToBlock`/les regex de
+  `parse-ups-label.js` en conséquence — c'est exactement l'usage prévu de ce journal, pas
+  juste un historique passif.**
 - **`js/routing/insert-stop.js`** : insertion au moindre détour d'un colis scanné pendant
   une tournée en cours (pas de re-optimisation globale).
 - **Statuts colis** : `a_verifier` → `pret` → `en_tournee` → `livre` **ou** `echec`
