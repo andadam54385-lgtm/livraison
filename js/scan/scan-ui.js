@@ -233,6 +233,10 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
 
   container.innerHTML = `
     ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>⚠ Ce tracking a déjà été scanné.</strong></div>` : ""}
+    <div class="button-row">
+      <button type="button" id="f-rescan">Rescanner</button>
+      <button type="button" class="primary btn-lg" id="f-valider">Valider</button>
+    </div>
     <div class="field">
       <label>Numéro</label>
       <input type="text" id="f-numero" class="field-lg" inputmode="numeric" value="${escapeAttr(numero)}">
@@ -269,10 +273,6 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     <div class="toggle-row">
       <label for="f-avant12h">Livrer avant 12h</label>
       <input type="checkbox" id="f-avant12h" ${colis.avant12h ? "checked" : ""} style="width:26px;height:26px;">
-    </div>
-    <div class="button-row">
-      <button type="button" id="f-rescan">Rescanner</button>
-      <button type="button" class="primary btn-lg" id="f-valider">Valider</button>
     </div>
   `;
 
