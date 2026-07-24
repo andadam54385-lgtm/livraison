@@ -3,7 +3,33 @@
 PWA installée en standalone sur iPhone (Safari), pour un livreur solo. **Aucune API, aucun
 compte, aucun appel réseau après le premier chargement en wifi** — respecte ça dans tout
 changement. Composant "B" ; `../data-prep/` (Composant A, en lecture seule, ne jamais y
-exécuter quoi que ce soit) génère `graph.json`/`ban.json` consommés ici.
+exécuter quoi que ce soit) générait à l'origine `graph.json`/`ban.json` consommés ici.
+
+**`assets/ban.json.gz` est depuis le 2026-07-24 régénéré indépendamment de data-prep**
+(demande explicite : élargir la couverture à tout le 54 + 55, sans exécuter data-prep) —
+téléchargement direct des exports officiels BAN par département
+(`https://adresse.data.gouv.fr/data/ban/adresses/latest/csv/adresses-{54,55}.csv.gz`),
+transformés en JSON avec le `normalizeStreet`/`normalizeCity` de
+`js/geocode/normalize-address.js` (le même que celui utilisé au runtime, donc compatible
+avec `match-address.js` sans rien changer côté code). 366 396 entrées, bbox
+`{minLat:48.36, maxLat:49.62, minLon:4.91, maxLon:7.10}` — plus étroite à l'ouest que
+l'ancienne (qui débordait sur un bout de département voisin), plus large à l'est (54
+s'étend jusqu'à la frontière). Script de regénération non conservé dans le repo (lancé une
+fois depuis le scratchpad) — à refaire à l'identique si besoin : télécharger les deux CSV,
+parser avec les colonnes `numero;rep;nom_voie;code_postal;nom_commune;lon;lat`, construire
+`{n,rep,r,rn,cp,c,cn,lat,lon}` par ligne + `bbox` global, gzip, remplacer le fichier, puis
+`node tools/gen-data-manifest.js`.
+
+**`graph.json.gz` (graphe routier) N'A PAS été élargi** — reste sur l'ancienne zone plus
+petite. L'élargir correctement demanderait de reconstruire un graphe OSM "étendu par
+arête" avec gestion des restrictions de virage (voir `js/routing/graph-loader.js` pour le
+format exact attendu : `nodeCoords`/`edges`/`edgeAdjacency`/`nodeOutgoingEdges`/
+`nodeIncomingEdges`) — un chantier bien plus gros et risqué à reproduire correctement
+depuis zéro (turn restrictions, sens uniques, vitesses par type de route) que la simple
+transformation de CSV faite pour les adresses. Pas tenté sans une évaluation dédiée. Tant
+que ce n'est pas fait : la recherche/le géocodage d'adresse couvrent tout le 54+55, mais
+le calcul de tournée (tri, temps de trajet, carte) reste limité à l'ancienne zone plus
+restreinte pour les arrêts hors de celle-ci.
 
 ## Graphe de connaissance du code (Graphify)
 
