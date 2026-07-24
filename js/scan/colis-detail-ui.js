@@ -77,7 +77,7 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
     </div>
     <div class="card">
       <div class="card-title" style="font-size:1.2rem;">${escapeHtml(titre)}</div>
-      <div class="muted">${escapeHtml(adresse)}</div>
+      ${colis.nom ? `<div class="muted">${escapeHtml(adresse)}</div>` : ""}
       ${colis.tel ? `<a class="btn-link" style="margin-top:10px;" href="tel:${escapeHtml(colis.tel)}">📞 ${escapeHtml(colis.tel)}</a>` : ""}
       ${smsOptions.length > 0 ? `<button type="button" class="btn-link" style="margin-top:8px;" id="detail-sms-toggle">💬 SMS</button>` : ""}
       ${

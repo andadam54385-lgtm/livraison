@@ -148,14 +148,18 @@ async function render() {
 // ============================= Etat A : preparation =============================
 
 function renderPrepCard(c) {
-  const titre = c.nom || formatAdresseAffichage(c);
+  const adresse = formatAdresseAffichage(c);
+  const titre = c.nom || adresse;
+  // Bug reel : sans nom, le titre EST deja l'adresse -- la reafficher juste
+  // en dessous la dupliquait a l'identique. Ne montrer la ligne muted que
+  // quand elle apporte une info differente du titre (un vrai nom present).
   return `
     <div class="card" data-colis-id="${escapeAttr(c.id)}" data-open-detail>
       <div class="card-row">
         <div class="card-title">${escapeHtml(titre)}</div>
         ${badgeForStatut(c.statut)}
       </div>
-      <div class="muted">${escapeHtml(formatAdresseAffichage(c))}</div>
+      ${c.nom ? `<div class="muted">${escapeHtml(adresse)}</div>` : ""}
       <div class="stats-row">
         ${c.avant12h ? `<span class="badge badge-urgent">Avant 12h</span>` : ""}
         ${c.quantite > 1 ? `<span class="badge badge-pending">${c.quantite} colis</span>` : ""}

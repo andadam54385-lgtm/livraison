@@ -5,6 +5,7 @@ import { listFavoris, updateFavori, deleteFavori } from "../favoris/favoris-stor
 import { saveColis } from "../scan/colis-store.js";
 import { showToast } from "../lib/toast.js";
 import { renderOcrDebug } from "../scan/ocr-debug-ui.js";
+import { renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -75,19 +76,13 @@ async function render() {
           .join("");
 
   containerRef.innerHTML = `
-    <div class="field">
-      <label>Latitude dépôt</label>
-      <input type="number" step="0.0001" id="s-depot-lat" value="${settings.depotLat}">
+    <div class="card">
+      <div class="card-title">Dépôt</div>
+      <p class="muted" id="s-depot-current" style="margin-top:-4px;">${escapeHtml(settings.depotLabel)}</p>
+      <div id="s-depot-search-slot"></div>
+      <button type="button" id="s-depot-change">✏️ Changer l'adresse du dépôt</button>
     </div>
-    <div class="field">
-      <label>Longitude dépôt</label>
-      <input type="number" step="0.0001" id="s-depot-lon" value="${settings.depotLon}">
-    </div>
-    <div class="field">
-      <label>Nom du dépôt</label>
-      <input type="text" id="s-depot-label" value="${settings.depotLabel}">
-    </div>
-    <p class="muted" style="margin-top:-6px;margin-bottom:12px;">Le départ (dépôt ou position) et le retour au dépôt en fin de tournée se choisissent à chaque calcul, dans l'onglet Tournée.</p>
+    <p class="muted" style="margin:8px 0 12px;">Le départ (dépôt ou position) et le retour au dépôt en fin de tournée se choisissent à chaque calcul, dans l'onglet Tournée.</p>
     <div class="field">
       <label>Application de navigation</label>
       <select id="s-nav-app">
@@ -184,10 +179,29 @@ async function render() {
     smsSelect.options[smsActiveIndex].text = smsDraft[smsActiveIndex].label;
   });
 
+  // Adresse du depot : recherche BAN (comme partout ailleurs dans l'app),
+  // plus de latitude/longitude a taper a la main -- sauvegarde immediate au
+  // choix, pas besoin de cliquer "Enregistrer" apres.
+  containerRef.querySelector("#s-depot-change").addEventListener("click", () => {
+    const slot = containerRef.querySelector("#s-depot-search-slot");
+    renderManualAddressSearch(slot, {
+      initialQuery: settings.depotLabel,
+      onPick: async (entry) => {
+        const label = formatEntry(entry);
+        await setSetting("depotLat", entry.lat);
+        await setSetting("depotLon", entry.lon);
+        await setSetting("depotLabel", label);
+        containerRef.querySelector("#s-depot-current").textContent = label;
+        slot.innerHTML = "";
+        showToast("🏠 Dépôt mis à jour.");
+      },
+      onCancel: () => {
+        slot.innerHTML = "";
+      },
+    });
+  });
+
   containerRef.querySelector("#s-save").addEventListener("click", async () => {
-    await setSetting("depotLat", parseFloat(containerRef.querySelector("#s-depot-lat").value));
-    await setSetting("depotLon", parseFloat(containerRef.querySelector("#s-depot-lon").value));
-    await setSetting("depotLabel", containerRef.querySelector("#s-depot-label").value.trim());
     await setSetting("navApp", containerRef.querySelector("#s-nav-app").value);
     await setSetting("autoNavAfterDeliver", containerRef.querySelector("#s-auto-nav").checked);
     await setSetting("avant12hPenaltyMinutes", parseFloat(containerRef.querySelector("#s-penalty").value));

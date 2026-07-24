@@ -498,6 +498,11 @@ async function render() {
       style,
       center: [depot.lon, depot.lat],
       zoom: 12,
+      // Le bouton d'attribution "i" par defaut est en bas a droite -- pile
+      // sous la feuille des arrets (.stop-panel, position:absolute sur toute
+      // la largeur en bas de la carte), d'ou le chevauchement constate.
+      // Repositionne en haut a gauche, seul coin libre de tout controle.
+      attributionControl: false,
     });
   } catch (err) {
     console.error("[map] Échec d'initialisation de MapLibre (WebGL indisponible ?) :", err);
@@ -508,6 +513,7 @@ async function render() {
     return;
   }
   mapInstance = map;
+  map.addControl(new window.maplibregl.AttributionControl({ compact: true }), "top-left");
   map.addControl(new window.maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.addControl(
     new window.maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }),

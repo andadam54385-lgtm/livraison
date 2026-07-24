@@ -11,10 +11,10 @@
   color-scheme: light;
   --bg: #ffffff;
   --bg-elevated: #f3f4f7;
-  --bg-card: #ffffff;
-  --bg-card-hover: #f7f8fa;
-  --border: #e1e3e9;
-  --border-soft: #ececef;
+  --bg-card: #fbfbfd;
+  --bg-card-hover: #f2f3f6;
+  --border: #d7dae1;
+  --border-soft: #e6e8ec;
   --text: #0a0d12;
   --text-muted: #5b6472;
   --accent: #0a5fe0;
@@ -39,11 +39,11 @@
   :root {
     color-scheme: dark;
     --bg: #0a0d12;
-    --bg-elevated: #12161d;
-    --bg-card: #171c25;
-    --bg-card-hover: #1d2330;
-    --border: #232a35;
-    --border-soft: #1b212b;
+    --bg-elevated: #151a23;
+    --bg-card: #1c2430;
+    --bg-card-hover: #232c3a;
+    --border: #2f3947;
+    --border-soft: #212836;
     --text: #f5f7fa;
     --text-muted: #98a2b3;
     --accent: #3d84ff;
@@ -65,8 +65,8 @@
    preference systeme, dans les deux sens. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0a0d12; --bg-elevated: #12161d; --bg-card: #171c25; --bg-card-hover: #1d2330;
-  --border: #232a35; --border-soft: #1b212b; --text: #f5f7fa; --text-muted: #98a2b3;
+  --bg: #0a0d12; --bg-elevated: #151a23; --bg-card: #1c2430; --bg-card-hover: #232c3a;
+  --border: #2f3947; --border-soft: #212836; --text: #f5f7fa; --text-muted: #98a2b3;
   --accent: #3d84ff; --accent-strong: #63a0ff; --accent-ink: #06101f;
   --ok: #3ddc7d; --ok-bg: rgba(61,220,125,0.14); --ok-ink: #06170d;
   --warn: #ff6161; --warn-bg: rgba(255,97,97,0.16);
@@ -76,8 +76,8 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #ffffff; --bg-elevated: #f3f4f7; --bg-card: #ffffff; --bg-card-hover: #f7f8fa;
-  --border: #e1e3e9; --border-soft: #ececef; --text: #0a0d12; --text-muted: #5b6472;
+  --bg: #ffffff; --bg-elevated: #f3f4f7; --bg-card: #fbfbfd; --bg-card-hover: #f2f3f6;
+  --border: #d7dae1; --border-soft: #e6e8ec; --text: #0a0d12; --text-muted: #5b6472;
   --accent: #0a5fe0; --accent-strong: #2f7dff; --accent-ink: #ffffff;
   --ok: #147a3c; --ok-bg: #e6f6ec; --ok-ink: #ffffff;
   --warn: #b91c1c; --warn-bg: #fbe6e6;
@@ -476,6 +476,12 @@ a { color: var(--accent-strong); }
 }
 
 .candidate-list { display: flex; flex-direction: column; gap: 8px; }
+/* Bug reel : un display:flex sur .candidate-list ecrasait l'attribut hidden
+   (regle UA [hidden]{display:none}, priorite plus basse que le CSS auteur
+   des que la specificite est egale -- meme piege deja rencontre et corrige
+   pour .view, voir .view[hidden] plus haut). Les 3 modeles SMS s'affichaient
+   donc tout le temps au lieu d'apparaitre seulement au tap sur 💬/le logo. */
+.candidate-list[hidden] { display: none; }
 .candidate-item { text-align: left; }
 .candidate-item .muted { display: block; margin-top: 2px; }
 
