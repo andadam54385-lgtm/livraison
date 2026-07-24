@@ -1,4 +1,10 @@
-const MAX_DIMENSION = 1800; // limite raisonnable perf/memoire OCR mobile, garde le texte lisible
+// 1800 -> 2400 (retour terrain : qualite OCR insuffisante) -- si l'etiquette
+// n'occupe qu'une partie de la photo (pas de recadrage manuel fait), le texte
+// utile se retrouve en tres basse resolution une fois la photo entiere
+// redimensionnee a la limite. Plus de pixels = meilleure precision Tesseract,
+// au prix d'un OCR un peu plus lent (~1.8x de pixels en plus) -- tant que la
+// justesse prime sur la vitesse ici, l'echange est justifie.
+const MAX_DIMENSION = 2400;
 
 export async function loadImageToCanvas(file) {
   const bitmap = await createImageBitmap(file);
