@@ -56,13 +56,16 @@ export function loadZxingLib() {
 }
 
 // Retourne le texte du premier code-barres Code128 valide trouve dans
-// l'image, ou null si aucun. tryHarder desactive : appele plusieurs fois par
-// seconde pendant le viewfinder live, la vitesse prime sur l'exhaustivite
-// (une image ratee est retentee a la frame suivante de toute facon).
+// l'image, ou null si aucun. tryHarder active : retour terrain ("la lecture
+// ne donne rien" avec une vraie etiquette UPS, code-barres 1D confirme
+// visuellement) -- desactive au depart pour la vitesse (avant meme d'avoir
+// un vrai test), mais la reussite du decodage prime largement sur la
+// cadence ici (un echec silencieux repete est bien pire qu'une frame de
+// retard). tryRotate/tryInvert restent a leurs defauts (true).
 export async function decodeCode128(imageData) {
   const results = await window.ZXingWASM.readBarcodes(imageData, {
     formats: ["Code128"],
-    tryHarder: false,
+    tryHarder: true,
   });
   const hit = results.find((r) => r.isValid && r.text);
   return hit ? hit.text : null;

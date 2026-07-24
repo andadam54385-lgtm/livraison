@@ -96,7 +96,15 @@ export function startBarcodeViewfinder(container) {
     }
 
     loadZxingLib()
-      .then(() => navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }))
+      // Sans contrainte de resolution, certains navigateurs livrent un flux
+      // webcam par defaut (~640x480) bien trop bas pour lire un code-barres
+      // qui ne remplit qu'une partie du cadre a distance de bras -- "ideal"
+      // demande le mieux disponible sans planter si la camera ne le permet pas.
+      .then(() =>
+        navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+        })
+      )
       .then((s) => {
         if (stopped) {
           s.getTracks().forEach((t) => t.stop()); // annule pendant le chargement
