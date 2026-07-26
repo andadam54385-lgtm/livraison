@@ -1,4 +1,5 @@
 import { loadZxingLib, decodeCode128 } from "./barcode.js";
+import { icon } from "../ui/icons.js";
 
 const SCAN_INTERVAL_MS = 220; // ~4-5 tentatives/s : reactif sans saturer le CPU mobile
 const MAX_CONSECUTIVE_ERRORS = 5; // au-dela, ce n'est plus un raté isole -- afficher l'erreur plutot que boucler en silence
@@ -31,7 +32,7 @@ export function startBarcodeViewfinder(container) {
       <p class="muted" style="text-align:center;">Vise le code-barres de l'étiquette.</p>
       <div class="button-row">
         <button type="button" id="viewfinder-cancel">Annuler</button>
-        <button type="button" class="primary" id="viewfinder-skip">📷 Prendre une photo à la place</button>
+        <button type="button" class="primary" id="viewfinder-skip">${icon("camera")}Prendre une photo à la place</button>
       </div>
     `;
 
@@ -56,12 +57,12 @@ export function startBarcodeViewfinder(container) {
       cleanup();
       container.innerHTML = `
         <div class="card" style="border-color:var(--danger);">
-          <div class="card-title">⚠ Scan code-barres indisponible</div>
+          <div class="card-title">${icon("alert-triangle")}Scan code-barres indisponible</div>
           <p class="muted">${escapeHtml(message)}</p>
         </div>
         <div class="button-row">
           <button type="button" id="viewfinder-cancel-err">Annuler</button>
-          <button type="button" class="primary" id="viewfinder-skip-err">📷 Prendre une photo à la place</button>
+          <button type="button" class="primary" id="viewfinder-skip-err">${icon("camera")}Prendre une photo à la place</button>
         </div>
       `;
       container.querySelector("#viewfinder-cancel-err").addEventListener("click", () => reject(new Error("Scan annulé.")));

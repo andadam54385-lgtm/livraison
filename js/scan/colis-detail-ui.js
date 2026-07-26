@@ -6,6 +6,7 @@ import { buildNavUrl } from "../tour/deep-links.js";
 import { buildSmsOptions } from "../tour/sms-template.js";
 import { renderReviewForm } from "./scan-ui.js";
 import { showToast } from "../lib/toast.js";
+import { icon } from "../ui/icons.js";
 
 // Fiche colis consolidee : point d'entree UNIQUE pour voir le detail d'un
 // colis et agir dessus (Corriger/Favori/Supprimer), qu'on y arrive depuis la
@@ -72,14 +73,14 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
 
   container.innerHTML = `
     <div class="card-row" style="margin-bottom:10px;">
-      <button type="button" id="detail-back">← Retour</button>
+      <button type="button" id="detail-back">${icon("arrow-left")}Retour</button>
       ${badgeForStatut(colis.statut)}
     </div>
     <div class="card">
       <div class="card-title" style="font-size:1.2rem;">${escapeHtml(titre)}</div>
       ${colis.nom ? `<div class="muted">${escapeHtml(adresse)}</div>` : ""}
-      ${colis.tel ? `<a class="btn-link" style="margin-top:10px;" href="tel:${escapeHtml(colis.tel)}">📞 ${escapeHtml(colis.tel)}</a>` : ""}
-      ${smsOptions.length > 0 ? `<button type="button" class="btn-link" style="margin-top:8px;" id="detail-sms-toggle">💬 SMS</button>` : ""}
+      ${colis.tel ? `<a class="btn-link" style="margin-top:10px;" href="tel:${escapeHtml(colis.tel)}">${icon("phone")}${escapeHtml(colis.tel)}</a>` : ""}
+      ${smsOptions.length > 0 ? `<button type="button" class="btn-link" style="margin-top:8px;" id="detail-sms-toggle">${icon("message-circle")}SMS</button>` : ""}
       ${
         smsOptions.length > 0
           ? `<div class="candidate-list" id="detail-sms-options" hidden style="margin-top:8px;">
@@ -96,14 +97,14 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       ${colis.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:6px;">${colis.quantite} colis à cette adresse</span>` : ""}
     </div>
     <div class="toggle-row">
-      <label for="detail-avant12h">⏰ Livrer avant 12h</label>
+      <label for="detail-avant12h">${icon("clock")}Livrer avant 12h</label>
       <input type="checkbox" id="detail-avant12h" ${colis.avant12h ? "checked" : ""} style="width:26px;height:26px;">
     </div>
     ${
       canFavori
         ? `
       <div class="field">
-        <label>⭐ Note pour cette adresse</label>
+        <label>${icon("star")}Note pour cette adresse</label>
         <textarea id="detail-note" class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(existingFavori?.note || "")}</textarea>
       </div>
     `
@@ -113,20 +114,20 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       showDeliveryActions
         ? `
       <div class="button-row">
-        ${navUrl ? `<a class="btn-link primary btn-lg" href="${navUrl}" target="_blank" rel="noopener">🧭 Naviguer</a>` : ""}
+        ${navUrl ? `<a class="btn-link primary btn-lg" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
       </div>
       <div class="button-row">
-        <button type="button" class="ok btn-lg" id="detail-deliver">✓ Livré</button>
+        <button type="button" class="ok btn-lg" id="detail-deliver">${icon("check")}Livré</button>
       </div>
       <button type="button" class="hero-fail-btn" id="detail-fail">Marquer en échec</button>
     `
         : ""
     }
     <div class="button-row" style="margin-top:16px;">
-      <button type="button" id="detail-correct">✏️ Corriger</button>
+      <button type="button" id="detail-correct">${icon("pencil")}Corriger</button>
     </div>
     <div class="button-row">
-      <button type="button" class="danger" id="detail-delete">🗑 Supprimer</button>
+      <button type="button" class="danger" id="detail-delete">${icon("trash-2")}Supprimer</button>
     </div>
   `;
 
@@ -151,7 +152,7 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
     noteEl.addEventListener("blur", async () => {
       if (noteEl.value === initialNote) return;
       await saveNote(colis, noteEl.value);
-      showToast("⭐ Note enregistrée.");
+      showToast("Note enregistrée.");
     });
   }
 

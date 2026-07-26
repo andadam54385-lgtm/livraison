@@ -2,6 +2,7 @@ import { listAllColis } from "./colis-store.js";
 import { parseUpsLabelDetailed } from "./parse-ups-label.js";
 import { renderReviewForm } from "./scan-ui.js";
 import { listOcrCorrections } from "./ocr-corrections-store.js";
+import { icon } from "../ui/icons.js";
 
 // Ecran de diagnostic (Reglages) : montre le texte OCR brut d'un colis
 // scanne et le detail de la classification ligne par ligne (nom / rue /
@@ -68,7 +69,7 @@ function renderClassificationDetail(colis) {
 function renderCorrectionsSection(corrections) {
   return `
     <div class="card" style="margin-top:16px;">
-      <div class="card-title">📋 Corrections enregistrées (${corrections.length})</div>
+      <div class="card-title">${icon("clipboard-list")}Corrections enregistrées (${corrections.length})</div>
       <p class="muted">Chaque correction faite via "Corriger ce colis" est journalisée ici (texte OCR brut, ce que le parser a produit, ce que tu as validé) — copie ce texte (tap dedans pour tout sélectionner) et partage-le pour améliorer le parsing.</p>
       ${
         corrections.length > 0
@@ -118,7 +119,7 @@ export async function renderOcrDebug(container, { preselectColisId } = {}) {
     detail.innerHTML = `
       ${renderClassificationDetail(colis)}
       <div class="button-row" style="margin-top:10px;">
-        <button type="button" id="ocr-debug-correct">✏️ Corriger ce colis</button>
+        <button type="button" id="ocr-debug-correct">${icon("pencil")}Corriger ce colis</button>
       </div>
     `;
     detail.querySelector("#ocr-debug-correct").addEventListener("click", () => {

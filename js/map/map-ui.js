@@ -8,6 +8,7 @@ import { getDb } from "../db/schema.js";
 import { loadCsrFromDb } from "../routing/graph-loader.js";
 import { buildSpatialGrid, findNearestNode } from "../routing/spatial-index.js";
 import { dijkstraSingleTargetPath, createDijkstraScratch } from "../routing/dijkstra.js";
+import { icon, iconToImage } from "../ui/icons.js";
 
 // Chantier C : vrai fond de carte vectoriel (MapLibre GL JS + PMTiles +
 // basemap Protomaps), 100% local -- remplace le plan SVG maison (rues
@@ -152,12 +153,12 @@ function formatColisDetail(c, { navApp, ordre } = {}) {
     <div class="muted">${adresse}</div>
     ${c.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:4px;">${c.quantite} colis</span>` : ""}
     <div class="button-row">
-      ${c.tel ? `<a class="btn-link" href="tel:${c.tel}">📞 Appeler</a>` : ""}
-      ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">🧭 Naviguer</a>` : ""}
+      ${c.tel ? `<a class="btn-link" href="tel:${c.tel}">${icon("phone")}Appeler</a>` : ""}
+      ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
     </div>
     ${
       done
-        ? `<button type="button" disabled style="margin-top:10px;width:100%;">${c.statut === "livre" ? "Livré ✓" : "Échec"}</button>`
+        ? `<button type="button" disabled style="margin-top:10px;width:100%;">${c.statut === "livre" ? `Livré ${icon("check", { spaced: false })}` : "Échec"}</button>`
         : `<button type="button" class="ok" data-map-deliver="${escapeAttr(c.id)}" style="margin-top:10px;width:100%;">Marquer livré</button>`
     }
   `;
@@ -166,7 +167,7 @@ function formatColisDetail(c, { navApp, ordre } = {}) {
 function formatFavoriDetail(f) {
   const adresse = `${f.rue || ""}, ${f.cp || ""} ${f.ville || ""}`;
   return `
-    <div class="card-title">⭐ ${f.rue || "Favori"}</div>
+    <div class="card-title">${icon("star")}${f.rue || "Favori"}</div>
     <div class="muted">${adresse}</div>
     ${f.note ? `<p style="margin-top:8px;">${f.note}</p>` : `<p class="muted" style="margin-top:8px;">Pas de note.</p>`}
   `;
@@ -190,8 +191,8 @@ function renderStopList(ordered, navApp) {
             <div class="muted">${escapeHtml(adresse)}</div>
           </div>
           <div class="stop-row-actions">
-            ${navUrl ? `<a href="${navUrl}" target="_blank" rel="noopener" aria-label="Naviguer" class="stop-row-btn">🧭</a>` : ""}
-            ${delivered ? `<span class="stop-row-btn" aria-label="Livré">✓</span>` : `<button type="button" class="stop-row-btn" data-stop-deliver="${escapeAttr(colis.id)}" aria-label="Marquer livré">✓</button>`}
+            ${navUrl ? `<a href="${navUrl}" target="_blank" rel="noopener" aria-label="Naviguer" class="stop-row-btn">${icon("navigation", { spaced: false })}</a>` : ""}
+            ${delivered ? `<span class="stop-row-btn" aria-label="Livré">${icon("check", { spaced: false })}</span>` : `<button type="button" class="stop-row-btn" data-stop-deliver="${escapeAttr(colis.id)}" aria-label="Marquer livré">${icon("check", { spaced: false })}</button>`}
           </div>
         </div>
       `;
@@ -296,6 +297,27 @@ function buildWaypointsGeoJson(depot, returnPoint) {
   return { type: "FeatureCollection", features };
 }
 
+// Charge les pictogrammes depot/arrivee/favori en bitmap (une fois par
+// instance Map -- recreee a chaque render()) : les symbol layers MapLibre
+// dessinent leur text-field avec la police vendorisee (Noto Sans, plage
+// Latin-1 uniquement, voir CLAUDE.md chantier C), qui ne contient AUCUN
+// glyphe emoji. Un text-field "🏠"/"🏁"/"⭐" ne s'affichait donc pas du tout
+// (case vide silencieuse) -- une image bitmap contourne le probleme.
+async function ensureMapIcons(map) {
+  const specs = [
+    ["icon-depot", "home", "#0f172a"],
+    ["icon-arrivee", "flag", "#0f172a"],
+    ["icon-favori", "star", "#eab308"],
+  ];
+  await Promise.all(
+    specs.map(async ([name, iconName, color]) => {
+      if (map.hasImage(name)) return;
+      const imageData = await iconToImage(iconName, { size: 40, color });
+      map.addImage(name, imageData);
+    })
+  );
+}
+
 function addMapLayers(map, data) {
   const { routeGeoJson, stopsGeoJson, favorisGeoJson, waypointsGeoJson } = data;
 
@@ -329,7 +351,11 @@ function addMapLayers(map, data) {
     id: "waypoints-label",
     type: "symbol",
     source: "waypoints",
-    layout: { "text-field": ["match", ["get", "kind"], "depot", "🏠", "🏁"], "text-size": 13, "text-allow-overlap": true },
+    layout: {
+      "icon-image": ["match", ["get", "kind"], "depot", "icon-depot", "icon-arrivee"],
+      "icon-size": 0.55,
+      "icon-allow-overlap": true,
+    },
   });
 
   map.addSource("favoris", { type: "geojson", data: favorisGeoJson });
@@ -337,7 +363,7 @@ function addMapLayers(map, data) {
     id: "favoris-label",
     type: "symbol",
     source: "favoris",
-    layout: { "text-field": "⭐", "text-size": 16, "text-allow-overlap": true },
+    layout: { "icon-image": "icon-favori", "icon-size": 0.5, "icon-allow-overlap": true },
   });
 
   map.addSource("stops", { type: "geojson", data: stopsGeoJson });
@@ -372,6 +398,72 @@ function fitToPoints(map, points) {
   const bounds = new window.maplibregl.LngLatBounds();
   for (const p of points) bounds.extend([p.lon, p.lat]);
   map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 0 });
+}
+
+const SHEET_STATES = { collapsed: 64, half: 0.42, full: 0.82 };
+
+// Feuille glissante a 3 positions (repliee / mi-hauteur / pleine hauteur),
+// glissable au doigt (pointer events, une seule poignee) ET cliquable (cycle
+// aux 3 positions sans avoir a glisser -- accessibilite/precision). La
+// hauteur est pilotee en pixels (pas en max-height/CSS class comme l'ancienne
+// version a 2 etats) pour permettre un suivi fluide du doigt pendant le drag.
+function setupStopPanelSheet(panel, handle) {
+  const heightFor = (name) => (name === "collapsed" ? SHEET_STATES.collapsed : Math.round(window.innerHeight * SHEET_STATES[name]));
+  let state = "collapsed";
+  let dragged = false;
+  let dragStartY = null;
+  let dragStartHeight = null;
+
+  function applyState(name, animate = true) {
+    state = name;
+    panel.style.transition = animate ? "height 0.22s var(--ease)" : "none";
+    panel.style.height = `${heightFor(name)}px`;
+    panel.dataset.state = name;
+  }
+  applyState("collapsed", false);
+
+  function nearestState(height) {
+    let best = "collapsed";
+    let bestDist = Infinity;
+    for (const name of Object.keys(SHEET_STATES)) {
+      const d = Math.abs(height - heightFor(name));
+      if (d < bestDist) {
+        bestDist = d;
+        best = name;
+      }
+    }
+    return best;
+  }
+
+  handle.addEventListener("click", () => {
+    if (dragged) {
+      dragged = false; // le pointerup qui suit un drag ne doit pas aussi cycler l'etat
+      return;
+    }
+    const order = ["collapsed", "half", "full"];
+    applyState(order[(order.indexOf(state) + 1) % order.length]);
+  });
+
+  handle.addEventListener("pointerdown", (e) => {
+    dragStartY = e.clientY;
+    dragStartHeight = panel.getBoundingClientRect().height;
+    panel.style.transition = "none";
+    handle.setPointerCapture(e.pointerId);
+  });
+  handle.addEventListener("pointermove", (e) => {
+    if (dragStartY === null) return;
+    const dy = dragStartY - e.clientY;
+    if (Math.abs(dy) > 4) dragged = true;
+    const h = Math.min(heightFor("full"), Math.max(heightFor("collapsed"), dragStartHeight + dy));
+    panel.style.height = `${h}px`;
+  });
+  function endDrag() {
+    if (dragStartY === null) return;
+    dragStartY = null;
+    applyState(nearestState(panel.getBoundingClientRect().height));
+  }
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
 }
 
 async function render() {
@@ -422,26 +514,33 @@ async function render() {
 
   const stopListHtml = renderStopList(ordered, settings.navApp);
 
+  // Carte plein ecran (plus de header/legende toujours visibles) : tout ce
+  // qui n'est pas la carte elle-meme (legende, avertissements, acces aux
+  // Reglages) est regroupe dans un seul menu deroulant en haut a gauche,
+  // ferme par defaut.
   containerRef.innerHTML = `
-    <div style="padding:10px 16px;">
-      <div class="stats-row" style="flex-wrap:wrap;">
-        <span class="stat-pill">🏠 Départ</span>
-        ${returnPoint ? `<span class="stat-pill">🏁 Retour dépôt</span>` : ""}
-        <span class="stat-pill" style="border-color:#94a3b8;color:#94a3b8;">● À vérifier</span>
-        <span class="stat-pill" style="border-color:${DEFAULT_STOP_COLOR};color:${DEFAULT_STOP_COLOR};">● Prêt / en tournée</span>
-        <span class="stat-pill" style="border-color:#22c55e;color:#22c55e;">● Livré</span>
-        <span class="stat-pill" style="border-color:#dc2626;color:#dc2626;">● Échec</span>
-        <span class="stat-pill">⭐ Favori</span>
-        ${!hasMap ? `<span class="stat-pill stat-pill-warn">⚠ Fond de carte non téléchargé</span>` : ""}
-        ${!csr ? `<span class="stat-pill stat-pill-warn">⚠ Trajet en ligne droite (graphe routier non chargé)</span>` : ""}
-      </div>
-    </div>
     <div class="map-canvas-wrap">
       ${hasMap ? `<div id="maplibre-map"></div>` : `<div class="empty-state">Fond de carte indisponible : synchronise l'appli en Wifi une fois (voir Réglages) pour le télécharger.</div>`}
+      <button type="button" class="map-menu-btn" id="map-menu-toggle" aria-label="Menu">${icon("menu", { spaced: false, size: 22 })}</button>
+      <div class="map-menu-panel" id="map-menu-panel" hidden>
+        <a class="btn-link" href="#settings">${icon("settings")}Réglages</a>
+        <div class="map-legend">
+          <span class="legend-item">${icon("home", { spaced: false })}Départ</span>
+          ${returnPoint ? `<span class="legend-item">${icon("flag", { spaced: false })}Retour dépôt</span>` : ""}
+          <span class="legend-item"><span class="legend-dot" style="background:#94a3b8;"></span>À vérifier</span>
+          <span class="legend-item"><span class="legend-dot" style="background:${DEFAULT_STOP_COLOR};"></span>Prêt / en tournée</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#22c55e;"></span>Livré</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Échec</span>
+          <span class="legend-item">${icon("star", { spaced: false })}Favori</span>
+        </div>
+        ${!hasMap ? `<p class="map-menu-warn">${icon("alert-triangle", { spaced: false })}Fond de carte non téléchargé</p>` : ""}
+        ${!csr ? `<p class="map-menu-warn">${icon("alert-triangle", { spaced: false })}Trajet en ligne droite (graphe routier non chargé)</p>` : ""}
+      </div>
+      <div id="map-detail"></div>
       ${
         stopListHtml
           ? `
-        <div class="stop-panel" id="stop-panel">
+        <div class="stop-panel" id="stop-panel" data-state="collapsed">
           <button type="button" class="stop-panel-handle" id="stop-panel-toggle">
             <span class="stop-panel-bar"></span>
             <span>${ordered.length} arrêt${ordered.length > 1 ? "s" : ""} — voir la liste</span>
@@ -452,14 +551,15 @@ async function render() {
           : ""
       }
     </div>
-    <div id="map-detail"></div>
   `;
+
+  const menuToggle = containerRef.querySelector("#map-menu-toggle");
+  const menuPanel = containerRef.querySelector("#map-menu-panel");
+  menuToggle.addEventListener("click", () => menuPanel.toggleAttribute("hidden"));
 
   const stopPanel = containerRef.querySelector("#stop-panel");
   if (stopPanel) {
-    containerRef.querySelector("#stop-panel-toggle").addEventListener("click", () => {
-      stopPanel.classList.toggle("expanded");
-    });
+    setupStopPanelSheet(stopPanel, containerRef.querySelector("#stop-panel-toggle"));
   }
 
   const navApp = settings.navApp;
@@ -525,7 +625,8 @@ async function render() {
   mq.addEventListener("change", onThemeChange);
   themeMediaCleanup = () => mq.removeEventListener("change", onThemeChange);
 
-  map.on("load", () => {
+  map.on("load", async () => {
+    await ensureMapIcons(map);
     const routeGeoJson = buildRouteGeoJson(depot, ordered, returnPoint, csr);
     const stopsGeoJson = buildStopsGeoJson(geocoded, ordreParColisId);
     const favorisGeoJson = buildFavorisGeoJson(favGeoco);

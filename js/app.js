@@ -3,6 +3,7 @@ import { runImportIfNeeded } from "./import/import-data.js";
 import { renderImportProgress } from "./import/import-ui.js";
 import { purgeOldTours } from "./routing/tour-store.js";
 import { getSetting } from "./settings/settings-store.js";
+import { icon } from "./ui/icons.js";
 
 // Tournee est l'ecran d'accueil et heberge le scan (bouton flottant camera,
 // voir tour-ui.js) : machine a 2 etats (preparation/execution), plus de tab
@@ -62,6 +63,19 @@ async function boot() {
 
   const importView = document.getElementById("import-view");
   importView.hidden = false;
+
+  // Le HTML statique ne peut pas appeler icon() (module JS) : les quelques
+  // icones vivant hors des vues gerees par mount() sont injectees ici, une
+  // fois, au demarrage.
+  document.getElementById("scan-fab").innerHTML = icon("camera", { spaced: false, size: 26 });
+  document.getElementById("settings-back").innerHTML = icon("arrow-left", { spaced: false });
+  document.getElementById("settings-back").addEventListener("click", () => {
+    // Reglages n'est plus un onglet de la nav du bas (accessible depuis le
+    // menu de l'ecran Carte) : history.back() ramene a l'ecran d'ou on vient
+    // plutot que vers une destination fixe supposee.
+    if (history.length > 1) history.back();
+    else location.hash = "#tour";
+  });
 
   await openDb();
   await runImportIfNeeded(renderImportProgress);

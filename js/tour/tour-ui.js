@@ -9,6 +9,7 @@ import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
 import { renderColisDetail } from "../scan/colis-detail-ui.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
 import { showToast } from "../lib/toast.js";
+import { icon } from "../ui/icons.js";
 
 // Ecran "Tournee" fusionne (chantier fusion Tournee/Scan) : machine a 2
 // etats dans le MEME onglet/conteneur.
@@ -85,7 +86,7 @@ async function handleColisSaved(colis) {
     const result = await insertStopCheapest(tour, colis);
     if (result) {
       await saveColis({ ...colis, statut: "en_tournee" });
-      showToast(`✓ "${colis.nom || formatAdresseAffichage(colis)}" ajouté en position ${result.position}.`);
+      showToast(`"${colis.nom || formatAdresseAffichage(colis)}" ajouté en position ${result.position}.`);
     } else {
       showToast("Colis ajouté (sera inclus au prochain recalcul de tournée).");
     }
@@ -180,7 +181,7 @@ function renderEchecCard(c) {
         <span class="badge badge-warn">Échec</span>
       </div>
       <div class="muted" data-colis-id="${escapeAttr(c.id)}" data-open-detail>${escapeHtml(formatAdresseAffichage(c))}</div>
-      <button type="button" class="ok" style="margin-top:8px;width:100%;" data-report-colis="${escapeAttr(c.id)}">🔄 Reporter à cette tournée</button>
+      <button type="button" class="ok" style="margin-top:8px;width:100%;" data-report-colis="${escapeAttr(c.id)}">${icon("rotate-ccw")}Reporter à cette tournée</button>
     </div>
   `;
 }
@@ -220,7 +221,7 @@ async function renderEtatA() {
 
   containerRef.innerHTML = `
     <div class="button-row" style="margin-bottom:14px;">
-      <button type="button" id="etatA-manual">✏️ Saisie manuelle</button>
+      <button type="button" id="etatA-manual">${icon("pencil")}Saisie manuelle</button>
     </div>
     ${
       echecColis.length > 0
@@ -234,14 +235,14 @@ async function renderEtatA() {
     <div class="card" style="margin-top:18px;">
       <div class="card-title">Départ</div>
       <div class="button-row" style="margin-top:8px;">
-        <button type="button" id="etatA-start-depot" class="${selectedStart === "depot" ? "primary" : ""}">🏠 Dépôt</button>
-        <button type="button" id="etatA-start-gps" class="${selectedStart === "gps" ? "primary" : ""}">📍 Ma position</button>
+        <button type="button" id="etatA-start-depot" class="${selectedStart === "depot" ? "primary" : ""}">${icon("home")}Dépôt</button>
+        <button type="button" id="etatA-start-gps" class="${selectedStart === "gps" ? "primary" : ""}">${icon("map-pin")}Ma position</button>
       </div>
       <div class="toggle-row">
         <label for="etatA-depot-return">Revenir au dépôt en fin de tournée</label>
         <input type="checkbox" id="etatA-depot-return" style="width:auto;min-height:0;" ${settings.depotReturn ? "checked" : ""}>
       </div>
-      <button type="button" class="primary btn-lg" id="etatA-optimize" style="width:100%;margin-top:6px;">🚀 Optimiser la tournée</button>
+      <button type="button" class="primary btn-lg" id="etatA-optimize" style="width:100%;margin-top:6px;">${icon("zap")}Optimiser la tournée</button>
       <p id="routing-status" class="muted" style="margin-top:10px;"></p>
       <div class="progress-bar"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
     </div>
@@ -252,7 +253,7 @@ async function renderEtatA() {
   containerRef.querySelectorAll("[data-report-colis]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       await reporterColisEchec(btn.dataset.reportColis);
-      showToast("🔄 Colis remis dans la préparation de tournée.");
+      showToast("Colis remis dans la préparation de tournée.");
       render();
     });
   });
@@ -376,7 +377,7 @@ async function afterHeroDelivered() {
   if (!lastTour) return; // plus de tournee active (rare, ex: supprimee entre-temps)
   const heroEntry = lastStopsWithColis.find(({ stop, colis }) => isPending(stop) && colis);
   if (!heroEntry) {
-    showToast("🎉 Tous les arrêts sont traités !");
+    showToast("Tous les arrêts sont traités !");
     return;
   }
   const label = heroEntry.colis.nom || formatAdresseAffichage(heroEntry.colis);
@@ -389,9 +390,9 @@ async function afterHeroDelivered() {
       adresse: formatAdresseAffichage(heroEntry.colis),
     });
     window.open(navUrl, "_blank", "noopener");
-    showToast(`🧭 Direction : ${label}`);
+    showToast(`Direction : ${label}`);
   } else {
-    showToast(`👉 Prochain arrêt : ${label}`);
+    showToast(`Prochain arrêt : ${label}`);
   }
 }
 
@@ -446,12 +447,12 @@ function renderHeroCard(stop, colis, { navApp, eta, smsTemplates }) {
       </div>
       <div class="hero-actions">
         <div class="button-row">
-          ${navUrl ? `<a class="btn-link primary btn-lg" href="${navUrl}" target="_blank" rel="noopener">🧭 Naviguer</a>` : ""}
-          ${colis.tel ? `<a class="btn-link btn-lg" style="flex:0 0 58px;" href="tel:${colis.tel}">📞</a>` : ""}
-          ${smsOptions.length > 0 ? `<button type="button" class="btn-link btn-lg" style="flex:0 0 58px;" id="hero-sms-toggle">💬</button>` : ""}
+          ${navUrl ? `<a class="btn-link primary btn-lg" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
+          ${colis.tel ? `<a class="btn-link btn-lg" style="flex:0 0 58px;" href="tel:${colis.tel}">${icon("phone", { spaced: false })}</a>` : ""}
+          ${smsOptions.length > 0 ? `<button type="button" class="btn-link btn-lg" style="flex:0 0 58px;" id="hero-sms-toggle">${icon("message-circle", { spaced: false })}</button>` : ""}
         </div>
         ${renderSmsOptionsHtml(smsOptions)}
-        <button type="button" class="ok btn-lg" data-deliver-ordre="${stop.ordre}" data-hero-deliver>✓ Livré</button>
+        <button type="button" class="ok btn-lg" data-deliver-ordre="${stop.ordre}" data-hero-deliver>${icon("check")}Livré</button>
         <button type="button" class="hero-fail-btn" data-fail-ordre="${stop.ordre}">Marquer en échec</button>
       </div>
     </div>
@@ -477,8 +478,8 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
   const reorderButtons = reorderMode
     ? `
       <div class="button-row" style="margin-top:6px;">
-        <button type="button" data-move-ordre="${stop.ordre}" data-move-dir="-1" ${canMoveUp ? "" : "disabled"} aria-label="Monter">▲</button>
-        <button type="button" data-move-ordre="${stop.ordre}" data-move-dir="1" ${canMoveDown ? "" : "disabled"} aria-label="Descendre">▼</button>
+        <button type="button" data-move-ordre="${stop.ordre}" data-move-dir="-1" ${canMoveUp ? "" : "disabled"} aria-label="Monter">${icon("chevron-up", { spaced: false })}</button>
+        <button type="button" data-move-ordre="${stop.ordre}" data-move-dir="1" ${canMoveDown ? "" : "disabled"} aria-label="Descendre">${icon("chevron-down", { spaced: false })}</button>
       </div>
     `
     : "";
@@ -496,17 +497,17 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
       ${failed && stop.raisonEchec ? `<div class="muted" style="margin-top:2px;">Motif : ${escapeHtml(stop.raisonEchec)}</div>` : ""}
       ${colis.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:4px;">${colis.quantite} colis</span>` : ""}
       <div class="button-row">
-        ${colis.tel ? `<a class="btn-link" href="tel:${colis.tel}">📞 Appeler</a>` : ""}
-        ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">🧭 Naviguer</a>` : ""}
+        ${colis.tel ? `<a class="btn-link" href="tel:${colis.tel}">${icon("phone")}Appeler</a>` : ""}
+        ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
         ${
           done
-            ? `<button type="button" disabled>${delivered ? "Livré ✓" : "Échec"}</button>`
+            ? `<button type="button" disabled>${delivered ? `${icon("check")}Livré` : "Échec"}</button>`
             : `<button type="button" class="ok" data-deliver-ordre="${stop.ordre}">Livré</button>`
         }
       </div>
       ${reorderButtons}
       <div class="button-row" style="margin-top:6px;">
-        <button type="button" data-photo-colis="${escapeAttr(colis.id)}">${hasPhoto ? "📷 Photo ✓" : "📷 Photo (optionnel)"}</button>
+        <button type="button" data-photo-colis="${escapeAttr(colis.id)}">${icon("camera")}${hasPhoto ? `Photo ${icon("check", { spaced: false })}` : "Photo (optionnel)"}</button>
         ${!done ? `<button type="button" class="hero-fail-btn" data-fail-ordre="${stop.ordre}">Échec</button>` : ""}
       </div>
     </div>
@@ -524,12 +525,12 @@ function renderDepotReturnCard(tour, navApp, depotEta) {
   return `
     <div class="card">
       <div class="card-row">
-        <div class="card-title" style="margin-bottom:0;">🏠 Retour au dépôt</div>
+        <div class="card-title" style="margin-bottom:0;">${icon("home")}Retour au dépôt</div>
         ${depotEta ? `<span class="badge badge-pending">≈ ${formatHeure(depotEta)}</span>` : ""}
       </div>
       <div class="muted">${escapeAttr(tour.depotArrivee.label)}</div>
       <div class="button-row">
-        <a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">🧭 Naviguer</a>
+        <a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>
       </div>
     </div>
   `;
@@ -582,7 +583,7 @@ function bindActionEvents(tourId) {
         if (!colis) return;
         colis.preuvePhoto = file;
         await saveColis(colis);
-        showToast("📷 Photo de preuve enregistrée.");
+        showToast("Photo de preuve enregistrée.");
         render();
       } catch (err) {
         if (err.message !== "Aucune photo sélectionnée.") console.error(err);
@@ -663,7 +664,7 @@ async function renderEtatB(tour) {
   const heroEntry = stopsWithColis.find(({ stop, colis }) => isPending(stop) && colis);
   const heroHtml = heroEntry
     ? renderHeroCard(heroEntry.stop, heroEntry.colis, { navApp, eta: lastEtas.get(heroEntry.colis.id), smsTemplates: settings.smsTemplates })
-    : `<div class="card"><div class="card-title">🎉 Tournée traitée</div><p class="muted">${delivered} livré${delivered > 1 ? "s" : ""}${failed > 0 ? `, ${failed} échec${failed > 1 ? "s" : ""}` : ""}. Plus aucun arrêt en attente.</p></div>`;
+    : `<div class="card"><div class="card-title">${icon("check")}Tournée traitée</div><p class="muted">${delivered} livré${delivered > 1 ? "s" : ""}${failed > 0 ? `, ${failed} échec${failed > 1 ? "s" : ""}` : ""}. Plus aucun arrêt en attente.</p></div>`;
 
   containerRef.innerHTML = `
     <div class="card">
@@ -684,13 +685,13 @@ async function renderEtatB(tour) {
     </div>
     <div class="card-row" style="margin:4px 0 10px;">
       <div class="field" style="margin-bottom:0;flex:1;">
-        <input type="search" id="tour-search" placeholder="🔍 Rechercher un arrêt…">
+        <input type="search" id="tour-search" placeholder="Rechercher un arrêt…">
       </div>
-      <button type="button" id="reorder-toggle" style="margin-left:8px;flex-shrink:0;">${reorderMode ? "✓ Terminé" : "↕️ Réordonner"}</button>
+      <button type="button" id="reorder-toggle" style="margin-left:8px;flex-shrink:0;">${reorderMode ? `${icon("check")}Terminé` : `${icon("move-vertical")}Réordonner`}</button>
     </div>
     ${
       reorderMode
-        ? `<div class="button-row" style="margin:-4px 0 10px;"><button type="button" id="reverse-order-btn">🔁 Inverser le sens des arrêts restants</button></div>`
+        ? `<div class="button-row" style="margin:-4px 0 10px;"><button type="button" id="reverse-order-btn">${icon("repeat")}Inverser le sens des arrêts restants</button></div>`
         : ""
     }
     ${total > 0 ? `<p class="muted" style="margin:-4px 0 10px;">Horaires estimés à titre indicatif — recalcule la tournée après un réarrangement pour des horaires exacts.</p>` : ""}

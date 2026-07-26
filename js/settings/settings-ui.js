@@ -8,6 +8,7 @@ import { renderOcrDebug } from "../scan/ocr-debug-ui.js";
 import { renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
 import { getActiveTour } from "../routing/tour-store.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
+import { icon } from "../ui/icons.js";
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -70,8 +71,8 @@ async function render() {
             <textarea data-favori-note class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(f.note)}</textarea>
           </div>
           <div class="button-row" style="margin-top:8px;">
-            <button type="button" data-favori-addtour>➕ Ajouter à la tournée</button>
-            <button type="button" class="danger" data-favori-delete>🗑 Supprimer</button>
+            <button type="button" data-favori-addtour>${icon("plus")}Ajouter à la tournée</button>
+            <button type="button" class="danger" data-favori-delete>${icon("trash-2")}Supprimer</button>
           </div>
         </div>`
           )
@@ -82,7 +83,7 @@ async function render() {
       <div class="card-title">Dépôt</div>
       <p class="muted" id="s-depot-current" style="margin-top:-4px;">${escapeHtml(settings.depotLabel)}</p>
       <div id="s-depot-search-slot"></div>
-      <button type="button" id="s-depot-change">✏️ Changer l'adresse du dépôt</button>
+      <button type="button" id="s-depot-change">${icon("pencil")}Changer l'adresse du dépôt</button>
     </div>
     <p class="muted" style="margin:8px 0 12px;">Le départ (dépôt ou position) et le retour au dépôt en fin de tournée se choisissent à chaque calcul, dans l'onglet Tournée.</p>
     <div class="field">
@@ -133,7 +134,7 @@ async function render() {
     <div class="card">
       <div class="card-title">Stockage local</div>
       <p class="muted">${storageInfo}</p>
-      <p class="muted">Stockage persistant : ${persisted ? "activé ✓" : "non activé"}</p>
+      <p class="muted">Stockage persistant : ${persisted ? `activé ${icon("check", { spaced: false })}` : "non activé"}</p>
     </div>
     <div class="button-row">
       <button type="button" class="primary" id="s-save">Enregistrer</button>
@@ -145,8 +146,8 @@ async function render() {
     </div>
     <div class="card" style="margin-top:20px;">
       <div class="card-row" style="cursor:pointer;" id="debug-ocr-toggle">
-        <div class="card-title" style="margin-bottom:0;">🔍 Debug OCR</div>
-        <span class="muted">${showDebugOcr ? "▲" : "▼"}</span>
+        <div class="card-title" style="margin-bottom:0;">${icon("search")}Debug OCR</div>
+        <span class="muted">${showDebugOcr ? icon("chevron-up", { spaced: false }) : icon("chevron-down", { spaced: false })}</span>
       </div>
       <p class="muted" style="margin-top:6px;">Texte OCR brut et classification ligne par ligne d'un scan, pour comprendre pourquoi un nom/une rue n'a pas été trouvé.</p>
       <div id="debug-ocr-content" ${showDebugOcr ? "" : "hidden"} style="margin-top:10px;"></div>
@@ -195,7 +196,7 @@ async function render() {
         await setSetting("depotLabel", label);
         containerRef.querySelector("#s-depot-current").textContent = label;
         slot.innerHTML = "";
-        showToast("🏠 Dépôt mis à jour.");
+        showToast("Dépôt mis à jour.");
       },
       onCancel: () => {
         slot.innerHTML = "";
@@ -258,11 +259,11 @@ async function render() {
         const result = await insertStopCheapest(activeTour, colis);
         if (result) {
           await saveColis({ ...colis, statut: "en_tournee" });
-          showToast(`⭐ "${favori.rue || "Favori"}" ajouté à la tournée en cours (position ${result.position}).`);
+          showToast(`"${favori.rue || "Favori"}" ajouté à la tournée en cours (position ${result.position}).`);
           return;
         }
       }
-      showToast(`⭐ "${favori.rue || "Favori"}" ajouté aux colis à trier.`);
+      showToast(`"${favori.rue || "Favori"}" ajouté aux colis à trier.`);
     });
   });
 
@@ -274,7 +275,7 @@ async function render() {
       if (el.value === initialNote) return;
       const id = el.closest("[data-favori-id]").dataset.favoriId;
       await updateFavori(id, { note: el.value });
-      showToast("⭐ Note enregistrée.");
+      showToast("Note enregistrée.");
     });
   });
 

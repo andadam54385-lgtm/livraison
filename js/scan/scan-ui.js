@@ -15,6 +15,7 @@ import { googleMapsSearchUrl } from "../tour/deep-links.js";
 import { showToast } from "../lib/toast.js";
 import { emit } from "../lib/event-bus.js";
 import { uuid } from "../lib/id.js";
+import { icon } from "../ui/icons.js";
 
 // Flux de capture/validation d'un colis (photo -> OCR -> fiche editable ->
 // geocodage), independant de tout onglet : utilise a la fois par le bouton
@@ -233,7 +234,7 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
   const { numero, rue: rueSansNumero } = splitNumeroRue(colis.adresseRaw.rue);
 
   container.innerHTML = `
-    ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>⚠ Ce tracking a déjà été scanné.</strong></div>` : ""}
+    ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>${icon("alert-triangle")}Ce tracking a déjà été scanné.</strong></div>` : ""}
     <div class="button-row">
       <button type="button" id="f-rescan">Rescanner</button>
       <button type="button" class="primary btn-lg" id="f-valider">Valider</button>
@@ -376,7 +377,7 @@ export async function runGeocodeAndSave(container, colis, { onSaved } = {}) {
 async function warnIfFavoriMatch(colis) {
   const fav = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
   if (fav && fav.note) {
-    showToast(`⭐ Adresse favorite : ${fav.note}`, { variant: "warn", durationMs: 7000 });
+    showToast(`Adresse favorite : ${fav.note}`, { variant: "warn", durationMs: 7000 });
   }
 }
 
@@ -403,7 +404,7 @@ function renderGeocodePicker(container, colis, { onSaved }) {
     <div class="card" style="margin-top:8px;">
       <div class="card-title">Introuvable ? (entreprise, zone industrielle…)</div>
       <p class="muted">La BAN ne connaît que les adresses officielles, pas les noms d'entreprise. Cherche sur Google Maps, puis fais un appui long sur le point → "Copier les coordonnées", et colle-les ici.</p>
-      <a class="btn-link" href="${googleMapsSearchUrl(rawQuery)}" target="_blank" rel="noopener">🔍 Chercher "${escapeHtml(rawQuery)}" sur Google Maps</a>
+      <a class="btn-link" href="${googleMapsSearchUrl(rawQuery)}" target="_blank" rel="noopener">${icon("search")}Chercher "${escapeHtml(rawQuery)}" sur Google Maps</a>
       <div class="field" style="margin-top:10px;">
         <label>Coordonnées GPS collées</label>
         <input type="text" id="geocode-manual-coords" class="field-lg" placeholder="ex: 48.6921, 6.1844" inputmode="decimal">
@@ -460,7 +461,7 @@ function renderGeocodePicker(container, colis, { onSaved }) {
   container.querySelector("#geocode-manual-coords-btn").addEventListener("click", () => {
     const parsed = parseLatLon(container.querySelector("#geocode-manual-coords").value);
     if (!parsed) {
-      showToast("⚠ Coordonnées invalides (format attendu : 48.6921, 6.1844)");
+      showToast("Coordonnées invalides (format attendu : 48.6921, 6.1844)");
       return;
     }
     acceptManualCoords(parsed.lat, parsed.lon);

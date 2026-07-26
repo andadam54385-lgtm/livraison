@@ -1,6 +1,6 @@
 {
-  "version": "a6b2b6f7205b",
-  "generatedAt": "2026-07-26T14:20:27.597Z",
+  "version": "29136d84d8b5",
+  "generatedAt": "2026-07-26T16:00:08.943Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -339,6 +339,7 @@
     "./js/tour/deep-links.js",
     "./js/tour/sms-template.js",
     "./js/tour/tour-ui.js",
+    "./js/ui/icons.js",
     "./lib/maplibre/LICENSE-maplibre-gl.txt",
     "./lib/maplibre/LICENSE-pmtiles.txt",
     "./lib/maplibre/basemap-assets/fonts/Noto Sans Italic/0-255.pbf",

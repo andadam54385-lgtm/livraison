@@ -185,6 +185,20 @@ a { color: var(--accent-strong); }
   background: linear-gradient(180deg, var(--bg-elevated), var(--bg));
   flex-shrink: 0;
 }
+.view-header-row { display: flex; align-items: center; gap: 10px; }
+
+/* Bouton carre icone seule (retour, menu...) -- meme cible tactile minimale
+   que les boutons texte, sans le padding horizontal qui n'a pas de sens ici. */
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
 
 .view-content {
   flex: 1;
@@ -338,7 +352,70 @@ a { color: var(--accent-strong); }
 /* Grille de controles MapLibre par defaut (~29px) agrandie pour rester
    proche du standard 44px+ "usage a une main / gants" du reste de l'appli. */
 .maplibregl-ctrl-group button { width: 40px; height: 40px; }
+/* Le controle d'attribution par defaut (coin haut-gauche) chevaucherait
+   sinon notre bouton menu, place dans ce meme coin -- decale sous lui. */
+.maplibregl-ctrl-top-left { margin-top: 56px; }
 
+/* Carte plein ecran (chantier refonte) : plus de header ni de legende
+   toujours visibles -- un seul bouton menu en haut a gauche ouvre un panneau
+   regroupant legende + avertissements + acces aux Reglages. */
+.map-menu-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-elevated);
+}
+.map-menu-panel {
+  position: absolute;
+  top: 62px;
+  left: 12px;
+  z-index: 6;
+  width: min(280px, calc(100vw - 24px));
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-elevated);
+  padding: 10px;
+}
+.map-menu-panel[hidden] { display: none; }
+.map-menu-panel .btn-link { justify-content: flex-start; width: 100%; }
+.map-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 0.85rem;
+}
+.legend-item { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.map-menu-warn { display: flex; align-items: center; gap: 6px; color: var(--warn); font-size: 0.8rem; margin: 8px 0 0; }
+
+/* Fiche de detail (tap sur un pin/favori) : flotte au-dessus de la carte
+   plutot que de pousser son contenu en dessous (sinon la carte ne serait
+   plus "plein ecran" des qu'une fiche est affichee). */
+#map-detail:not(:empty) {
+  position: absolute;
+  top: 64px;
+  left: 12px;
+  right: 12px;
+  z-index: 5;
+}
+
+/* Feuille glissante a 3 positions (repliee/mi-hauteur/pleine hauteur, voir
+   setupStopPanelSheet dans map-ui.js) : hauteur pilotee en JS (px) pendant le
+   drag, pas de classe CSS par etat -- data-state ne sert qu'a un eventuel
+   style visuel (ex: coin arrondis identiques dans les 3 cas ici). */
 .stop-panel {
   position: absolute;
   left: 0;
@@ -350,10 +427,8 @@ a { color: var(--accent-strong); }
   border-top: 1px solid var(--border);
   border-radius: 16px 16px 0 0;
   box-shadow: var(--shadow-elevated);
-  max-height: 132px;
-  transition: max-height 0.2s var(--ease);
+  height: 64px;
 }
-.stop-panel.expanded { max-height: 62%; }
 .stop-panel-handle {
   position: relative;
   display: flex;
@@ -369,6 +444,8 @@ a { color: var(--accent-strong); }
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-muted);
+  touch-action: none;
+  cursor: grab;
 }
 .stop-panel-bar {
   position: absolute;
@@ -381,9 +458,12 @@ a { color: var(--accent-strong); }
   background: var(--border);
 }
 .stop-panel-list {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0 12px 10px;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .stop-row {

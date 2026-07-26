@@ -33,23 +33,26 @@
     <div class="progress-bar" id="tour-header-progress" hidden><div id="tour-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
   </header>
   <div id="tour-content" class="view-content"></div>
-  <button id="scan-fab" class="fab" type="button" aria-label="Scanner un colis">📷</button>
+  <button id="scan-fab" class="fab" type="button" aria-label="Scanner un colis"></button>
 </div>
 
 <div id="map-view" class="view" data-view="map" hidden>
-  <header class="view-header"><h1>Carte</h1></header>
   <div id="map-content" class="view-content" style="padding:0;"></div>
 </div>
 
 <div id="settings-view" class="view" data-view="settings" hidden>
-  <header class="view-header"><h1>Réglages</h1></header>
+  <header class="view-header">
+    <div class="view-header-row">
+      <button type="button" id="settings-back" class="icon-btn" aria-label="Retour"></button>
+      <h1>Réglages</h1>
+    </div>
+  </header>
   <div id="settings-content" class="view-content"></div>
 </div>
 
 <nav id="bottom-nav" class="bottom-nav" hidden>
   <a href="#tour" data-nav="tour">Tournée</a>
   <a href="#map" data-nav="map">Carte</a>
-  <a href="#settings" data-nav="settings">Réglages</a>
 </nav>
 
 <div id="toast-container" class="toast-container" aria-live="polite"></div>
