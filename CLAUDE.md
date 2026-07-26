@@ -220,20 +220,27 @@ importé.
   `basemap-assets/sprites/` (light/dark, 1x/2x) et `basemap-assets/fonts/Noto Sans
   {Regular,Medium,Italic}/0-255.pbf` (seule la plage Latin-1 est nécessaire pour le
   français — c'est tout ce que la palette de styles FR référence).
-- **`assets/map.pmtiles`** (61 Mo) : extrait avec le CLI Go `pmtiles extract` depuis le
-  build quotidien `https://build.protomaps.com/YYYYMMDD.pmtiles` (extraction distante par
-  plages HTTP, jamais téléchargé en entier), bbox = celle déjà présente dans
-  `ban.json`'s `bbox`, zoom 0-14 (assez pour un aperçu Circuit-like, pas pour du
-  turn-by-turn). **Ne fais jamais tourner `pmtiles extract`/le CLI dans `data-prep/`** —
-  c'est un artefact indépendant, régénéré uniquement si la zone de tournée change (rebbox
-  depuis `ban.json`, puis `node tools/gen-data-manifest.js`).
-  **Pas encore régénéré depuis l'élargissement au 54+55** (fichier daté du 2026-07-20,
-  antérieur au `ban.json.gz`/`graph.json.gz` élargis le 2026-07-24/26) — nécessite le CLI Go
-  `pmtiles`, pas juste un script Node comme pour les deux autres assets, pas tenté sans
-  demande explicite. Conséquence pratique en attendant : le fond de carte vectoriel
-  (tuiles/rues dessinées) reste visible seulement dans l'ancienne zone plus restreinte ;
-  hors de cette zone, la carte affiche quand même les pins/l'itinéraire (ceux-ci viennent de
-  `ban.json`/`graph.json`, indépendants du fond visuel) mais sur un fond gris/vide.
+- **`assets/map.pmtiles`** (64,6 Mo depuis le 2026-07-26, était 61 Mo) : extrait avec le CLI
+  Go `pmtiles extract` (binaire officiel `go-pmtiles`, télécharger le zip Windows depuis les
+  releases GitHub de `protomaps/go-pmtiles` s'il n'est pas déjà présent — pas besoin
+  d'installer Go, c'est un binaire autonome) depuis le build quotidien
+  `https://build.protomaps.com/YYYYMMDD.pmtiles` (extraction distante par plages HTTP,
+  jamais téléchargé en entier — 137 Go au total, seuls les chunks couvrant la bbox sont
+  récupérés), bbox = celle de `ban.json`/`graph.json` (`4.906709,48.355505,7.103224,
+  49.615402` au format `--bbox=min_lon,min_lat,max_lon,max_lat`).
+  **`--maxzoom=14` donnait 116 Mo, rejeté par GitHub (limite dure 100 Mo, pas de Git LFS ici
+  — GitHub Pages ne sait pas servir des fichiers LFS de toute façon)** : ré-extrait à
+  `--maxzoom=13` depuis le fichier zoom-14 déjà téléchargé (`pmtiles extract` accepte un
+  fichier local en entrée, pas besoin de retélécharger depuis le serveur distant) → 64,6 Mo.
+  MapLibre sur-zoome automatiquement au-delà du maxzoom de l'archive (comportement standard
+  du protocole pmtiles, aucun code à changer) — largement suffisant pour un aperçu
+  Circuit-like, pas du turn-by-turn. Commande complète :
+  `pmtiles.exe extract "https://build.protomaps.com/AAAAMMJJ.pmtiles" map-z14.pmtiles --bbox=4.906709,48.355505,7.103224,49.615402 --maxzoom=14`
+  puis `pmtiles.exe extract map-z14.pmtiles map.pmtiles --maxzoom=13` si le premier résultat
+  dépasse 100 Mo. Vérifier avec `pmtiles.exe show map.pmtiles` (bounds/maxzoom affichés).
+  **Ne fais jamais tourner `pmtiles extract`/le CLI dans `data-prep/`** — c'est un artefact
+  indépendant, régénéré uniquement si la zone de tournée change (rebbox depuis `ban.json`,
+  puis `node tools/gen-data-manifest.js`).
 - **Stockage** : `map.pmtiles` est trop gros pour le precache SW classique (voir
   `EXCLUDE_FILES` dans `tools/gen-precache-manifest.js`, même traitement que
   graph/ban.json.gz). Il est téléchargé une fois pendant l'import Wifi initial

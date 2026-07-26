@@ -22,8 +22,9 @@ export async function getMapFile(db) {
 }
 
 // Telecharge assets/map.pmtiles avec suivi de progression (Content-Length).
-// Accumule en Blob en memoire pendant le fetch (~60 Mo, tient confortablement
-// en memoire mobile moderne) avant d'etre remis a l'appelant pour stockage.
+// Accumule en Blob en memoire pendant le fetch (~65 Mo depuis l'elargissement
+// au 54+55, tient confortablement en memoire mobile moderne) avant d'etre
+// remis a l'appelant pour stockage.
 async function downloadMapPmtiles(onProgress) {
   const url = moduleRelativeUrl("../../assets/map.pmtiles");
   const res = await fetch(url);
