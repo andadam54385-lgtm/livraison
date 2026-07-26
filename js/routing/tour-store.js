@@ -104,6 +104,29 @@ export async function moveStop(tourId, ordre, direction) {
   return tour;
 }
 
+// Inverse le sens de parcours des arrets restants, sans recalcul de trajet
+// (l'utilisateur a fait demi-tour, ou prefere finir par l'autre bout) --
+// seuls les arrets pas encore traites sont concernes : ceux deja livres/en
+// echec gardent leur position, on ne revient pas dessus. Meme limite que
+// moveStop : les legDureeSec restent ceux d'origine, donc les heures
+// estimees redeviennent approximatives tant qu'on n'a pas recalcule.
+export async function reverseRemainingStops(tourId) {
+  const db = await getDb();
+  const tour = await get(db, "tours", tourId);
+  if (!tour) return null;
+  const stops = tour.stops.slice().sort((a, b) => a.ordre - b.ordre);
+  const pending = stops.filter((s) => !s.statutLivraison);
+  if (pending.length < 2) return tour;
+  const ordres = pending.map((s) => s.ordre);
+  const reversed = pending.slice().reverse();
+  reversed.forEach((stop, i) => {
+    stop.ordre = ordres[i];
+  });
+  tour.stops = stops;
+  await put(db, "tours", tour);
+  return tour;
+}
+
 async function listAllTours(db) {
   const [enCours, archivees] = await Promise.all([
     getAllFromIndex(db, "tours", "by_statut", "en_cours"),

@@ -6,6 +6,8 @@ import { saveColis } from "../scan/colis-store.js";
 import { showToast } from "../lib/toast.js";
 import { renderOcrDebug } from "../scan/ocr-debug-ui.js";
 import { renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
+import { getActiveTour } from "../routing/tour-store.js";
+import { insertStopCheapest } from "../routing/insert-stop.js";
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -236,7 +238,7 @@ async function render() {
       const id = el.closest("[data-favori-id]").dataset.favoriId;
       const favori = favoris.find((f) => f.id === id);
       if (!favori) return;
-      await saveColis({
+      const colis = await saveColis({
         nom: favori.rue || "Favori",
         adresseRaw: { rue: favori.rue, cp: favori.cp, ville: favori.ville },
         geocode: { lat: favori.lat, lon: favori.lon, status: "ok" },
@@ -247,6 +249,19 @@ async function render() {
         avant12h: false,
         sourceFavoriId: favori.id,
       });
+      // Bug reel corrige ici : ce bouton creait le colis mais ne l'inserait
+      // jamais dans une tournee deja en cours (contrairement au scan, voir
+      // tour-ui.js's handleColisSaved) -- il restait "pret" hors-tournee
+      // jusqu'au prochain recalcul complet, invisible entre-temps.
+      const activeTour = await getActiveTour();
+      if (activeTour) {
+        const result = await insertStopCheapest(activeTour, colis);
+        if (result) {
+          await saveColis({ ...colis, statut: "en_tournee" });
+          showToast(`⭐ "${favori.rue || "Favori"}" ajouté à la tournée en cours (position ${result.position}).`);
+          return;
+        }
+      }
       showToast(`⭐ "${favori.rue || "Favori"}" ajouté aux colis à trier.`);
     });
   });

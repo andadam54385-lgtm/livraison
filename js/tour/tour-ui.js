@@ -1,4 +1,4 @@
-import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, getTodayStats, reporterColisEchec } from "../routing/tour-store.js";
+import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec } from "../routing/tour-store.js";
 import { getColis, saveColis, listAllColis, formatAdresseAffichage } from "../scan/colis-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
@@ -688,6 +688,11 @@ async function renderEtatB(tour) {
       </div>
       <button type="button" id="reorder-toggle" style="margin-left:8px;flex-shrink:0;">${reorderMode ? "✓ Terminé" : "↕️ Réordonner"}</button>
     </div>
+    ${
+      reorderMode
+        ? `<div class="button-row" style="margin:-4px 0 10px;"><button type="button" id="reverse-order-btn">🔁 Inverser le sens des arrêts restants</button></div>`
+        : ""
+    }
     ${total > 0 ? `<p class="muted" style="margin:-4px 0 10px;">Horaires estimés à titre indicatif — recalcule la tournée après un réarrangement pour des horaires exacts.</p>` : ""}
     <div id="stops-container" data-hero-colis-id="${heroEntry ? escapeAttr(heroEntry.colis.id) : ""}"></div>
     ${renderDepotReturnCard(tour, navApp, lastDepotEta)}
@@ -706,6 +711,11 @@ async function renderEtatB(tour) {
   containerRef.querySelector("#reorder-toggle").addEventListener("click", () => {
     reorderMode = !reorderMode;
     render(); // passe par le routeur (filet de securite en cas d'echec, voir plus haut)
+  });
+
+  containerRef.querySelector("#reverse-order-btn")?.addEventListener("click", async () => {
+    await reverseRemainingStops(tour.id);
+    render();
   });
 
   containerRef.querySelector("#recalc-tour-btn").addEventListener("click", async () => {
