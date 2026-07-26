@@ -20,16 +20,48 @@ parser avec les colonnes `numero;rep;nom_voie;code_postal;nom_commune;lon;lat`, 
 `{n,rep,r,rn,cp,c,cn,lat,lon}` par ligne + `bbox` global, gzip, remplacer le fichier, puis
 `node tools/gen-data-manifest.js`.
 
-**`graph.json.gz` (graphe routier) N'A PAS été élargi** — reste sur l'ancienne zone plus
-petite. L'élargir correctement demanderait de reconstruire un graphe OSM "étendu par
-arête" avec gestion des restrictions de virage (voir `js/routing/graph-loader.js` pour le
-format exact attendu : `nodeCoords`/`edges`/`edgeAdjacency`/`nodeOutgoingEdges`/
-`nodeIncomingEdges`) — un chantier bien plus gros et risqué à reproduire correctement
-depuis zéro (turn restrictions, sens uniques, vitesses par type de route) que la simple
-transformation de CSV faite pour les adresses. Pas tenté sans une évaluation dédiée. Tant
-que ce n'est pas fait : la recherche/le géocodage d'adresse couvrent tout le 54+55, mais
-le calcul de tournée (tri, temps de trajet, carte) reste limité à l'ancienne zone plus
-restreinte pour les arrêts hors de celle-ci.
+**`assets/graph.json.gz` a été élargi au 54+55 le 2026-07-26**, indépendamment de
+data-prep (même contrainte : jamais rien exécuter dans `data-prep/`) — reimplémentation
+complète depuis zéro de l'algorithme (lu en lecture seule dans
+`data-prep/scripts/lib/graph-builder.js` pour en comprendre les règles exactes : vitesses
+par type de voie, sens unique implicite, restrictions de virage via-nœud, plus grande
+composante connexe), aucun code data-prep importé/exécuté. Pipeline (non conservé dans le
+repo, lancé depuis le scratchpad) :
+1. Télécharger les routes carrossables + relations `type=restriction` via l'API Overpass
+   publique, en 4 tuiles (quadrants NE/NW/SE/SW de la bbox BAN 54+55) pour rester sous les
+   limites de l'API — miroirs `overpass-api.de`/`overpass.kumi.systems`/
+   `overpass.private.coffee`, requête `[out:xml]` avec `(._;>>;)` pour résoudre tous les
+   nœuds référencés.
+2. Parser le XML "out body" (un élément par ligne, y compris les `<node>` porteurs de tags
+   type feu tricolore/jonction — pas auto-fermés, piège rencontré une fois).
+3. Construire le graphe étendu par arête (même format que `graph-loader.js` attend :
+   `nodeCoords`/`edges`/`edgeAdjacency`/`nodeOutgoingEdges`/`nodeIncomingEdges`/`bbox`).
+4. Dédupliquer les voies/relations par id OSM (les 4 tuiles se chevauchent volontairement
+   aux frontières).
+
+**Contrainte mémoire réelle rencontrée** : cette machine n'a que 6 Go de RAM au total — une
+première tentative fidèle à l'algorithme de référence (arêtes stockées comme objets JS
+`{fromNode,toNode,seconds}`, sortie via un unique `JSON.stringify()`) a fait planter Node en
+"JavaScript heap out of memory" à la construction du graphe. Corrigé en réécrivant les
+structures chaudes (arêtes, coordonnées) en tableaux typés (`Int32Array`/`Float32Array`/
+`Float64Array`, croissance amortie par doublement) et en écrivant le JSON en streaming
+directement vers gzip (jamais de chaîne JSON complète ni de structure imbriquée entière en
+mémoire) — validé de bout en bout sur un cas synthétique avant de relancer la construction
+réelle. Retenir pour toute prochaine reconstruction/élargissement : ne JAMAIS repartir de
+l'implémentation "tableaux d'objets" naïve sur une zone de cette taille.
+
+**Résultat** : bbox `{minLat:48.355505, maxLat:49.615402, minLon:4.906709,
+maxLon:7.103224}` (= bbox de `ban.json.gz`), 1 687 908 nœuds, 3 243 223 arcs, 276 291 voies
+retenues, 5629/6126 restrictions de virage appliquées. **267 Mo décompressé / 71,5 Mo
+gzippé** — plus gros que les 222,8 Mo (zone 80km) déjà jugés "trop risqués pour l'iPhone"
+lors d'un essai antérieur documenté dans `config/zone.json` (côté data-prep) et jamais
+déployés pour cette raison. Déployé quand même le 2026-07-26 **sur demande explicite de
+l'utilisateur, après l'avoir prévenu du dépassement de ce seuil** (`AskUserQuestion` :
+choix "Déployer tel quel" plutôt que réduire la zone ou garder l'ancien graphe). Si un
+souci de mémoire/plantage à l'import est un jour rapporté sur l'appareil réel, la piste de
+réduction la plus rentable est d'exclure les voies `service`/`living_street` (nombreuses en
+zone urbaine/village, contribuent peu au routage inter-communes) et de recadrer la bbox
+pour retirer le débordement constaté côté Luxembourg (coin nord-est).
 
 ## Graphe de connaissance du code (Graphify)
 
@@ -195,6 +227,13 @@ importé.
   turn-by-turn). **Ne fais jamais tourner `pmtiles extract`/le CLI dans `data-prep/`** —
   c'est un artefact indépendant, régénéré uniquement si la zone de tournée change (rebbox
   depuis `ban.json`, puis `node tools/gen-data-manifest.js`).
+  **Pas encore régénéré depuis l'élargissement au 54+55** (fichier daté du 2026-07-20,
+  antérieur au `ban.json.gz`/`graph.json.gz` élargis le 2026-07-24/26) — nécessite le CLI Go
+  `pmtiles`, pas juste un script Node comme pour les deux autres assets, pas tenté sans
+  demande explicite. Conséquence pratique en attendant : le fond de carte vectoriel
+  (tuiles/rues dessinées) reste visible seulement dans l'ancienne zone plus restreinte ;
+  hors de cette zone, la carte affiche quand même les pins/l'itinéraire (ceux-ci viennent de
+  `ban.json`/`graph.json`, indépendants du fond visuel) mais sur un fond gris/vide.
 - **Stockage** : `map.pmtiles` est trop gros pour le precache SW classique (voir
   `EXCLUDE_FILES` dans `tools/gen-precache-manifest.js`, même traitement que
   graph/ban.json.gz). Il est téléchargé une fois pendant l'import Wifi initial
