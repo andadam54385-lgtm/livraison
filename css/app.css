@@ -264,8 +264,13 @@ a { color: var(--accent-strong); }
   right: 20px;
   bottom: calc(var(--nav-height) + var(--safe-bottom) + 16px);
   width: 60px; height: 60px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   background: var(--accent);
+  color: var(--accent-ink);
   border: none;
   font-size: 1.5rem;
   box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 45%, transparent);
