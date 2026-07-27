@@ -3,6 +3,16 @@ import { icon } from "../ui/icons.js";
 
 const SCAN_INTERVAL_MS = 220; // ~4-5 tentatives/s : reactif sans saturer le CPU mobile
 const MAX_CONSECUTIVE_ERRORS = 5; // au-dela, ce n'est plus un raté isole -- afficher l'erreur plutot que boucler en silence
+// Retour terrain : "la page scan ne veut plus bouger" -- decodeCode128 (WASM
+// zxing) s'execute de façon synchrone/bloquante sur le thread principal (pas
+// de Worker ici, contrairement au routage/OCR). Decoder une frame a la
+// resolution complete de la camera (1920x1080, relevee cette session pour
+// fiabiliser la lecture) + tryHarder:true geleait visiblement l'interface a
+// chaque tentative (toutes les 220ms). Le code-barres n'a besoin que d'etre
+// bien cadre (voir .viewfinder-frame), pas de la pleine resolution : la
+// frame est downscalee avant decodage, la video affichee a l'ecran reste
+// elle en pleine resolution (aucun impact visuel).
+const MAX_DECODE_DIMENSION = 900;
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -72,9 +82,10 @@ export function startBarcodeViewfinder(container) {
     async function tick() {
       if (stopped) return;
       if (video.readyState >= 2 && video.videoWidth > 0) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
+        const scale = Math.min(1, MAX_DECODE_DIMENSION / Math.max(video.videoWidth, video.videoHeight));
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         try {
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const text = await decodeCode128(imageData);

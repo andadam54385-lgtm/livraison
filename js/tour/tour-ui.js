@@ -689,6 +689,9 @@ async function renderEtatB(tour) {
       </div>
       <button type="button" id="reorder-toggle" style="margin-left:8px;flex-shrink:0;">${reorderMode ? `${icon("check")}Terminé` : `${icon("move-vertical")}Réordonner`}</button>
     </div>
+    <div class="button-row" style="margin:-4px 0 10px;">
+      <button type="button" id="etatB-manual">${icon("plus")}Ajouter une adresse</button>
+    </div>
     ${
       reorderMode
         ? `<div class="button-row" style="margin:-4px 0 10px;"><button type="button" id="reverse-order-btn">${icon("repeat")}Inverser le sens des arrêts restants</button></div>`
@@ -708,6 +711,12 @@ async function renderEtatB(tour) {
   containerRef.querySelector("#tour-search").addEventListener("input", (e) => {
     renderStopsList(e.target.value);
   });
+
+  // Retour terrain : aucun moyen de saisir une adresse a la main une fois la
+  // tournee calculee (seul le FAB camera etait accessible en Etat B) --
+  // reutilise le meme circuit que le scan (handleColisSaved fait deja
+  // l'insertion au meilleur endroit sans recalcul complet, voir plus haut).
+  containerRef.querySelector("#etatB-manual").addEventListener("click", () => openManualEntry());
 
   containerRef.querySelector("#reorder-toggle").addEventListener("click", () => {
     reorderMode = !reorderMode;
