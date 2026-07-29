@@ -1,4 +1,4 @@
-import { getColis, saveColis, deleteColis, formatAdresseAffichage } from "./colis-store.js";
+import { getColis, saveColis, deleteColis, formatAdresseAffichage, formatAdresseForNav } from "./colis-store.js";
 import { addFavori, updateFavori, findNearbyFavori } from "../favoris/favoris-store.js";
 import { getActiveTour, markStopDelivered, markStopFailed } from "../routing/tour-store.js";
 import { getSetting } from "../settings/settings-store.js";
@@ -62,7 +62,7 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
   const showDeliveryActions = stop && stop.statutLivraison !== "livre" && stop.statutLivraison !== "echec";
 
   const adresse = formatAdresseAffichage(colis);
-  const navUrl = colis.geocode?.lat != null ? buildNavUrl(await getSetting("navApp"), { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse }) : null;
+  const navUrl = colis.geocode?.lat != null ? buildNavUrl(await getSetting("navApp"), { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse: formatAdresseForNav(colis) }) : null;
   const canFavori = colis.geocode?.status === "ok";
   const titre = colis.nom || adresse;
   const existingFavori = canFavori ? await findNearbyFavori(colis.geocode.lat, colis.geocode.lon) : null;

@@ -53,3 +53,23 @@ export function formatAdresseAffichage(colis) {
   if (!rue && !cp && !ville) return "(adresse à vérifier)";
   return `${rue}, ${cp} ${ville}`.trim();
 }
+
+// Adresse a passer aux liens de navigation GPS (deep-links.js) -- DIFFERENT de
+// formatAdresseAffichage (display) : quand geocode.manual est vrai (livreur a
+// colle des coordonnees GPS a la main via "Introuvable ? entreprise/zone
+// industrielle...", voir scan-ui.js's acceptManualCoords), adresseAffichage
+// n'est JAMAIS pose (pas de match BAN) et formatAdresseAffichage retombe alors
+// sur adresseRaw -- c'est-a-dire EXACTEMENT le texte qui vient d'echouer le
+// geocodage automatique. deep-links.js prefere toujours `adresse` a
+// `lat,lon` des qu'un texte est present (retour terrain : precision GPS BAN
+// parfois moins bonne que le geocodage Apple/Waze/Google sur une adresse
+// propre) -- mais ici ce texte n'a justement RIEN de propre/fiable, et les
+// coordonnees que le livreur a explicitement recuperees (copiees depuis un
+// point precis sur Google Maps) sont la seule information fiable qu'on ait.
+// Les ecarter au profit du texte fait recommencer Apple/Waze/Google le meme
+// geocodage bancal, silencieusement, et peut renvoyer un point eloigne (bug
+// terrain "adresse compressee envoyee au GPS" -- voir memoire du bug).
+export function formatAdresseForNav(colis) {
+  if (colis.geocode?.manual) return null;
+  return formatAdresseAffichage(colis);
+}

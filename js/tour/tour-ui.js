@@ -1,5 +1,5 @@
 import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec } from "../routing/tour-store.js";
-import { getColis, saveColis, listAllColis, formatAdresseAffichage } from "../scan/colis-store.js";
+import { getColis, saveColis, listAllColis, formatAdresseAffichage, formatAdresseForNav } from "../scan/colis-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
 import { buildSmsOptions } from "./sms-template.js";
@@ -387,7 +387,7 @@ async function afterHeroDelivered() {
       lat: heroEntry.colis.geocode.lat,
       lon: heroEntry.colis.geocode.lon,
       label: heroEntry.colis.nom,
-      adresse: formatAdresseAffichage(heroEntry.colis),
+      adresse: formatAdresseForNav(heroEntry.colis),
     });
     window.open(navUrl, "_blank", "noopener");
     showToast(`Direction : ${label}`);
@@ -423,7 +423,9 @@ function renderSmsOptionsHtml(smsOptions) {
 
 function renderHeroCard(stop, colis, { navApp, eta, smsTemplates }) {
   const adresse = formatAdresseAffichage(colis);
-  const navUrl = colis.geocode?.lat ? buildNavUrl(navApp, { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse }) : null;
+  const navUrl = colis.geocode?.lat
+    ? buildNavUrl(navApp, { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse: formatAdresseForNav(colis) })
+    : null;
   const { street, cityLine } = splitAdresseForHero(colis);
   // Minutes restantes reelles (arret courant d'une tournee active) : le seul
   // endroit ou {minutes_estimees} peut etre rempli avec une valeur fraiche
@@ -468,7 +470,7 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
   const done = delivered || failed;
   const adresse = formatAdresseAffichage(colis);
   const navUrl = colis.geocode?.lat
-    ? buildNavUrl(navApp, { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse })
+    ? buildNavUrl(navApp, { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse: formatAdresseForNav(colis) })
     : null;
   let heureLabel = null;
   if (delivered) heureLabel = stop.heureLivraison ? `Livré à ${formatHeure(new Date(stop.heureLivraison))}` : "Livré";

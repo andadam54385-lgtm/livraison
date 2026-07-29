@@ -3,8 +3,13 @@
 // brut OCR) quand disponible : retour terrain, la precision au point BAN est
 // parfois moins bonne que le geocodage propre d'Apple/Waze/Google sur une
 // adresse propre (notamment hameaux/lieux-dits). Repli sur les coordonnees
-// GPS si l'adresse est absente (ne devrait pas arriver : elle est toujours
-// posee des que geocode.lat existe).
+// GPS si l'adresse est absente -- ce qui ARRIVE reellement pour les colis
+// geocodes via coordonnees collees a la main (adresse introuvable dans la
+// BAN, ex: entreprise/zone industrielle) : appelants, passez
+// colis-store.js's formatAdresseForNav(colis) plutot que
+// formatAdresseAffichage(colis) pour `adresse` ici, qui renvoie null dans ce
+// cas precis (jamais le texte qui vient d'echouer le geocodage automatique --
+// voir formatAdresseForNav pour le detail du bug que ca corrige).
 
 export function appleMapsUrl({ lat, lon, label, adresse }) {
   const params = new URLSearchParams({ daddr: adresse || `${lat},${lon}` });

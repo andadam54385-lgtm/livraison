@@ -1,4 +1,4 @@
-import { listAllColis, formatAdresseAffichage } from "../scan/colis-store.js";
+import { listAllColis, formatAdresseAffichage, formatAdresseForNav } from "../scan/colis-store.js";
 import { getActiveTour, markColisDeliveredDirect } from "../routing/tour-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { listFavoris } from "../favoris/favoris-store.js";
@@ -143,7 +143,7 @@ function badgeForStatut(statut) {
 function formatColisDetail(c, { navApp, ordre } = {}) {
   const adresse = formatAdresseAffichage(c);
   const done = c.statut === "livre" || c.statut === "echec";
-  const navUrl = c.geocode?.lat != null ? buildNavUrl(navApp, { lat: c.geocode.lat, lon: c.geocode.lon, label: c.nom, adresse }) : null;
+  const navUrl = c.geocode?.lat != null ? buildNavUrl(navApp, { lat: c.geocode.lat, lon: c.geocode.lon, label: c.nom, adresse: formatAdresseForNav(c) }) : null;
   return `
     <div class="card-row">
       <div class="card-title">${ordre != null ? `#${ordre} ` : ""}${c.nom || "(nom inconnu)"}</div>
@@ -182,7 +182,7 @@ function renderStopList(ordered, navApp) {
       const delivered = stop.statutLivraison === "livre";
       const failed = stop.statutLivraison === "echec";
       const adresse = formatAdresseAffichage(colis);
-      const navUrl = colis.geocode?.lat != null ? buildNavUrl(navApp, { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse }) : null;
+      const navUrl = colis.geocode?.lat != null ? buildNavUrl(navApp, { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse: formatAdresseForNav(colis) }) : null;
       return `
         <div class="stop-row${delivered || failed ? " stop-row-done" : ""}" data-stop-colis-id="${escapeAttr(colis.id)}">
           <div class="stop-row-num">${stop.ordre}</div>
