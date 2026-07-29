@@ -24,6 +24,25 @@ const STREET_KEYWORDS = [
   "TER", "BIS", "FAUBOURG",
 ];
 
+// Mot entier, jamais une sous-chaine : plusieurs mots-cles ci-dessus sont
+// courts (AV, BD, TER, BIS, VOIE) et apparaissent par coincidence DANS des
+// noms/prenoms francais tres courants -- "AV" dans "DAVID"/"GUSTAVE"/"AVRIL",
+// "BD" dans "ABDALLAH", "TER" dans "STERN", "VOIE" dans "SAVOIE". Avec un
+// simple `.includes()` (bug reel trouve par analyse statique, meme symptome
+// que l'ancien bug du chiffre isole plus bas : le nom bascule a tort en
+// "rue" et disparait), une ligne "DAVID MARTIN" ou "SAVOIE JULIE" etait
+// classee comme ligne de rue au lieu du nom. Delimiteur = tout ce qui n'est
+// pas une lettre (espace, chiffre, ponctuation, debut/fin de ligne) : couvre
+// aussi les mots-cles a espace/tiret interne ("LIEU-DIT", "LIEU DIT") sans
+// les casser, puisque seules les extremites du mot-cle sont verifiees.
+function lineHasStreetWord(line) {
+  const upper = line.toUpperCase();
+  return STREET_KEYWORDS.some((k) => {
+    const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^A-ZÀ-Ü'])${escaped}(?=[^A-ZÀ-Ü']|$)`, "i").test(upper);
+  });
+}
+
 // Regle unique, sans branchement par longueur de prefixe : le prefixe
 // parasite (006, 336, 00336, 33336, +33, 0033...) est toujours AVANT le
 // vrai numero francais a 9 chiffres significatifs -- en prenant
@@ -84,7 +103,7 @@ function classifyShipToBlock(lines) {
     // frequente O/0, l/1, S/5) faisait basculer toute la ligne en "rue" et
     // faisait disparaitre le nom -- cause probable du "(nom inconnu)"
     // systematique constate sur le terrain (voir historique de discussion).
-    const hasStreetWord = STREET_KEYWORDS.some((k) => line.toUpperCase().includes(k));
+    const hasStreetWord = lineHasStreetWord(line);
     const startsWithNumber = /^\d/.test(line);
     if (startsWithNumber || hasStreetWord) {
       result.streets.push(line);

@@ -130,5 +130,47 @@ console.log("\n=== Regression : bruit OCR O/0 dans le nom (ne doit plus le faire
   assertEqual(r.ville, "ANSAUVILLE", "ville");
 }
 
+// --- Regression : mots-cles de rue courts (AV, BD, TER, BIS, VOIE) trouves
+// par SOUS-CHAINE dans des noms/prenoms francais courants -- meme symptome
+// que le bug O/0 ci-dessus (le nom bascule en "rue" et disparait) mais via un
+// chemin de code different (STREET_KEYWORDS.some(... .includes(k)), pas le
+// test /\d/). Trouve par analyse statique (pas encore vu dans le journal de
+// corrections OCR), corrige en exigeant un mot ENTIER (lineHasStreetWord) ---
+console.log("\n=== Regression : mots-cles de rue courts trouves par erreur DANS un nom ===");
+{
+  const cases = [
+    ["DAVID MARTIN", "AV dans DAVID"],
+    ["ABDALLAH NASSER", "BD dans ABDALLAH"],
+    ["SAVOIE JULIE", "VOIE dans SAVOIE"],
+    ["GUSTAVE LEROY", "AV dans GUSTAVE"],
+    ["AVRIL SOPHIE", "AV dans AVRIL"],
+    ["STERN MARC", "TER dans STERN"],
+  ];
+  for (const [nomLigne, label] of cases) {
+    const text = [nomLigne, "0642158790", "6 RUE DE L EGLISE", "54470 ANSAUVILLE"].join("\n");
+    const r = parseUpsLabel(`SHIP TO:\n${text}`);
+    assertEqual(r.nom, nomLigne, `nom present malgre ${label}`);
+    assertEqual(r.rue, "6 RUE DE L EGLISE", `rue non contaminee (${label})`);
+  }
+}
+
+// --- Regression (non-regression) : les memes mots-cles courts doivent
+// toujours declencher la classification "rue" quand ils apparaissent comme
+// mot entier (abreviation reelle sur une etiquette), pas seulement en toutes
+// lettres ---
+console.log("\n=== Non-regression : mots-cles courts comme mot entier restent classes en rue ===");
+{
+  const cases = [
+    ["6 BD JOFFRE", "BD abrege"],
+    ["12 AV DE LA LIBERATION", "AV abrege"],
+  ];
+  for (const [rueLigne, label] of cases) {
+    const text = ["JEAN DUPONT", "0642158790", rueLigne, "54000 NANCY"].join("\n");
+    const r = parseUpsLabel(`SHIP TO:\n${text}`);
+    assertEqual(r.rue, rueLigne, `rue toujours detectee (${label})`);
+    assertEqual(r.nom, "JEAN DUPONT", `nom toujours correct (${label})`);
+  }
+}
+
 console.log(`\n${failures === 0 ? "TOUS LES TESTS SONT PASSES" : `${failures} ECHEC(S)`}`);
 process.exit(failures === 0 ? 0 : 1);
