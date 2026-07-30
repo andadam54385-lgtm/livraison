@@ -253,14 +253,26 @@ export async function runRecalculate(container, { tour, onDone, disableButtons =
       progressFill,
     });
 
-    pendingStops.forEach((s, i) => {
-      s.ordre = fixedStops.length + i + 1;
+    // Renumerote TOUT le tableau final (fixes + pending) par position, sans
+    // garder les anciens numeros d'ordre des arrets fixes -- bug reel corrige
+    // ici : si un arret livre/en echec avait ete traite hors ordre (ex: un
+    // arret n'ayant pas l'ordre le plus bas parmi les "ordre <=
+    // fixedStops.length"), son ancien "ordre" pouvait entrer en collision avec
+    // celui, recalcule, d'un arret pending -- deux arrets partageant alors le
+    // meme "ordre", et markStopDelivered(tourId, ordre) (qui fait juste
+    // tour.stops.find(s => s.ordre === ordre)) retombait sur le mauvais arret
+    // (le premier du tableau, deja livre) : le bouton "Livre" de la hero card
+    // semblait alors "refuser" indefiniment, l'arret vise n'etant en realite
+    // jamais marque livre.
+    const allStops = [...fixedStops, ...pendingStops];
+    allStops.forEach((s, i) => {
+      s.ordre = i + 1;
     });
     const fixedTotal = fixedStops.reduce((a, s) => a + (s.legDureeSec || 0), 0);
 
     const updatedTour = await saveTour({
       ...tour,
-      stops: [...fixedStops, ...pendingStops],
+      stops: allStops,
       totalDureeSec: fixedTotal + pendingTotal,
     });
 
