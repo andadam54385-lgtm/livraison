@@ -567,7 +567,24 @@ async function render() {
   const { db, geocoded, settings, csr, depot, favGeoco, returnPoint, ordreParColisId, ordered } = await loadMapData();
 
   if (geocoded.length === 0) {
-    containerRef.innerHTML = `<div class="empty-state">Aucun colis géocodé pour le moment. Scanne ou saisis des colis, puis reviens ici.</div>`;
+    // Bug reel : l'ancien retour anticipe remplaçait TOUT le conteneur par le
+    // message vide, y compris le bouton menu -- or Reglages n'est accessible
+    // QUE depuis ce menu (plus d'onglet dedie dans la nav du bas depuis le
+    // 2026-07-26). Un utilisateur sans aucun colis geocode (ex: tout premier
+    // lancement) se retrouvait donc sans aucun moyen d'atteindre Reglages.
+    containerRef.innerHTML = `
+      <div class="map-canvas-wrap">
+        <div class="empty-state">Aucun colis géocodé pour le moment. Scanne ou saisis des colis, puis reviens ici.</div>
+        <button type="button" class="map-menu-btn" id="map-menu-toggle" aria-label="Menu">${icon("menu", { spaced: false, size: 22 })}</button>
+        <div class="map-menu-panel" id="map-menu-panel" hidden>
+          <a class="btn-link" href="#settings">${icon("settings")}Réglages</a>
+          ${!csr ? `<p class="map-menu-warn">${icon("alert-triangle", { spaced: false })}Trajet en ligne droite (graphe routier non chargé)</p>` : ""}
+        </div>
+      </div>
+    `;
+    const menuToggle = containerRef.querySelector("#map-menu-toggle");
+    const menuPanel = containerRef.querySelector("#map-menu-panel");
+    menuToggle.addEventListener("click", () => menuPanel.toggleAttribute("hidden"));
     return;
   }
 
