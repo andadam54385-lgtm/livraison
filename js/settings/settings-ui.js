@@ -1,6 +1,6 @@
 import { getAllSettings, setSetting, DEFAULTS } from "./settings-store.js";
 import { getDb } from "../db/schema.js";
-import { clear } from "../lib/idb.js";
+import { clear, get } from "../lib/idb.js";
 import { listFavoris, updateFavori, deleteFavori } from "../favoris/favoris-store.js";
 import { saveColis } from "../scan/colis-store.js";
 import { showToast } from "../lib/toast.js";
@@ -56,6 +56,16 @@ async function render() {
   if (navigator.storage?.persisted) {
     persisted = await navigator.storage.persisted();
   }
+
+  // Repere de version des donnees locales (noeuds/aretes du graphe + hash
+  // court) -- affiche ici pour pouvoir verifier a l'oeil, apres une
+  // resynchronisation, que la zone attendue est bien celle chargee (sans ca,
+  // aucun moyen de le savoir depuis l'appli -- source d'un vrai flou terrain).
+  const db = await getDb();
+  const graphMeta = await get(db, "graphMeta", "current");
+  const graphInfo = graphMeta
+    ? `Graphe routier : ${graphMeta.nodeCount.toLocaleString("fr-FR")} nœuds / ${graphMeta.edgeCount.toLocaleString("fr-FR")} arêtes (version ${graphMeta.version.slice(0, 8)})`
+    : "Graphe routier : non chargé.";
 
   const favoris = await listFavoris();
   const favorisHtml =
@@ -135,6 +145,7 @@ async function render() {
       <div class="card-title">Stockage local</div>
       <p class="muted">${storageInfo}</p>
       <p class="muted">Stockage persistant : ${persisted ? `activé ${icon("check", { spaced: false })}` : "non activé"}</p>
+      <p class="muted">${graphInfo}</p>
     </div>
     <div class="button-row">
       <button type="button" class="primary" id="s-save">Enregistrer</button>
