@@ -25,6 +25,11 @@ import { icon, iconToImage } from "../ui/icons.js";
 let containerRef = null;
 let mapInstance = null;
 let themeMediaCleanup = null;
+// true seulement une fois addMapLayers() a tourne (dans map.on("load", ...)) :
+// getSource() avant que le style ne soit charge peut lever selon la version
+// de MapLibre plutot que retourner juste undefined -- ce flag explicite evite
+// de s'y fier (voir refreshMapData()).
+let layersReady = false;
 
 let libsLoadPromise = null;
 let pmtilesProtocol = null; // singleton process : un seul enregistrement global du schema "pmtiles"
@@ -466,9 +471,12 @@ function setupStopPanelSheet(panel, handle) {
   handle.addEventListener("pointercancel", endDrag);
 }
 
-async function render() {
-  containerRef.innerHTML = `<div class="empty-state">Chargement de la carte…</div>`;
-
+// Recupere + met en forme toutes les donnees necessaires a l'ecran Carte
+// (colis geocodes, tournee active, reglages, favoris, graphe routier) --
+// factorise pour etre appelable a la fois par render() (montage complet) et
+// refreshMapData() (rafraichissement leger apres une livraison, voir
+// plus bas) sans dupliquer la logique de tri/filtrage.
+async function loadMapData() {
   const db = await getDb();
   const [allColis, activeTour, settings, favoris, csr] = await Promise.all([
     listAllColis(),
@@ -478,24 +486,6 @@ async function render() {
     loadCsrFromDb(db),
   ]);
   const geocoded = allColis.filter((c) => c.geocode?.lat != null && c.geocode?.lon != null);
-
-  if (geocoded.length === 0) {
-    containerRef.innerHTML = `<div class="empty-state">Aucun colis géocodé pour le moment. Scanne ou saisis des colis, puis reviens ici.</div>`;
-    return;
-  }
-
-  await loadMapLibs();
-  const hasMap = await ensurePmtilesSource(db);
-
-  if (mapInstance) {
-    mapInstance.remove();
-    mapInstance = null;
-  }
-  if (themeMediaCleanup) {
-    themeMediaCleanup();
-    themeMediaCleanup = null;
-  }
-
   const depot = activeTour?.depot ?? { lat: settings.depotLat, lon: settings.depotLon, label: settings.depotLabel };
   const favGeoco = favoris.filter((f) => f.lat != null && f.lon != null);
   const returnPoint = activeTour?.returnToDepot && activeTour.depotArrivee ? activeTour.depotArrivee : null;
@@ -510,6 +500,88 @@ async function render() {
       .map((s) => ({ stop: s, colis: byColisId.get(s.colisId) }))
       .filter((x) => x.colis);
     ordered.forEach(({ stop }) => ordreParColisId.set(stop.colisId, stop.ordre));
+  }
+
+  return { db, geocoded, settings, csr, depot, favGeoco, returnPoint, ordreParColisId, ordered };
+}
+
+// Rebranche les boutons "Marquer livre" d'une liste d'arrets (portee limitee
+// a scopeEl pour pouvoir re-brancher juste apres un remplacement cible de
+// .stop-panel-list, sans reparcourir tout containerRef -- voir
+// refreshMapData()).
+function bindStopListDeliverButtons(scopeEl) {
+  scopeEl.querySelectorAll("[data-stop-deliver]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      await markColisDeliveredDirect(el.dataset.stopDeliver);
+      await refreshMapData();
+    });
+  });
+}
+
+// Rafraichissement leger apres une livraison marquee depuis l'ecran Carte :
+// contrairement a render(), ne detruit PAS l'instance MapLibre (contexte
+// WebGL + tuiles deja decodees) ni l'etat de l'UI (panneau menu, position de
+// la feuille d'arrets, pan/zoom) -- seules les donnees qui peuvent reellement
+// changer (statut d'un arret) sont mises a jour : sources "stops"/"route" via
+// setData(), liste d'arrets, et fiche detail si elle est ouverte sur le colis
+// concerne. "favoris"/"waypoints" ne changent jamais suite a une livraison,
+// pas besoin de les toucher. Repli sur render() si l'instance n'existe pas
+// encore ou si ses sources ne sont pas encore posees (fenetre de montage
+// avant que le "load" de MapLibre n'ait tourne, voir addMapLayers plus haut) --
+// getSource() ne leve pas d'exception, retourne juste undefined.
+async function refreshMapData() {
+  if (!mapInstance || !layersReady) return render();
+
+  const { geocoded, csr, depot, returnPoint, ordreParColisId, ordered, settings } = await loadMapData();
+
+  mapInstance.getSource("stops").setData(buildStopsGeoJson(geocoded, ordreParColisId));
+  mapInstance.getSource("route").setData(buildRouteGeoJson(depot, ordered, returnPoint, csr));
+
+  const stopListEl = containerRef.querySelector(".stop-panel-list");
+  if (stopListEl) {
+    stopListEl.innerHTML = renderStopList(ordered, settings.navApp);
+    bindStopListDeliverButtons(stopListEl);
+  }
+
+  // Si la fiche detail ouverte concerne justement le colis qu'on vient de
+  // livrer, la rafraichir aussi (sinon son bouton "Marquer livre" reste
+  // affiche par erreur jusqu'au prochain montage complet).
+  const detailEl = containerRef.querySelector("#map-detail");
+  const openBtn = detailEl?.querySelector("[data-map-deliver]");
+  if (openBtn) {
+    const colis = geocoded.find((c) => c.id === openBtn.dataset.mapDeliver);
+    if (colis) {
+      detailEl.innerHTML = `<div class="card" style="margin:0 16px 12px;">${formatColisDetail(colis, { navApp: settings.navApp, ordre: ordreParColisId.get(colis.id) })}</div>`;
+      const btn = detailEl.querySelector("[data-map-deliver]");
+      btn?.addEventListener("click", async () => {
+        await markColisDeliveredDirect(btn.dataset.mapDeliver);
+        await refreshMapData();
+      });
+    }
+  }
+}
+
+async function render() {
+  containerRef.innerHTML = `<div class="empty-state">Chargement de la carte…</div>`;
+
+  const { db, geocoded, settings, csr, depot, favGeoco, returnPoint, ordreParColisId, ordered } = await loadMapData();
+
+  if (geocoded.length === 0) {
+    containerRef.innerHTML = `<div class="empty-state">Aucun colis géocodé pour le moment. Scanne ou saisis des colis, puis reviens ici.</div>`;
+    return;
+  }
+
+  await loadMapLibs();
+  const hasMap = await ensurePmtilesSource(db);
+
+  if (mapInstance) {
+    mapInstance.remove();
+    mapInstance = null;
+    layersReady = false;
+  }
+  if (themeMediaCleanup) {
+    themeMediaCleanup();
+    themeMediaCleanup = null;
   }
 
   const stopListHtml = renderStopList(ordered, settings.navApp);
@@ -570,16 +642,12 @@ async function render() {
     if (!btn) return;
     btn.addEventListener("click", async () => {
       await markColisDeliveredDirect(btn.dataset.mapDeliver);
-      await render();
+      await refreshMapData();
     });
   }
 
-  containerRef.querySelectorAll("[data-stop-deliver]").forEach((el) => {
-    el.addEventListener("click", async () => {
-      await markColisDeliveredDirect(el.dataset.stopDeliver);
-      await render();
-    });
-  });
+  const initialStopListEl = containerRef.querySelector(".stop-panel-list");
+  if (initialStopListEl) bindStopListDeliverButtons(initialStopListEl);
 
   if (!hasMap) return;
 
@@ -632,6 +700,7 @@ async function render() {
     const favorisGeoJson = buildFavorisGeoJson(favGeoco);
     const waypointsGeoJson = buildWaypointsGeoJson(depot, returnPoint);
     addMapLayers(map, { routeGeoJson, stopsGeoJson, favorisGeoJson, waypointsGeoJson });
+    layersReady = true;
 
     const allPoints = [
       depot,
