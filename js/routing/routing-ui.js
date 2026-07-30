@@ -3,8 +3,8 @@ import { loadCsrFromDb } from "./graph-loader.js";
 import { buildSpatialGrid, findNearestNode } from "./spatial-index.js";
 import { buildTravelTimeMatrix } from "./matrix-builder.js";
 import { optimizeTourOrder } from "./tsp.js";
-import { listColisByStatut, saveColis } from "../scan/colis-store.js";
-import { createTour } from "./tour-store.js";
+import { listColisByStatut, saveColis, getColis } from "../scan/colis-store.js";
+import { createTour, saveTour } from "./tour-store.js";
 import { getAllSettings, setSetting } from "../settings/settings-store.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
 import { emit } from "../lib/event-bus.js";
@@ -47,6 +47,93 @@ function legDurationsSeconds(order, matrix, startIdx) {
   return legs;
 }
 
+// Coeur partage du tri : point de depart -> N arrets (+ retour depot
+// optionnel) -> ordre optimise + duree de chaque troncon. Utilise a la fois
+// pour la creation initiale (runSort) et pour le recalcul en place d'une
+// tournee active (runRecalculate) -- statusEl/progressFill pilotent le texte
+// de progression de l'appelant, progressFill est optionnel (Etat B n'a pas
+// forcement de barre de progression dediee).
+async function computeOptimizedStops({ eligibles, start, depotReturnPoint, settings, statusEl, progressFill }) {
+  statusEl.textContent = "Chargement du graphe routier…";
+  const db = await getDb();
+  const csr = await loadCsrFromDb(db);
+  if (!csr) {
+    throw new Error("Graphe routier indisponible. Réimporte les données dans les réglages.");
+  }
+
+  statusEl.textContent = "Positionnement des arrêts sur le réseau routier…";
+  const grid = buildSpatialGrid(csr.nodeLat, csr.nodeLon);
+
+  // Si "revenir au depot" est active, le depot est ajoute une seconde fois
+  // en tant que point d'arrivee fixe (voir fixedEndIdx plus bas) -- distinct
+  // du point de depart, qui peut etre le depot ou la position GPS.
+  const points = [
+    start,
+    ...eligibles.map((c) => ({ lat: c.geocode.lat, lon: c.geocode.lon })),
+    ...(depotReturnPoint ? [depotReturnPoint] : []),
+  ];
+  const depotEndIdx = depotReturnPoint ? points.length - 1 : null;
+
+  const pointNodeIndices = [];
+  const unsnapped = [];
+  for (let i = 0; i < points.length; i++) {
+    const { nodeIndex, distanceMeters } = findNearestNode(grid, csr.nodeLat, csr.nodeLon, points[i].lat, points[i].lon);
+    if (nodeIndex === -1 || distanceMeters > 2000) {
+      unsnapped.push(i);
+    }
+    pointNodeIndices.push(nodeIndex === -1 ? 0 : nodeIndex);
+  }
+  if (unsnapped.length > 0) {
+    statusEl.textContent = `${unsnapped.length} point(s) trop loin du réseau routier connu — ils seront quand même inclus avec une estimation approximative.`;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+
+  statusEl.textContent = `Calcul des temps de trajet (0/${points.length})…`;
+  const matrix = await buildTravelTimeMatrix(csr, pointNodeIndices, {
+    maxSeconds: 3600,
+    onProgress: (done, total) => {
+      statusEl.textContent = `Calcul des temps de trajet (${done}/${total})…`;
+      if (progressFill) progressFill.style.width = `${Math.round((done / total) * 100)}%`;
+    },
+  });
+
+  statusEl.textContent = "Optimisation de l'ordre de tournée…";
+  const stopIndices = eligibles.map((_, i) => i + 1);
+  const avant12hFlags = {};
+  eligibles.forEach((c, i) => {
+    avant12hFlags[i + 1] = Boolean(c.avant12h);
+  });
+  const penaltyWeight = (settings.avant12hPenaltyMinutes || 0) * 60;
+
+  const { order } = optimizeTourOrder(matrix, 0, depotEndIdx != null ? [...stopIndices, depotEndIdx] : stopIndices, {
+    avant12hFlags,
+    penaltyWeight,
+    timeBudgetMs: 5000,
+    fixedEndIdx: depotEndIdx,
+  });
+
+  const legs = legDurationsSeconds(order, matrix, 0);
+  const totalDureeSec = legs.reduce((a, b) => a + b, 0);
+  // fixedEndIdx (voir tsp.js) garantit que le point de retour au depot,
+  // s'il existe, est toujours le tout dernier element de `order` -- les
+  // legs des arrets de livraison correspondent donc directement aux
+  // memes positions dans `order` (pas besoin de les re-associer).
+  const deliveryOrder = depotEndIdx != null ? order.slice(0, -1) : order;
+
+  const stops = deliveryOrder.map((pointIdx, i) => {
+    const colis = eligibles[pointIdx - 1];
+    return {
+      colisId: colis.id,
+      ordre: i + 1,
+      statutLivraison: "a_livrer",
+      heureLivraison: null,
+      legDureeSec: legs[i],
+    };
+  });
+
+  return { stops, totalDureeSec };
+}
+
 // Ecran appelant (tour-ui.js, Etat A) : doit fournir un conteneur avec
 // #routing-status, #routing-progress-fill et les boutons de declenchement
 // (peu importe leur nombre/libelle, seul `useGps`/`depotReturn` importent ici).
@@ -83,84 +170,14 @@ export async function runSort(container, { useGps, depotReturn, onDone, disableB
       }
     }
 
-    statusEl.textContent = "Chargement du graphe routier…";
-    const db = await getDb();
-    const csr = await loadCsrFromDb(db);
-    if (!csr) {
-      statusEl.textContent = "Graphe routier indisponible. Réimporte les données dans les réglages.";
-      disableButtons.forEach((b) => (b.disabled = false));
-      return;
-    }
-
-    statusEl.textContent = "Positionnement des arrêts sur le réseau routier…";
-    const grid = buildSpatialGrid(csr.nodeLat, csr.nodeLon);
-
-    // Si "revenir au depot" est active, le depot est ajoute une seconde fois
-    // en tant que point d'arrivee fixe (voir fixedEndIdx plus bas) -- distinct
-    // du point de depart, qui peut etre le depot ou la position GPS.
     const depotReturnPoint = depotReturnChecked ? { lat: settings.depotLat, lon: settings.depotLon } : null;
-    const points = [
+    const { stops, totalDureeSec } = await computeOptimizedStops({
+      eligibles,
       start,
-      ...eligibles.map((c) => ({ lat: c.geocode.lat, lon: c.geocode.lon })),
-      ...(depotReturnPoint ? [depotReturnPoint] : []),
-    ];
-    const depotEndIdx = depotReturnPoint ? points.length - 1 : null;
-
-    const pointNodeIndices = [];
-    const unsnapped = [];
-    for (let i = 0; i < points.length; i++) {
-      const { nodeIndex, distanceMeters } = findNearestNode(grid, csr.nodeLat, csr.nodeLon, points[i].lat, points[i].lon);
-      if (nodeIndex === -1 || distanceMeters > 2000) {
-        unsnapped.push(i);
-      }
-      pointNodeIndices.push(nodeIndex === -1 ? 0 : nodeIndex);
-    }
-    if (unsnapped.length > 0) {
-      statusEl.textContent = `${unsnapped.length} point(s) trop loin du réseau routier connu — ils seront quand même inclus avec une estimation approximative.`;
-      await new Promise((r) => setTimeout(r, 1500));
-    }
-
-    statusEl.textContent = `Calcul des temps de trajet (0/${points.length})…`;
-    const matrix = await buildTravelTimeMatrix(csr, pointNodeIndices, {
-      maxSeconds: 3600,
-      onProgress: (done, total) => {
-        statusEl.textContent = `Calcul des temps de trajet (${done}/${total})…`;
-        progressFill.style.width = `${Math.round((done / total) * 100)}%`;
-      },
-    });
-
-    statusEl.textContent = "Optimisation de l'ordre de tournée…";
-    const stopIndices = eligibles.map((_, i) => i + 1);
-    const avant12hFlags = {};
-    eligibles.forEach((c, i) => {
-      avant12hFlags[i + 1] = Boolean(c.avant12h);
-    });
-    const penaltyWeight = (settings.avant12hPenaltyMinutes || 0) * 60;
-
-    const { order } = optimizeTourOrder(matrix, 0, depotEndIdx != null ? [...stopIndices, depotEndIdx] : stopIndices, {
-      avant12hFlags,
-      penaltyWeight,
-      timeBudgetMs: 5000,
-      fixedEndIdx: depotEndIdx,
-    });
-
-    const legs = legDurationsSeconds(order, matrix, 0);
-    const totalDureeSec = legs.reduce((a, b) => a + b, 0);
-    // fixedEndIdx (voir tsp.js) garantit que le point de retour au depot,
-    // s'il existe, est toujours le tout dernier element de `order` -- les
-    // legs des arrets de livraison correspondent donc directement aux
-    // memes positions dans `order` (pas besoin de les re-associer).
-    const deliveryOrder = depotEndIdx != null ? order.slice(0, -1) : order;
-
-    const stops = deliveryOrder.map((pointIdx, i) => {
-      const colis = eligibles[pointIdx - 1];
-      return {
-        colisId: colis.id,
-        ordre: i + 1,
-        statutLivraison: "a_livrer",
-        heureLivraison: null,
-        legDureeSec: legs[i],
-      };
+      depotReturnPoint,
+      settings,
+      statusEl,
+      progressFill,
     });
 
     const tour = await createTour({
@@ -178,6 +195,82 @@ export async function runSort(container, { useGps, depotReturn, onDone, disableB
     emit("tour:computed", { tour });
     statusEl.textContent = `Tournée prête (${formatDurationShort(totalDureeSec)} estimées).`;
     onDone?.(tour);
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = `Erreur: ${err.message || err}`;
+  } finally {
+    disableButtons.forEach((b) => (b.disabled = false));
+  }
+}
+
+// Recalcul EN PLACE d'une tournee active (bouton "Recalculer" en Etat B,
+// tour-ui.js) : contrairement a runSort (qui archive/remplace toute la
+// tournee), garde les arrets deja livres/en echec intacts a leur place et ne
+// retrie que les arrets restants -- en incluant les colis "pret" scannes
+// entre-temps (voir listColisEligibles). Le point de depart du retri essaie
+// la position GPS live (le camion a bouge depuis le calcul initial), puis le
+// dernier arret deja traite, puis le point de depart d'origine de la tournee
+// en dernier recours.
+export async function runRecalculate(container, { tour, onDone, disableButtons = [] }) {
+  const statusEl = container.querySelector("#routing-status");
+  const progressFill = container.querySelector("#routing-progress-fill");
+  disableButtons.forEach((b) => (b.disabled = true));
+
+  try {
+    const settings = await getAllSettings();
+    const sortedStops = tour.stops.slice().sort((a, b) => a.ordre - b.ordre);
+    const fixedStops = sortedStops.filter((s) => s.statutLivraison === "livre" || s.statutLivraison === "echec");
+    const eligibles = await listColisEligibles();
+
+    if (eligibles.length === 0) {
+      statusEl.textContent = "Aucun arrêt en attente à recalculer.";
+      disableButtons.forEach((b) => (b.disabled = false));
+      return;
+    }
+
+    let start = tour.depot;
+    statusEl.textContent = "Localisation en cours…";
+    try {
+      const pos = await getCurrentPosition();
+      start = { ...pos, label: "Position actuelle" };
+    } catch (err) {
+      const lastFixed = fixedStops[fixedStops.length - 1];
+      const lastColis = lastFixed ? await getColis(lastFixed.colisId) : null;
+      if (lastColis?.geocode?.lat != null) {
+        start = { lat: lastColis.geocode.lat, lon: lastColis.geocode.lon, label: "Dernier arrêt traité" };
+      }
+      statusEl.textContent = `Position indisponible (${err.message}), repli sur "${start.label}".`;
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+
+    const depotReturnPoint = tour.returnToDepot && tour.depotArrivee ? { lat: tour.depotArrivee.lat, lon: tour.depotArrivee.lon } : null;
+    const { stops: pendingStops, totalDureeSec: pendingTotal } = await computeOptimizedStops({
+      eligibles,
+      start,
+      depotReturnPoint,
+      settings,
+      statusEl,
+      progressFill,
+    });
+
+    pendingStops.forEach((s, i) => {
+      s.ordre = fixedStops.length + i + 1;
+    });
+    const fixedTotal = fixedStops.reduce((a, s) => a + (s.legDureeSec || 0), 0);
+
+    const updatedTour = await saveTour({
+      ...tour,
+      stops: [...fixedStops, ...pendingStops],
+      totalDureeSec: fixedTotal + pendingTotal,
+    });
+
+    for (const colis of eligibles) {
+      await saveColis({ ...colis, statut: "en_tournee" });
+    }
+
+    emit("tour:computed", { tour: updatedTour });
+    statusEl.textContent = `Tournée recalculée (${formatDurationShort(pendingTotal)} restantes estimées).`;
+    onDone?.(updatedTour);
   } catch (err) {
     console.error(err);
     statusEl.textContent = `Erreur: ${err.message || err}`;

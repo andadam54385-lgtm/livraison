@@ -4,7 +4,7 @@ import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
 import { buildSmsOptions } from "./sms-template.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
-import { runSort } from "../routing/routing-ui.js";
+import { runSort, runRecalculate } from "../routing/routing-ui.js";
 import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
 import { renderColisDetail } from "../scan/colis-detail-ui.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
@@ -702,8 +702,11 @@ async function renderEtatB(tour) {
     ${total > 0 ? `<p class="muted" style="margin:-4px 0 10px;">Horaires estimés à titre indicatif — recalcule la tournée après un réarrangement pour des horaires exacts.</p>` : ""}
     <div id="stops-container" data-hero-colis-id="${heroEntry ? escapeAttr(heroEntry.colis.id) : ""}"></div>
     ${renderDepotReturnCard(tour, navApp, lastDepotEta)}
+    <p id="routing-status" class="muted" style="margin:10px 0 0;"></p>
+    <div class="progress-bar"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
     <div class="button-row">
-      <button type="button" class="danger" id="recalc-tour-btn">Recalculer la tournée</button>
+      <button type="button" id="recalc-tour-btn">${icon("zap")}Recalculer la tournée</button>
+      <button type="button" class="danger" id="end-tour-btn">Terminer la tournée</button>
     </div>
   `;
 
@@ -730,8 +733,21 @@ async function renderEtatB(tour) {
     render();
   });
 
-  containerRef.querySelector("#recalc-tour-btn").addEventListener("click", async () => {
-    if (!confirm("Recalculer la tournée ? Les arrêts déjà traités restent acquis, les autres seront re-triés (colis en attente inclus).")) return;
+  containerRef.querySelector("#recalc-tour-btn").addEventListener("click", () => {
+    const recalcBtn = containerRef.querySelector("#recalc-tour-btn");
+    const endBtn = containerRef.querySelector("#end-tour-btn");
+    runRecalculate(containerRef, {
+      tour,
+      disableButtons: [recalcBtn, endBtn],
+      onDone: () => {
+        reorderMode = false;
+        render();
+      },
+    });
+  });
+
+  containerRef.querySelector("#end-tour-btn").addEventListener("click", async () => {
+    if (!confirm("Terminer cette tournée ? Les arrêts restants (non livrés) resteront dans l'historique tels quels — utilise plutôt \"Recalculer\" s'il reste des arrêts à faire.")) return;
     await archiveTour(tour.id);
     reorderMode = false;
     render();
