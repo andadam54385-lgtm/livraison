@@ -4,6 +4,28 @@ import { renderImportProgress } from "./import/import-ui.js";
 import { purgeOldTours } from "./routing/tour-store.js";
 import { getSetting } from "./settings/settings-store.js";
 import { icon } from "./ui/icons.js";
+import { reportBug } from "./debug/bug-reports-store.js";
+
+// Capture automatique des erreurs JS non attrapees (retour terrain : le
+// livreur ne pense pas toujours a signaler un bug lui-meme) -- complement au
+// bouton manuel "Signaler un bug" des Reglages, voir bug-reports-store.js.
+// Best-effort : si l'ecriture IndexedDB elle-meme echoue (ex: DB pas encore
+// ouverte au tout debut du boot), on avale silencieusement plutot que de
+// provoquer une 2e erreur en cascade.
+function installGlobalErrorCapture() {
+  window.addEventListener("error", (e) => {
+    reportBug({ type: "auto", message: e.message || String(e.error), stack: e.error?.stack, context: "window.onerror" }).catch(() => {});
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    const reason = e.reason;
+    reportBug({
+      type: "auto",
+      message: reason?.message || String(reason),
+      stack: reason?.stack,
+      context: "unhandledrejection",
+    }).catch(() => {});
+  });
+}
 
 // Tournee est l'ecran d'accueil et heberge le scan (bouton flottant camera,
 // voir tour-ui.js) : machine a 2 etats (preparation/execution), plus de tab
@@ -38,6 +60,7 @@ async function navigate(name) {
     await mod.mount(container);
   } catch (err) {
     console.error(`Erreur d'affichage de la vue "${name}":`, err);
+    reportBug({ type: "auto", message: err.message || String(err), stack: err.stack, context: `navigate("${name}")` }).catch(() => {});
     const container = document.getElementById(`${name}-content`);
     if (container) {
       container.innerHTML = `<div class="empty-state">Erreur d'affichage. Détail dans la console.</div>`;
@@ -55,6 +78,8 @@ function onHashChange() {
 }
 
 async function boot() {
+  installGlobalErrorCapture();
+
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch((err) => {
       console.warn("Service worker non enregistré:", err);
@@ -104,6 +129,7 @@ async function boot() {
 
 boot().catch((err) => {
   console.error("Echec du demarrage:", err);
+  reportBug({ type: "auto", message: err.message || String(err), stack: err.stack, context: "boot()" }).catch(() => {});
   const importView = document.getElementById("import-view");
   importView.hidden = false;
   document.getElementById("import-status").textContent = "Erreur au démarrage.";

@@ -1,7 +1,7 @@
 import { openDatabase } from "../lib/idb.js";
 
 export const DB_NAME = "delivery-tour";
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 
 let dbPromise = null;
 
@@ -55,6 +55,13 @@ function upgrade(db) {
   // js/scan/ocr-corrections-store.js.
   if (!db.objectStoreNames.contains("ocrCorrections")) {
     db.createObjectStore("ocrCorrections", { keyPath: "id" });
+  }
+  // Rapports de bug (v5) : notes manuelles ("Signaler un bug", Reglages) et
+  // captures automatiques d'erreurs JS non attrapees (voir app.js) -- meme
+  // esprit que ocrCorrections, mais pour n'importe quel souci technique, pas
+  // seulement l'OCR. Voir js/debug/bug-reports-store.js.
+  if (!db.objectStoreNames.contains("bugReports")) {
+    db.createObjectStore("bugReports", { keyPath: "id" });
   }
 }
 

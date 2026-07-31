@@ -135,6 +135,14 @@ async function listAllTours(db) {
   return [...enCours, ...archivees];
 }
 
+// Variante exportee (ouvre elle-meme la connexion) : utilisee par l'export
+// CSV des Reglages (voir js/export/export-tours.js), seul appelant externe
+// a ce jour a avoir besoin de TOUTES les tournees (en cours + archivees).
+export async function getAllTours() {
+  const db = await getDb();
+  return listAllTours(db);
+}
+
 // Petit bilan du jour (colis livres, tournees calculees, duree estimee
 // cumulee) -- calcule a la volee a partir des tournees en cours + archivees,
 // pas d'agregat persiste separement.

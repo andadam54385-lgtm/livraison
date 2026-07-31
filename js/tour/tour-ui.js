@@ -10,6 +10,7 @@ import { renderColisDetail } from "../scan/colis-detail-ui.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
 import { showToast } from "../lib/toast.js";
 import { icon } from "../ui/icons.js";
+import { reportBug } from "../debug/bug-reports-store.js";
 
 // Ecran "Tournee" fusionne (chantier fusion Tournee/Scan) : machine a 2
 // etats dans le MEME onglet/conteneur.
@@ -142,6 +143,7 @@ async function render() {
     }
   } catch (err) {
     console.error("Erreur d'affichage de l'écran Tournée:", err);
+    reportBug({ type: "auto", message: err.message || String(err), stack: err.stack, context: "tour-ui render()" }).catch(() => {});
     containerRef.innerHTML = `<div class="empty-state">Erreur d'affichage. Détail dans la console.</div>`;
   }
 }

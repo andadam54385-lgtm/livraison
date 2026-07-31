@@ -5,6 +5,8 @@ import { listFavoris, updateFavori, deleteFavori } from "../favoris/favoris-stor
 import { saveColis } from "../scan/colis-store.js";
 import { showToast } from "../lib/toast.js";
 import { renderOcrDebug } from "../scan/ocr-debug-ui.js";
+import { renderBugReports } from "../debug/bug-reports-ui.js";
+import { exportToursCsv } from "../export/export-tours.js";
 import { renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
 import { getActiveTour } from "../routing/tour-store.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
@@ -16,6 +18,7 @@ function escapeHtml(s) {
 
 let containerRef = null;
 let showDebugOcr = false;
+let showBugReports = false;
 // Copie de travail des 3 templates (menu deroulant : un seul visible/edite a
 // la fois, voir plus bas) -- initialisee une fois par mount() pour survivre
 // aux re-rendus internes (suppression d'un favori, etc.) sans perdre une
@@ -164,6 +167,19 @@ async function render() {
       <div id="debug-ocr-content" ${showDebugOcr ? "" : "hidden"} style="margin-top:10px;"></div>
     </div>
     <div class="card" style="margin-top:20px;">
+      <div class="card-row" style="cursor:pointer;" id="bug-reports-toggle">
+        <div class="card-title" style="margin-bottom:0;">${icon("alert-triangle")}Signaler un bug</div>
+        <span class="muted">${showBugReports ? icon("chevron-up", { spaced: false }) : icon("chevron-down", { spaced: false })}</span>
+      </div>
+      <p class="muted" style="margin-top:6px;">Note un souci à chaud, ou consulte/exporte les problèmes techniques capturés automatiquement.</p>
+      <div id="bug-reports-content" ${showBugReports ? "" : "hidden"} style="margin-top:10px;"></div>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <div class="card-title">Export</div>
+      <p class="muted">Liste de toutes les tournées (en cours et archivées), un arrêt par ligne : nom, adresse, statut, heure — pour un suivi d'activité ou une preuve de livraison.</p>
+      <button type="button" id="s-export-csv">${icon("clipboard-list")}Exporter les tournées (CSV)</button>
+    </div>
+    <div class="card" style="margin-top:20px;">
       <div class="card-title">Zone dangereuse</div>
       <p class="muted">Efface tous les colis et tournées (le graphe routier, les adresses et les favoris restent, pas besoin de réimporter).</p>
       <button type="button" class="danger" id="s-reset">Effacer tous les colis et tournées</button>
@@ -236,6 +252,10 @@ async function render() {
     setSetting("autoNavAfterDeliver", e.target.checked);
   });
 
+  containerRef.querySelector("#s-export-csv").addEventListener("click", async () => {
+    await exportToursCsv();
+  });
+
   containerRef.querySelector("#s-reset").addEventListener("click", async () => {
     if (!confirm("Effacer tous les colis et tournées ? Cette action est irréversible.")) return;
     const db = await getDb();
@@ -305,5 +325,13 @@ async function render() {
   });
   if (showDebugOcr) {
     renderOcrDebug(containerRef.querySelector("#debug-ocr-content"));
+  }
+
+  containerRef.querySelector("#bug-reports-toggle").addEventListener("click", () => {
+    showBugReports = !showBugReports;
+    render();
+  });
+  if (showBugReports) {
+    renderBugReports(containerRef.querySelector("#bug-reports-content"));
   }
 }
