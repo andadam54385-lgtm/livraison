@@ -21,7 +21,16 @@ const crypto = require("crypto");
 
 const ROOT = path.join(__dirname, "..");
 
-const EXCLUDE_DIRS = new Set(["tools", "test-fixtures", "node_modules", ".git"]);
+// Bug reel corrige ici (trouve en generalisant vers Tourneo, voir historique) :
+// "graphify-out" (cache local du graphe de connaissance Graphify, exclu du
+// depot par .gitignore -- voir CLAUDE.md) manquait de cette liste. Le
+// manifeste genere en local listait donc jusqu'a 284 fichiers
+// "./graphify-out/..." qui n'existent JAMAIS sur le site deploye (jamais
+// pousses sur Git) -- sw.js's cache.addAll() etant tout-ou-rien, la moindre
+// 404 parmi ces fichiers faisait echouer l'installation ENTIERE du service
+// worker a chaque deploiement, silencieusement (aucune erreur visible cote
+// utilisateur, juste "le mode hors-ligne ne marche jamais vraiment").
+const EXCLUDE_DIRS = new Set(["tools", "test-fixtures", "node_modules", ".git", "graphify-out"]);
 // map.pmtiles (60+ Mo) est gere par js/map/pmtiles-store.js (import initial
 // vers OPFS, avec sa propre barre de progression), pas par le precache SW --
 // meme raison que graph.json.gz/ban.json.gz : trop gros pour le Cache Storage
