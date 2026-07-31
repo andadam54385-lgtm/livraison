@@ -257,20 +257,16 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
       <input type="text" id="f-cp" class="field-lg" inputmode="numeric" value="${escapeAttr(colis.adresseRaw.cp)}">
     </div>
     <div class="field">
-      <label>Nom</label>
-      <input type="text" id="f-nom" class="field-lg" value="${escapeAttr(colis.nom)}">
+      <label>Nombre de colis à cette adresse</label>
+      <input type="number" id="f-quantite" class="field-lg" inputmode="numeric" min="1" step="1" value="${colis.quantite || 1}">
     </div>
     <div class="field">
       <label>Téléphone ${telBadge}</label>
       <input type="tel" id="f-tel" class="field-lg" value="${escapeAttr(colis.tel)}">
     </div>
     <div class="field">
-      <label>Tracking</label>
-      <input type="text" id="f-tracking" class="field-lg" value="${escapeAttr(colis.tracking)}">
-    </div>
-    <div class="field">
-      <label>Nombre de colis à cette adresse</label>
-      <input type="number" id="f-quantite" class="field-lg" inputmode="numeric" min="1" step="1" value="${colis.quantite || 1}">
+      <label>Nom</label>
+      <input type="text" id="f-nom" class="field-lg" value="${escapeAttr(colis.nom)}">
     </div>
     <div class="toggle-row">
       <label for="f-avant12h">Livrer avant 12h</label>
@@ -293,11 +289,10 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     // geocodage precedent en avait pose une) ne correspond plus forcement,
     // on la laisse etre recalculee par le prochain geocodage reussi.
     colis.adresseAffichage = null;
-    const trackingInput = container.querySelector("#f-tracking").value.trim();
-    if (isNew && trackingInput && trackingInput !== colis.tracking) {
-      colis.id = trackingInput; // corrige a la main avant 1ere sauvegarde -> aligne la cle
-    }
-    colis.tracking = trackingInput || null;
+    // Tracking : plus de champ de saisie manuelle (retour terrain : peu
+    // fiable/peu utile a corriger a la main) -- colis.tracking reste tel
+    // qu'extrait automatiquement par l'OCR (ou null), utilise seulement pour
+    // la detection de doublon (voir isDuplicateTracking).
     colis.avant12h = container.querySelector("#f-avant12h").checked;
     const quantiteInput = parseInt(container.querySelector("#f-quantite").value, 10);
     colis.quantite = Number.isFinite(quantiteInput) && quantiteInput > 0 ? quantiteInput : 1;

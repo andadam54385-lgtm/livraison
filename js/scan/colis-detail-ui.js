@@ -93,7 +93,6 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
             </div>`
           : ""
       }
-      ${colis.tracking ? `<p class="muted" style="margin-top:8px;">Tracking : ${escapeHtml(colis.tracking)}</p>` : ""}
       ${colis.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:6px;">${colis.quantite} colis à cette adresse</span>` : ""}
     </div>
     <div class="toggle-row">
