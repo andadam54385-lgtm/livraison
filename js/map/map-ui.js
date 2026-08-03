@@ -711,7 +711,18 @@ async function render() {
   themeMediaCleanup = () => mq.removeEventListener("change", onThemeChange);
 
   map.on("load", async () => {
+    // Bug reel corrige ici : si l'utilisateur quitte puis revient tres vite
+    // sur l'ecran Carte, render() est rappelee et detruit deja mapInstance
+    // (ligne ~594) avant que le "load" de CETTE instance-ci (encore en
+    // cours de chargement style/tuiles au moment du render() precedent)
+    // n'ait eu le temps de se declencher -- sans ce garde, la suite tentait
+    // d'ajouter des sources/couches sur une instance MapLibre deja detruite
+    // (exception non geree, silencieuse). mapInstance pointe alors deja
+    // vers la NOUVELLE instance : `map !== mapInstance` detecte que celle-ci
+    // est perimee et abandonne proprement.
+    if (map !== mapInstance) return;
     await ensureMapIcons(map);
+    if (map !== mapInstance) return; // re-verifie apres l'attente asynchrone
     const routeGeoJson = buildRouteGeoJson(depot, ordered, returnPoint, csr);
     const stopsGeoJson = buildStopsGeoJson(geocoded, ordreParColisId);
     const favorisGeoJson = buildFavorisGeoJson(favGeoco);
