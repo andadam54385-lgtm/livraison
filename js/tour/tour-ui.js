@@ -6,6 +6,7 @@ import { buildSmsOptions } from "./sms-template.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
 import { runSort, runRecalculate } from "../routing/routing-ui.js";
 import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
+import { startBatchScan } from "../scan/batch-scan-ui.js";
 import { renderColisDetail } from "../scan/colis-detail-ui.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
 import { showToast } from "../lib/toast.js";
@@ -103,6 +104,39 @@ function openScanFlow() {
 
 function openManualEntry() {
   startManualEntry(containerRef, { onSaved: handleColisSaved });
+}
+
+// Meme insertion-au-moindre-detour que handleColisSaved, mais pour tout un
+// lot d'un coup (scan en rafale, voir batch-scan-ui.js) -- un seul toast
+// recapitulatif et un seul rendu final plutot que de repeter les deux N
+// fois, potentiellement inutile/couteux pour une dizaine de colis d'un coup.
+async function handleColisSavedBatch(colisList) {
+  view = "list";
+  if (colisList.length === 0) {
+    await render();
+    return;
+  }
+  const tour = await getActiveTour();
+  let inserted = 0;
+  for (const colis of colisList) {
+    if (tour && colis.statut === "pret" && colis.geocode?.status === "ok") {
+      const result = await insertStopCheapest(tour, colis);
+      if (result) {
+        await saveColis({ ...colis, statut: "en_tournee" });
+        inserted++;
+      }
+    }
+  }
+  showToast(
+    `${colisList.length} colis enregistré${colisList.length > 1 ? "s" : ""}` +
+      (inserted > 0 ? `, ${inserted} ajouté${inserted > 1 ? "s" : ""} à la tournée en cours.` : ".")
+  );
+  await render();
+}
+
+function openBatchScan() {
+  view = "list";
+  startBatchScan(containerRef).then(handleColisSavedBatch, () => render()); // annulation : juste revenir a la liste
 }
 
 function openDetail(colisId) {
@@ -224,6 +258,7 @@ async function renderEtatA() {
   containerRef.innerHTML = `
     <div class="button-row" style="margin-bottom:14px;">
       <button type="button" id="etatA-manual">${icon("pencil")}Saisie manuelle</button>
+      <button type="button" id="etatA-batch-scan">${icon("camera")}Scanner une liste</button>
     </div>
     ${
       echecColis.length > 0
@@ -251,6 +286,7 @@ async function renderEtatA() {
   `;
 
   containerRef.querySelector("#etatA-manual").addEventListener("click", () => openManualEntry());
+  containerRef.querySelector("#etatA-batch-scan").addEventListener("click", () => openBatchScan());
 
   containerRef.querySelectorAll("[data-report-colis]").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -695,6 +731,7 @@ async function renderEtatB(tour) {
     </div>
     <div class="button-row" style="margin:-4px 0 10px;">
       <button type="button" id="etatB-manual">${icon("plus")}Ajouter une adresse</button>
+      <button type="button" id="etatB-batch-scan">${icon("camera")}Scanner une liste</button>
     </div>
     ${
       reorderMode
@@ -724,6 +761,7 @@ async function renderEtatB(tour) {
   // reutilise le meme circuit que le scan (handleColisSaved fait deja
   // l'insertion au meilleur endroit sans recalcul complet, voir plus haut).
   containerRef.querySelector("#etatB-manual").addEventListener("click", () => openManualEntry());
+  containerRef.querySelector("#etatB-batch-scan").addEventListener("click", () => openBatchScan());
 
   containerRef.querySelector("#reorder-toggle").addEventListener("click", () => {
     reorderMode = !reorderMode;

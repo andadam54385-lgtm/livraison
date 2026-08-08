@@ -51,7 +51,10 @@ function escapeHtml(s) {
 // suffixe ("6 Rue..." ne doit jamais lire "R" comme un suffixe -- "R" est
 // suivi de "u", pas d'une frontiere de mot, donc rejete).
 const REP_SUFFIX_WORDS = "bis|ter|quater|quinquies";
-function splitNumeroRue(rueComplete) {
+// Exportee pour reutilisation par batch-scan-ui.js (scan en rafale, plusieurs
+// adresses par photo) -- meme logique d'extraction numero/suffixe que la
+// saisie manuelle, pas de raison de la dupliquer.
+export function splitNumeroRue(rueComplete) {
   if (!rueComplete) return { numero: "", rue: "" };
   const s = rueComplete.trim();
   let m = s.match(new RegExp(`^(\\d+)\\s?(${REP_SUFFIX_WORDS})\\b\\.?\\s*(.*)$`, "i"));

@@ -592,3 +592,24 @@ a { color: var(--accent-strong); }
   border-radius: 12px;
   pointer-events: none;
 }
+
+/* Scan en rafale (batch-scan-ui.js) : pas d'aspect-ratio fixe/object-fit
+   cover comme .viewfinder-wrap -- la video garde son ratio natif (largeur
+   100%, hauteur automatique) pour que les cadres SVG (coordonnees en pixels
+   natifs de la video, voir viewBox pose en JS) restent alignes sans calcul
+   de recadrage/offset a refaire a chaque frame. */
+.batch-viewfinder-wrap {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #000;
+  line-height: 0;
+}
+.batch-viewfinder-wrap video { width: 100%; height: auto; display: block; }
+.batch-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}

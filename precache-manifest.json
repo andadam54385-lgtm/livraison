@@ -1,6 +1,6 @@
 {
-  "version": "cbdf45de2f53",
-  "generatedAt": "2026-08-08T13:25:45.171Z",
+  "version": "1a76546c436f",
+  "generatedAt": "2026-08-08T20:15:44.169Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -42,6 +42,7 @@
     "./js/routing/tour-store.js",
     "./js/routing/tsp.js",
     "./js/scan/barcode.js",
+    "./js/scan/batch-scan-ui.js",
     "./js/scan/capture.js",
     "./js/scan/colis-detail-ui.js",
     "./js/scan/colis-store.js",
@@ -49,6 +50,8 @@
     "./js/scan/ocr-corrections-store.js",
     "./js/scan/ocr-debug-ui.js",
     "./js/scan/ocr.js",
+    "./js/scan/parse-address-list.js",
+    "./js/scan/parse-address-list.test.mjs",
     "./js/scan/parse-ups-label.js",
     "./js/scan/parse-ups-label.test.mjs",
     "./js/scan/preprocess.js",
