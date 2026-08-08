@@ -38,5 +38,41 @@ assert(
   "Rembercourt-sur-Mad (mauvaise commune) ne doit jamais devancer Ansauville"
 );
 
+// Regression : retour terrain "modifie parfois le numero, n'accepte pas les
+// bis/a/b". Deux bugs distincts corriges (voir splitNumeroRue dans
+// scan-ui.js et scoreCandidates ci-dessus) : la saisie "6a" ne s'extrayait
+// pas du tout comme numero, et meme quand un suffixe etait reconnu (bis/ter)
+// il n'etait jamais compare a entry.rep -- plusieurs entrees BAN au meme
+// numero de base ("6", "6 bis", "6 A"...) etaient donc indiscernables, le
+// mauvais candidat pouvait gagner par bruit de similarite de rue.
+{
+  const repPool = [
+    { n: "6", rep: "", r: "Rue de l'Eglise", rn: normRue, cp: "54470", c: "Ansauville", cn: "ansauville" },
+    { n: "6", rep: "A", r: "Rue de l'Eglise", rn: normRue, cp: "54470", c: "Ansauville", cn: "ansauville" },
+    { n: "6", rep: "B", r: "Rue de l'Eglise", rn: normRue, cp: "54470", c: "Ansauville", cn: "ansauville" },
+  ];
+  const repScored = scoreCandidates(repPool, { normRue, normCommune, numero: "6a" });
+  assert(repScored[0].entry.rep === "A", `"6a" doit faire gagner l'entree rep=A (obtenu: rep=${repScored[0].entry.rep || "(aucun)"})`);
+  assert(
+    repScored[0].score > repScored.find((s) => s.entry.rep === "B").score,
+    "l'entree rep=A doit nettement devancer l'entree rep=B pour une recherche '6a'"
+  );
+}
+
+// Regression : commune tapee/OCRisee sans les tirets ("Rembercourt sur Mad")
+// perdait tout le bonus commune face a l'entree BAN "Rembercourt-sur-Mad" --
+// frequent, beaucoup de communes francaises ont un nom compose.
+{
+  const hyphenPool = [
+    { n: "6", rep: "", r: "Rue de l'Eglise", rn: normRue, cp: "54470", c: "Ansauville", cn: "ansauville" },
+    { n: "6", rep: "", r: "Rue de l'Eglise", rn: normRue, cp: "54470", c: "Rembercourt-sur-Mad", cn: "rembercourt-sur-mad" },
+  ];
+  const hyphenScored = scoreCandidates(hyphenPool, { normRue, normCommune: normalizeCity("Rembercourt sur Mad"), numero: "6" });
+  assert(
+    hyphenScored[0].entry.c === "Rembercourt-sur-Mad",
+    `"Rembercourt sur Mad" (sans tirets) doit quand meme matcher "Rembercourt-sur-Mad" (obtenu: ${hyphenScored[0].entry.c})`
+  );
+}
+
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);
 process.exit(failures === 0 ? 0 : 1);

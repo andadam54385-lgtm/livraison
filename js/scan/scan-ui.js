@@ -37,13 +37,31 @@ function escapeHtml(s) {
 // scannee, voir parse-ups-label.test.mjs cas 1). L'ancienne extraction dans
 // runGeocodeAndSave ne gerait que le numero en tete (`/^(\d+)/`) : un vrai
 // bug qui privait matchAddress de son bonus numero pour ce cas reel.
+//
+// Bug reel corrige ici (retour terrain : "accepte pas les bis ou les a/b") :
+// le suffixe de repetition ne reconnaissait que les mots complets
+// bis/ter/quater, jamais une lettre seule (6A, 6B...), pourtant tout aussi
+// courante sur une adresse francaise. "6a Rue de l'Eglise" (colle, sans
+// espace) ne matchait NI le motif "numero en tete" NI celui "numero en fin"
+// -- toute la chaine retombait en "rue" avec un numero vide, faisant perdre
+// le bonus numero du matching ET polluant la comparaison de similarite de
+// rue avec un "6a" parasite. La lettre seule est testee apres les mots
+// complets (jamais avant) et exige une frontiere de mot juste apres, pour
+// ne jamais confondre la premiere lettre du nom de rue qui suit avec un
+// suffixe ("6 Rue..." ne doit jamais lire "R" comme un suffixe -- "R" est
+// suivi de "u", pas d'une frontiere de mot, donc rejete).
+const REP_SUFFIX_WORDS = "bis|ter|quater|quinquies";
 function splitNumeroRue(rueComplete) {
   if (!rueComplete) return { numero: "", rue: "" };
   const s = rueComplete.trim();
-  let m = s.match(/^(\d+\s*(?:bis|ter|quater)?)\s+(.+)$/i);
+  let m = s.match(new RegExp(`^(\\d+)\\s?(${REP_SUFFIX_WORDS})\\b\\.?\\s*(.*)$`, "i"));
+  if (m) return { numero: `${m[1]} ${m[2]}`.trim(), rue: m[3].trim() };
+  m = s.match(/^(\d+)\s?([a-z])\b\.?\s+(.+)$/i);
+  if (m) return { numero: `${m[1]}${m[2]}`.trim(), rue: m[3].trim() };
+  m = s.match(/^(\d+)\s+(.+)$/);
   if (m) return { numero: m[1].trim(), rue: m[2].trim() };
-  m = s.match(/^(.+?)\s+(\d+\s*(?:bis|ter|quater)?)$/i);
-  if (m) return { numero: m[2].trim(), rue: m[1].trim() };
+  m = s.match(new RegExp(`^(.+?)\\s+(\\d+\\s?(?:${REP_SUFFIX_WORDS}|[a-z])?)$`, "i"));
+  if (m) return { numero: m[2].replace(/\s+/g, "").trim(), rue: m[1].trim() };
   return { numero: "", rue: s };
 }
 

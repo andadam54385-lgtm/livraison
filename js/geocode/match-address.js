@@ -68,17 +68,74 @@ const CONFIDENCE_THRESHOLD = 0.72;
 // probabilite brute (voir geocode-ui.js qui clampe l'affichage a 100%).
 const COMMUNE_MATCH_BONUS = 0.35;
 const NUMERO_MATCH_BONUS = 0.15;
+const REP_MATCH_BONUS = 0.08;
+const REP_MISMATCH_PENALTY = 0.08;
+
+// Separe un numero de voie combine (ex: "6", "6 bis", "6a") en {n, rep} pour
+// le comparer aux champs BAN, qui les stockent SEPAREMENT (entry.n = "6",
+// entry.rep = "BIS"/"A"/...). Bug reel corrige ici : l'ancien code comparait
+// le numero tel quel a entry.n seul ("6 bis" !== "6"), donc le bonus numero
+// ne s'appliquait quasiment jamais des qu'une adresse avait un suffixe --
+// meme bis/ter, deja "reconnus" par splitNumeroRue cote scan-ui.js, ne
+// beneficiaient d'aucun bonus au moment du matching.
+function splitNumeroRep(numero) {
+  const s = String(numero || "").trim();
+  if (!s) return { n: "", rep: "" };
+  const m = s.match(/^(\d+)\s?(bis|ter|quater|quinquies|[a-z])?\.?$/i);
+  if (!m) return { n: s, rep: "" };
+  return { n: m[1], rep: (m[2] || "").toLowerCase() };
+}
+
+function normalizeRep(rep) {
+  return String(rep || "")
+    .toLowerCase()
+    .replace(/[.\s]/g, "")
+    .trim();
+}
+
+// Comparaison de commune tolerante aux tirets/apostrophes (voir usage dans
+// scoreCandidates) -- volontairement PAS utilisee pour le stockage
+// (entry.cn reste tel que precalcule par data-prep), seulement au moment de
+// la comparaison, donc aucun impact sur ban.json.gz deja genere/deploye.
+function looseCommune(s) {
+  return String(s || "")
+    .replace(/[-']/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 // Extrait de matchAddress() pour rester testable sans IndexedDB (voir
 // match-address.test.mjs) : prend le pool BAN deja recupere en entree plutot
 // que d'aller le chercher lui-meme.
 export function scoreCandidates(pool, { normRue, normCommune, numero }) {
+  const wanted = splitNumeroRep(numero);
   const scored = pool.map((entry) => {
     let score = streetSimilarity(normRue, entry.rn);
-    if (numero && entry.n && String(numero).trim() === String(entry.n).trim()) {
+    if (wanted.n && entry.n && wanted.n === String(entry.n).trim()) {
       score += NUMERO_MATCH_BONUS;
+      // Numero identique : departage par le suffixe (bis/A/B...), frequent
+      // que plusieurs entrees BAN partagent le meme numero de base a une
+      // meme adresse ("6", "6 bis", "6 ter" cote a cote). Une correspondance
+      // exacte du suffixe renforce le score ; un suffixe clairement
+      // different (l'un des deux est renseigne, l'autre different) penalise
+      // legerement -- jamais assez pour annuler le bonus numero de base, le
+      // numero reste le signal le plus fort.
+      const entryRep = normalizeRep(entry.rep);
+      const wantedRep = normalizeRep(wanted.rep);
+      if (wantedRep && entryRep && wantedRep === entryRep) {
+        score += REP_MATCH_BONUS;
+      } else if (wantedRep !== entryRep) {
+        score -= REP_MISMATCH_PENALTY;
+      }
     }
-    if (normCommune && entry.cn === normCommune) {
+    // Comparaison stricte d'abord, puis un repli "sans tirets/apostrophes"
+    // (jamais applique au stockage, uniquement ici a la volee -- pas besoin
+    // de reconstruire ban.json.gz) : beaucoup de communes francaises ont un
+    // nom compose ("Rembercourt-sur-Mad", "Saint-Mihiel"), et un utilisateur
+    // qui tape/OCRise le nom sans les tirets (espaces a la place) perdait
+    // jusqu'ici tout le bonus commune -- exactement le signal cense
+    // departager deux villages qui partagent une meme rue courante.
+    if (normCommune && (entry.cn === normCommune || looseCommune(entry.cn) === looseCommune(normCommune))) {
       score += COMMUNE_MATCH_BONUS;
     }
     return { entry, score };
