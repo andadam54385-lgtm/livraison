@@ -257,8 +257,8 @@ async function renderEtatA() {
 
   containerRef.innerHTML = `
     <div class="button-row" style="margin-bottom:14px;">
-      <button type="button" id="etatA-manual">${icon("pencil")}Saisie manuelle</button>
-      <button type="button" id="etatA-batch-scan">${icon("camera")}Scanner une liste</button>
+      <button type="button" class="btn-compact" id="etatA-manual">${icon("pencil")}Saisie manuelle</button>
+      <button type="button" class="btn-compact" id="etatA-batch-scan">${icon("camera")}Scanner une liste</button>
     </div>
     ${
       echecColis.length > 0
@@ -502,12 +502,12 @@ function renderHeroCard(stop, colis, { navApp, eta, smsTemplates }) {
       </div>
       <div class="hero-actions">
         <div class="button-row">
-          ${navUrl ? `<a class="btn-link primary btn-lg" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
-          ${colis.tel ? `<a class="btn-link btn-lg" style="flex:0 0 58px;" href="tel:${colis.tel}">${icon("phone", { spaced: false })}</a>` : ""}
-          ${smsOptions.length > 0 ? `<button type="button" class="btn-link btn-lg" style="flex:0 0 58px;" id="hero-sms-toggle">${icon("message-circle", { spaced: false })}</button>` : ""}
+          ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
+          ${colis.tel ? `<a class="btn-link" style="flex:0 0 48px;" href="tel:${colis.tel}">${icon("phone", { spaced: false })}</a>` : ""}
+          ${smsOptions.length > 0 ? `<button type="button" class="btn-link" style="flex:0 0 48px;" id="hero-sms-toggle">${icon("message-circle", { spaced: false })}</button>` : ""}
         </div>
         ${renderSmsOptionsHtml(smsOptions)}
-        <button type="button" class="ok btn-lg" data-deliver-ordre="${stop.ordre}" data-hero-deliver>${icon("check")}Livré</button>
+        <button type="button" class="ok" data-deliver-ordre="${stop.ordre}" data-hero-deliver>${icon("check")}Livré</button>
         <button type="button" class="hero-fail-btn" data-fail-ordre="${stop.ordre}">Marquer en échec</button>
       </div>
     </div>
@@ -730,6 +730,11 @@ async function renderEtatB(tour) {
         <span class="muted">${formatDurationShort(tour.totalDureeSec)} estimées</span>
       </div>
     </div>
+    <div class="button-row" style="margin:0 0 6px;">
+      <button type="button" id="recalc-tour-btn">${icon("zap")}Recalculer la tournée</button>
+    </div>
+    <p id="routing-status" class="muted" style="margin:-2px 0 6px;"></p>
+    <div class="progress-bar" style="margin:-2px 0 12px;"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
     ${heroHtml}
     <div class="card">
       <div class="card-title">Aujourd'hui</div>
@@ -747,8 +752,8 @@ async function renderEtatB(tour) {
       <button type="button" id="reorder-toggle" style="margin-left:8px;flex-shrink:0;">${reorderMode ? `${icon("check")}Terminé` : `${icon("move-vertical")}Réordonner`}</button>
     </div>
     <div class="button-row" style="margin:-4px 0 10px;">
-      <button type="button" id="etatB-manual">${icon("plus")}Ajouter une adresse</button>
-      <button type="button" id="etatB-batch-scan">${icon("camera")}Scanner une liste</button>
+      <button type="button" class="btn-compact" id="etatB-manual">${icon("plus")}Ajouter une adresse</button>
+      <button type="button" class="btn-compact" id="etatB-batch-scan">${icon("camera")}Scanner une liste</button>
     </div>
     ${
       reorderMode
@@ -758,10 +763,7 @@ async function renderEtatB(tour) {
     ${total > 0 ? `<p class="muted" style="margin:-4px 0 10px;">Horaires estimés à titre indicatif — recalcule la tournée après un réarrangement pour des horaires exacts.</p>` : ""}
     <div id="stops-container" data-hero-colis-id="${heroEntry ? escapeAttr(heroEntry.colis.id) : ""}"></div>
     ${renderDepotReturnCard(tour, navApp, lastDepotEta)}
-    <p id="routing-status" class="muted" style="margin:10px 0 0;"></p>
-    <div class="progress-bar"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
     <div class="button-row">
-      <button type="button" id="recalc-tour-btn">${icon("zap")}Recalculer la tournée</button>
       <button type="button" class="danger" id="end-tour-btn">Terminer la tournée</button>
     </div>
   `;

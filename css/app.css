@@ -336,23 +336,25 @@ a { color: var(--accent-strong); }
 }
 
 /* Arret courant (ecran Tournee) : seul element mis en avant, tout le reste
-   (liste "a venir") reste volontairement discret en dessous. */
+   (liste "a venir") reste volontairement discret en dessous. Retour terrain
+   "trop gros" : gabarit densifie (padding, tailles de police, hauteur des
+   boutons d'action) tout en restant le plus visible de l'ecran. */
 .hero-card {
   background: var(--bg-card);
   border: 1.5px solid var(--border);
-  border-radius: 18px;
-  padding: 16px 16px 14px;
-  margin-bottom: 18px;
+  border-radius: 16px;
+  padding: 10px 12px 10px;
+  margin-bottom: 12px;
   box-shadow: var(--shadow-card);
 }
-.hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 8px; }
-.hero-eyebrow { font-size: 0.7rem; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
-.hero-addr { font-size: 1.55rem; font-weight: 750; letter-spacing: -0.015em; line-height: 1.15; margin: 2px 0 4px; }
-.hero-city { font-size: 0.95rem; color: var(--text-muted); margin: 0 0 10px; }
-.hero-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border-soft); margin-bottom: 14px; }
-.hero-name { font-size: 1rem; font-weight: 650; }
-.hero-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 1px; }
-.hero-actions { display: flex; flex-direction: column; gap: 8px; }
+.hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; gap: 8px; }
+.hero-eyebrow { font-size: 0.68rem; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
+.hero-addr { font-size: 1.2rem; font-weight: 750; letter-spacing: -0.015em; line-height: 1.15; margin: 1px 0 2px; }
+.hero-city { font-size: 0.85rem; color: var(--text-muted); margin: 0 0 6px; }
+.hero-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; border-top: 1px solid var(--border-soft); margin-bottom: 8px; }
+.hero-name { font-size: 0.92rem; font-weight: 650; }
+.hero-sub { font-size: 0.76rem; color: var(--text-muted); margin-top: 1px; }
+.hero-actions { display: flex; flex-direction: column; gap: 6px; }
 .hero-actions .button-row { margin-top: 0; }
 .hero-fail-btn {
   width: 100%;
@@ -433,15 +435,29 @@ a { color: var(--accent-strong); }
    confirmation flottants. Voir setupZoneMode() dans map-ui.js. */
 .zone-mode-btn { left: 64px; }
 .zone-mode-btn.active { background: var(--accent); color: var(--accent-ink); }
+/* Un <div> (pas un <svg>) : hit-testable sur toute sa boite meme transparent,
+   contrairement a un <svg> racine vide dont Safari ne detecte de facon fiable
+   que les zones reellement peintes (voir setupZoneMode() dans map-ui.js pour
+   le bug reel que ca causait). Le <svg> imbrique (.zone-draw-svg) ne sert
+   qu'a l'affichage, jamais a la detection du geste. */
 .zone-draw-overlay {
   position: absolute;
   inset: 0;
   z-index: 4;
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
   pointer-events: none;
 }
 .zone-draw-overlay.active { pointer-events: auto; }
-.zone-draw-overlay polygon {
+.zone-draw-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.zone-draw-svg polygon {
   fill: color-mix(in srgb, var(--accent) 22%, transparent);
   stroke: var(--accent-strong);
   stroke-width: 2.5;
@@ -607,6 +623,10 @@ a { color: var(--accent-strong); }
 
 .button-row { display: flex; gap: 10px; margin-top: 14px; }
 .button-row button { flex: 1; }
+/* Actions secondaires (Ajouter une adresse, Scanner une liste...) : retour
+   terrain "trop gros" -- cible tactile plus modeste que le defaut (toujours
+   >=36px, reste tapable), texte plus petit. */
+.btn-compact { min-height: 36px; padding: 7px 10px; font-size: 0.85rem; }
 
 .toast-container {
   position: fixed;

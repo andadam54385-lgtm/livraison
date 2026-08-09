@@ -627,26 +627,45 @@ function zoneEligibleColis(geocoded) {
 // pour un autre groupe -- computeOptimizedStops (routing-ui.js) respecte
 // ensuite ce macro-ordre (toutes les zones 1 avant les zones 2, etc.) en ne
 // laissant l'optimisation automatique jouer qu'A L'INTERIEUR de chaque zone.
-// L'overlay SVG capture tous les evenements pointer pendant le mode (voir
+// L'overlay capture tous les evenements pointer pendant le mode (voir
 // .zone-draw-overlay.active en CSS) : la carte MapLibre en dessous n'en recoit
 // alors plus aucun, pas besoin de desactiver dragPan separement.
+// Bug reel corrige ici : l'overlay etait a l'origine un <svg> directement --
+// Safari ne hit-teste de facon fiable que les zones REELLEMENT peintes d'un
+// <svg> racine vide, pas toute sa boite (contrairement a un <div>). Resultat
+// concret sur iPhone : le tap "traversait" l'overlay jusqu'a la carte en
+// dessous, qui se mettait donc a paner au lieu de dessiner. Un <div> (hit-
+// testable sur toute sa boite, meme transparent) capture desormais les
+// evenements ; le <svg> imbrique ne sert plus qu'a l'affichage (pointer-
+// events:none, voir CSS), jamais a la detection du geste.
 function setupZoneMode(map, geocoded, ordreParColisId) {
   const toggleBtn = containerRef.querySelector("#zone-mode-toggle");
   const overlay = containerRef.querySelector("#zone-draw-overlay");
+  const drawSvg = overlay?.querySelector(".zone-draw-svg");
   const hintBar = containerRef.querySelector("#zone-hint-bar");
   const confirmPanel = containerRef.querySelector("#zone-confirm-panel");
-  if (!toggleBtn || !overlay || !hintBar || !confirmPanel) return;
+  if (!toggleBtn || !overlay || !drawSvg || !hintBar || !confirmPanel) return;
 
   let drawing = false;
   let drawPoints = [];
+  // Cache le rect le temps d'UN geste (pointerdown -> pointerup) : evite un
+  // reflow a chaque pointermove tout en restant robuste au clientX/clientY
+  // (contrairement a offsetX/offsetY, dont le referentiel change si la
+  // capture de pointeur retargete e.target vers un enfant different).
+  let overlayRect = null;
+
+  function pointFromEvent(e) {
+    const rect = overlayRect || overlay.getBoundingClientRect();
+    return [e.clientX - rect.left, e.clientY - rect.top];
+  }
 
   function renderDrawPath() {
     if (drawPoints.length < 2) {
-      overlay.innerHTML = "";
+      drawSvg.innerHTML = "";
       return;
     }
     const pts = drawPoints.map(([x, y]) => `${x},${y}`).join(" ");
-    overlay.innerHTML = `<polygon points="${pts}"></polygon>`;
+    drawSvg.innerHTML = `<polygon points="${pts}"></polygon>`;
   }
 
   function applyZoneMode(active) {
@@ -711,18 +730,21 @@ function setupZoneMode(map, geocoded, ordreParColisId) {
   overlay.addEventListener("pointerdown", (e) => {
     if (!zoneMode) return;
     drawing = true;
-    drawPoints = [[e.offsetX, e.offsetY]];
+    overlayRect = overlay.getBoundingClientRect();
+    drawPoints = [pointFromEvent(e)];
     overlay.setPointerCapture(e.pointerId);
+    e.preventDefault();
     renderDrawPath();
   });
   overlay.addEventListener("pointermove", (e) => {
     if (!drawing) return;
-    drawPoints.push([e.offsetX, e.offsetY]);
+    drawPoints.push(pointFromEvent(e));
     renderDrawPath();
   });
   overlay.addEventListener("pointerup", async (e) => {
     if (!drawing) return;
     drawing = false;
+    overlayRect = null;
     overlay.releasePointerCapture(e.pointerId);
     const points = drawPoints;
     drawPoints = [];
@@ -742,6 +764,7 @@ function setupZoneMode(map, geocoded, ordreParColisId) {
   });
   overlay.addEventListener("pointercancel", () => {
     drawing = false;
+    overlayRect = null;
     drawPoints = [];
     renderDrawPath();
   });
@@ -811,7 +834,7 @@ async function render() {
   containerRef.innerHTML = `
     <div class="map-canvas-wrap">
       ${hasMap ? `<div id="maplibre-map"></div>` : `<div class="empty-state">Fond de carte indisponible : synchronise l'appli en Wifi une fois (voir Réglages) pour le télécharger.</div>`}
-      ${hasMap ? `<svg class="zone-draw-overlay" id="zone-draw-overlay"></svg>` : ""}
+      ${hasMap ? `<div class="zone-draw-overlay" id="zone-draw-overlay"><svg class="zone-draw-svg"></svg></div>` : ""}
       <button type="button" class="map-menu-btn" id="map-menu-toggle" aria-label="Menu">${icon("menu", { spaced: false, size: 22 })}</button>
       ${hasMap ? `<button type="button" class="map-menu-btn zone-mode-btn" id="zone-mode-toggle" aria-label="Sélection par zones">${icon("lasso", { spaced: false, size: 20 })}</button>` : ""}
       <div class="map-menu-panel" id="map-menu-panel" hidden>
