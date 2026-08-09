@@ -39,6 +39,7 @@ const PATHS = {
   clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
   "chevron-up": '<polyline points="18 15 12 9 6 15"/>',
+  lasso: '<path d="M8 21a4 4 0 0 1-3.5-6"/><path d="M4.5 15A6.8 6.8 0 0 1 3 11c0-4.4 4-8 9-8s9 3.6 9 8-4 8-9 8c-1 0-2-.1-2.9-.4"/><circle cx="17" cy="17" r="2"/>',
 };
 
 // spaced: ajoute une marge a droite (icone suivie de texte). Passer

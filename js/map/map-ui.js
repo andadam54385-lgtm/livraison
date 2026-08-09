@@ -1,4 +1,4 @@
-import { listAllColis, formatAdresseAffichage, formatAdresseForNav } from "../scan/colis-store.js";
+import { listAllColis, saveColis, formatAdresseAffichage, formatAdresseForNav } from "../scan/colis-store.js";
 import { getActiveTour, markColisDeliveredDirect } from "../routing/tour-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { listFavoris } from "../favoris/favoris-store.js";
@@ -9,6 +9,7 @@ import { loadCsrFromDb } from "../routing/graph-loader.js";
 import { buildSpatialGrid, findNearestNode } from "../routing/spatial-index.js";
 import { dijkstraSingleTargetPath, createDijkstraScratch } from "../routing/dijkstra.js";
 import { icon, iconToImage } from "../ui/icons.js";
+import { showToast } from "../lib/toast.js";
 
 // Chantier C : vrai fond de carte vectoriel (MapLibre GL JS + PMTiles +
 // basemap Protomaps), 100% local -- remplace le plan SVG maison (rues
@@ -25,6 +26,9 @@ import { icon, iconToImage } from "../ui/icons.js";
 let containerRef = null;
 let mapInstance = null;
 let themeMediaCleanup = null;
+// Mode "selection par zones" (lasso) : etat local a l'ecran Carte, reinitialise
+// a chaque mount() -- voir setupZoneMode().
+let zoneMode = false;
 // true seulement une fois addMapLayers() a tourne (dans map.on("load", ...)) :
 // getSource() avant que le style ne soit charge peut lever selon la version
 // de MapLibre plutot que retourner juste undefined -- ce flag explicite evite
@@ -39,6 +43,10 @@ const STATUT_COLORS = { livre: "#22c55e", echec: "#dc2626", a_verifier: "#94a3b8
 const DEFAULT_STOP_COLOR = "#3b82f6"; // pret / en_tournee
 const ROUTE_COLOR = "#3b82f6";
 const ROUTE_DONE_COLOR = "#94a3b8";
+// Anneau colore par zone manuelle (voir setupZoneMode()) -- distinct de la
+// couleur de remplissage (qui reste le statut du colis) : la teinte identifie
+// juste le groupe, pas de sens ordinal au-dela du numero affiche sur le pin.
+const ZONE_COLORS = ["#f97316", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16", "#f59e0b", "#14b8a6", "#a855f7"];
 
 function moduleRelativeUrl(relativePath) {
   return new URL(relativePath, import.meta.url).href;
@@ -274,6 +282,10 @@ function buildStopsGeoJson(geocoded, ordreParColisId) {
       const properties = { colisId: c.id, statut: c.statut };
       const ordre = ordreParColisId.get(c.id);
       if (ordre != null) properties.ordre = ordre;
+      if (c.zone != null) {
+        properties.zone = c.zone;
+        properties.zoneColor = ZONE_COLORS[(c.zone - 1) % ZONE_COLORS.length];
+      }
       return {
         type: "Feature",
         properties,
@@ -379,8 +391,10 @@ function addMapLayers(map, data) {
     paint: {
       "circle-radius": 13,
       "circle-color": ["match", ["get", "statut"], "livre", STATUT_COLORS.livre, "echec", STATUT_COLORS.echec, "a_verifier", STATUT_COLORS.a_verifier, DEFAULT_STOP_COLOR],
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": 2,
+      // Anneau colore par zone manuelle (voir ZONE_COLORS/setupZoneMode) --
+      // distinct du remplissage, qui reste le statut du colis.
+      "circle-stroke-color": ["case", ["has", "zoneColor"], ["get", "zoneColor"], "#ffffff"],
+      "circle-stroke-width": ["case", ["has", "zoneColor"], 4, 2],
       "circle-opacity": ["match", ["get", "statut"], "livre", 0.6, "echec", 0.6, 1],
     },
   });
@@ -388,7 +402,14 @@ function addMapLayers(map, data) {
     id: "stops-label",
     type: "symbol",
     source: "stops",
-    layout: { "text-field": ["case", ["has", "ordre"], ["to-string", ["get", "ordre"]], ""], "text-size": 11, "text-allow-overlap": true },
+    layout: {
+      // Une fois la tournee calculee, l'ordre de passage prime sur le numero
+      // de zone (qui n'a servi qu'a le determiner) -- avant calcul, "Z<n>"
+      // donne au livreur un retour visuel immediat sur ses zones dessinees.
+      "text-field": ["case", ["has", "ordre"], ["to-string", ["get", "ordre"]], ["has", "zone"], ["concat", "Z", ["to-string", ["get", "zone"]]], ""],
+      "text-size": 11,
+      "text-allow-overlap": true,
+    },
     paint: { "text-color": "#ffffff" },
   });
 
@@ -577,6 +598,170 @@ async function refreshMapData() {
   }
 }
 
+// Ray casting standard (point en coordonnees ecran, polygone = tableau de
+// [x,y] ecran) -- tout se fait en pixels, jamais en lat/lon : le lasso est
+// dessine a un instant donne pendant lequel la carte ne bouge pas (l'overlay
+// capture tous les evenements pointer, voir setupZoneMode), donc pas besoin
+// de reprojeter le polygone si la carte pan/zoom apres coup.
+function pointInPolygon([px, py], polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// Colis assignables a une zone : memes criteres que listColisEligibles()
+// (routing-ui.js) -- seuls les colis "pret"/"en_tournee" sont repris par un
+// (re)calcul de tournee, inutile de proposer une zone sur un colis "a
+// verifier" (pas encore geocode correctement) ou deja livre/en echec.
+function zoneEligibleColis(geocoded) {
+  return geocoded.filter((c) => c.statut === "pret" || c.statut === "en_tournee");
+}
+
+// Mode "selection par zones" (lasso) : le livreur trace un contour a main
+// levee autour d'un groupe d'arrets, lui donne un numero de zone, recommence
+// pour un autre groupe -- computeOptimizedStops (routing-ui.js) respecte
+// ensuite ce macro-ordre (toutes les zones 1 avant les zones 2, etc.) en ne
+// laissant l'optimisation automatique jouer qu'A L'INTERIEUR de chaque zone.
+// L'overlay SVG capture tous les evenements pointer pendant le mode (voir
+// .zone-draw-overlay.active en CSS) : la carte MapLibre en dessous n'en recoit
+// alors plus aucun, pas besoin de desactiver dragPan separement.
+function setupZoneMode(map, geocoded, ordreParColisId) {
+  const toggleBtn = containerRef.querySelector("#zone-mode-toggle");
+  const overlay = containerRef.querySelector("#zone-draw-overlay");
+  const hintBar = containerRef.querySelector("#zone-hint-bar");
+  const confirmPanel = containerRef.querySelector("#zone-confirm-panel");
+  if (!toggleBtn || !overlay || !hintBar || !confirmPanel) return;
+
+  let drawing = false;
+  let drawPoints = [];
+
+  function renderDrawPath() {
+    if (drawPoints.length < 2) {
+      overlay.innerHTML = "";
+      return;
+    }
+    const pts = drawPoints.map(([x, y]) => `${x},${y}`).join(" ");
+    overlay.innerHTML = `<polygon points="${pts}"></polygon>`;
+  }
+
+  function applyZoneMode(active) {
+    zoneMode = active;
+    toggleBtn.classList.toggle("active", active);
+    overlay.classList.toggle("active", active);
+    hintBar.hidden = !active;
+    if (!active) {
+      drawing = false;
+      drawPoints = [];
+      renderDrawPath();
+      confirmPanel.innerHTML = "";
+    }
+  }
+  applyZoneMode(false);
+
+  toggleBtn.addEventListener("click", () => applyZoneMode(!zoneMode));
+
+  function nextZoneNumber() {
+    const zones = zoneEligibleColis(geocoded)
+      .map((c) => c.zone)
+      .filter((z) => z != null);
+    return zones.length ? Math.max(...zones) + 1 : 1;
+  }
+
+  async function refreshZoneVisuals() {
+    if (!layersReady) return;
+    mapInstance?.getSource("stops")?.setData(buildStopsGeoJson(geocoded, ordreParColisId));
+  }
+
+  function showZoneConfirmPanel(selectedColis) {
+    const suggested = nextZoneNumber();
+    confirmPanel.innerHTML = `
+      <div class="zone-confirm-card">
+        <div class="card-title">${selectedColis.length} arrêt${selectedColis.length > 1 ? "s" : ""} entouré${selectedColis.length > 1 ? "s" : ""}</div>
+        <div class="field">
+          <label for="zone-number-input">Numéro de zone (ordre de passage)</label>
+          <input type="number" id="zone-number-input" min="1" step="1" value="${suggested}">
+        </div>
+        <div class="button-row">
+          <button type="button" id="zone-confirm-cancel">Annuler</button>
+          <button type="button" class="primary" id="zone-confirm-save">Valider</button>
+        </div>
+      </div>
+    `;
+    confirmPanel.querySelector("#zone-confirm-cancel").addEventListener("click", () => {
+      confirmPanel.innerHTML = "";
+    });
+    confirmPanel.querySelector("#zone-confirm-save").addEventListener("click", async () => {
+      const n = parseInt(confirmPanel.querySelector("#zone-number-input").value, 10);
+      confirmPanel.innerHTML = "";
+      if (!Number.isFinite(n) || n < 1) return;
+      for (const c of selectedColis) {
+        c.zone = n;
+        await saveColis(c);
+      }
+      showToast(`Zone ${n} enregistrée (${selectedColis.length} arrêt${selectedColis.length > 1 ? "s" : ""}).`);
+      await refreshZoneVisuals();
+    });
+  }
+
+  overlay.addEventListener("pointerdown", (e) => {
+    if (!zoneMode) return;
+    drawing = true;
+    drawPoints = [[e.offsetX, e.offsetY]];
+    overlay.setPointerCapture(e.pointerId);
+    renderDrawPath();
+  });
+  overlay.addEventListener("pointermove", (e) => {
+    if (!drawing) return;
+    drawPoints.push([e.offsetX, e.offsetY]);
+    renderDrawPath();
+  });
+  overlay.addEventListener("pointerup", async (e) => {
+    if (!drawing) return;
+    drawing = false;
+    overlay.releasePointerCapture(e.pointerId);
+    const points = drawPoints;
+    drawPoints = [];
+    renderDrawPath();
+    // <3 points (simple tap, pas un vrai tracé) : rien a selectionner.
+    if (points.length < 3) return;
+    const candidates = zoneEligibleColis(geocoded);
+    const selected = candidates.filter((c) => {
+      const pt = map.project([c.geocode.lon, c.geocode.lat]);
+      return pointInPolygon([pt.x, pt.y], points);
+    });
+    if (selected.length === 0) {
+      showToast("Aucun arrêt dans cette zone.");
+      return;
+    }
+    showZoneConfirmPanel(selected);
+  });
+  overlay.addEventListener("pointercancel", () => {
+    drawing = false;
+    drawPoints = [];
+    renderDrawPath();
+  });
+
+  containerRef.querySelector("#zone-reset-btn")?.addEventListener("click", async () => {
+    const withZone = zoneEligibleColis(geocoded).filter((c) => c.zone != null);
+    if (withZone.length === 0) {
+      showToast("Aucune zone à réinitialiser.");
+      return;
+    }
+    if (!confirm(`Effacer ${withZone.length} assignation${withZone.length > 1 ? "s" : ""} de zone ?`)) return;
+    for (const c of withZone) {
+      delete c.zone;
+      await saveColis(c);
+    }
+    showToast("Zones réinitialisées.");
+    await refreshZoneVisuals();
+  });
+}
+
 async function render() {
   containerRef.innerHTML = `<div class="empty-state">Chargement de la carte…</div>`;
 
@@ -626,7 +811,9 @@ async function render() {
   containerRef.innerHTML = `
     <div class="map-canvas-wrap">
       ${hasMap ? `<div id="maplibre-map"></div>` : `<div class="empty-state">Fond de carte indisponible : synchronise l'appli en Wifi une fois (voir Réglages) pour le télécharger.</div>`}
+      ${hasMap ? `<svg class="zone-draw-overlay" id="zone-draw-overlay"></svg>` : ""}
       <button type="button" class="map-menu-btn" id="map-menu-toggle" aria-label="Menu">${icon("menu", { spaced: false, size: 22 })}</button>
+      ${hasMap ? `<button type="button" class="map-menu-btn zone-mode-btn" id="zone-mode-toggle" aria-label="Sélection par zones">${icon("lasso", { spaced: false, size: 20 })}</button>` : ""}
       <div class="map-menu-panel" id="map-menu-panel" hidden>
         <a class="btn-link" href="#settings">${icon("settings")}Réglages</a>
         <div class="map-legend">
@@ -637,10 +824,22 @@ async function render() {
           <span class="legend-item"><span class="legend-dot" style="background:#22c55e;"></span>Livré</span>
           <span class="legend-item"><span class="legend-dot" style="background:#dc2626;"></span>Échec</span>
           <span class="legend-item">${icon("star", { spaced: false })}Favori</span>
+          ${hasMap ? `<span class="legend-item"><span class="legend-dot" style="background:${ZONE_COLORS[0]};"></span>Anneau = zone manuelle (${icon("lasso", { spaced: false, size: 14 })})</span>` : ""}
         </div>
         ${!hasMap ? `<p class="map-menu-warn">${icon("alert-triangle", { spaced: false })}Fond de carte non téléchargé</p>` : ""}
         ${!csr ? `<p class="map-menu-warn">${icon("alert-triangle", { spaced: false })}Trajet en ligne droite (graphe routier non chargé)</p>` : ""}
       </div>
+      ${
+        hasMap
+          ? `
+      <div class="zone-hint-bar" id="zone-hint-bar" hidden>
+        <span>Entoure un groupe d'arrêts au doigt, puis choisis son numéro de passage.</span>
+        <button type="button" id="zone-reset-btn">Réinitialiser</button>
+      </div>
+      <div id="zone-confirm-panel"></div>
+      `
+          : ""
+      }
       <div id="map-detail"></div>
       ${
         stopListHtml
@@ -711,9 +910,16 @@ async function render() {
     if (mapEl) {
       mapEl.outerHTML = `<div class="empty-state">Carte indisponible sur cet appareil (WebGL non accessible dans ce navigateur). La liste des arrêts ci-dessous reste utilisable.</div>`;
     }
+    // Pas de map.project() possible sans instance MapLibre -- le mode zones
+    // n'a aucun sens ici, retire les elements plutot que de laisser des
+    // boutons morts.
+    containerRef.querySelector("#zone-mode-toggle")?.remove();
+    containerRef.querySelector("#zone-draw-overlay")?.remove();
+    containerRef.querySelector("#zone-hint-bar")?.remove();
     return;
   }
   mapInstance = map;
+  setupZoneMode(map, geocoded, ordreParColisId);
   map.addControl(new window.maplibregl.AttributionControl({ compact: true }), "top-left");
   map.addControl(new window.maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.addControl(

@@ -406,6 +406,61 @@ a { color: var(--accent-strong); }
 .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
 .map-menu-warn { display: flex; align-items: center; gap: 6px; color: var(--warn); font-size: 0.8rem; margin: 8px 0 0; }
 
+/* Selection par zones (lasso) : bouton dedie a cote du menu, overlay SVG de
+   dessin par-dessus la carte (capture les evenements pointer tant que le mode
+   est actif, la carte MapLibre en dessous ne recoit alors plus rien -- pas
+   besoin de desactiver dragPan separement), bandeau d'aide + panneau de
+   confirmation flottants. Voir setupZoneMode() dans map-ui.js. */
+.zone-mode-btn { left: 64px; }
+.zone-mode-btn.active { background: var(--accent); color: var(--accent-ink); }
+.zone-draw-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  touch-action: none;
+  pointer-events: none;
+}
+.zone-draw-overlay.active { pointer-events: auto; }
+.zone-draw-overlay polygon {
+  fill: color-mix(in srgb, var(--accent) 22%, transparent);
+  stroke: var(--accent-strong);
+  stroke-width: 2.5;
+  stroke-dasharray: 6 4;
+  stroke-linejoin: round;
+}
+.zone-hint-bar {
+  position: absolute;
+  top: 12px;
+  left: 116px;
+  right: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  box-shadow: var(--shadow-elevated);
+  padding: 10px 12px;
+  font-size: 0.82rem;
+}
+.zone-hint-bar[hidden] { display: none; }
+.zone-hint-bar button { flex-shrink: 0; padding: 6px 10px; min-height: 0; font-size: 0.78rem; }
+#zone-confirm-panel:not(:empty) {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 76px;
+  z-index: 7;
+}
+.zone-confirm-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-elevated);
+  padding: 12px;
+}
+
 /* Fiche de detail (tap sur un pin/favori) : flotte au-dessus de la carte
    plutot que de pousser son contenu en dessous (sinon la carte ne serait
    plus "plein ecran" des qu'une fiche est affichee). */

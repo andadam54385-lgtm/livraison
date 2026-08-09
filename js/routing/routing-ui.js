@@ -98,18 +98,51 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   });
 
   statusEl.textContent = "Optimisation de l'ordre de tournée…";
-  const stopIndices = eligibles.map((_, i) => i + 1);
   const avant12hFlags = {};
   eligibles.forEach((c, i) => {
     avant12hFlags[i + 1] = Boolean(c.avant12h);
   });
   const penaltyWeight = (settings.avant12hPenaltyMinutes || 0) * 60;
 
-  const { order } = optimizeTourOrder(matrix, 0, depotEndIdx != null ? [...stopIndices, depotEndIdx] : stopIndices, {
-    avant12hFlags,
-    penaltyWeight,
-    timeBudgetMs: 5000,
-    fixedEndIdx: depotEndIdx,
+  // Zones manuelles (voir map-ui.js, selection au lasso sur l'ecran Carte) :
+  // chaque colis peut porter un numero de zone (colis.zone) pose a la main
+  // par le livreur pour forcer un MACRO-ordre de visite -- toutes les zones 1
+  // avant toutes les zones 2, etc. -- tandis que l'algo choisit librement le
+  // meilleur ordre A L'INTERIEUR de chaque zone (nearestNeighbor + 2-opt,
+  // inchange). Les colis sans zone (undefined/null) forment un groupe
+  // implicite place APRES toutes les zones numerotees : le livreur entoure en
+  // priorite les secteurs dont il veut fixer l'ordre, le reste suit le tri
+  // automatique habituel. Sans aucune zone assignee (cas normal, feature non
+  // utilisee), un seul groupe couvre tous les arrets et le comportement est
+  // identique a l'ancien appel optimizeTourOrder() unique sur la totalite.
+  const zoneGroups = new Map();
+  eligibles.forEach((c, i) => {
+    const z = c.zone != null ? c.zone : Infinity;
+    if (!zoneGroups.has(z)) zoneGroups.set(z, []);
+    zoneGroups.get(z).push(i + 1);
+  });
+  const zoneKeys = [...zoneGroups.keys()].sort((a, b) => a - b);
+
+  // Chaine les zones bout a bout : la zone N+1 part du dernier arret de la
+  // zone N (pas du point de depart global) -- seule la DERNIERE zone recoit
+  // le retour au depot comme fin fixe. Budget de temps 2-opt partage entre
+  // zones (au prorata, avec un plancher) plutot que 5s par zone, qui
+  // deviendrait excessif avec de nombreuses petites zones.
+  const order = [];
+  let chainStart = 0;
+  const zoneBudgetMs = Math.max(800, Math.floor(5000 / zoneKeys.length));
+  zoneKeys.forEach((z, zi) => {
+    const isLastZone = zi === zoneKeys.length - 1;
+    const indices = zoneGroups.get(z);
+    const finalIndices = isLastZone && depotEndIdx != null ? [...indices, depotEndIdx] : indices;
+    const { order: zoneOrder } = optimizeTourOrder(matrix, chainStart, finalIndices, {
+      avant12hFlags,
+      penaltyWeight,
+      timeBudgetMs: zoneBudgetMs,
+      fixedEndIdx: isLastZone ? depotEndIdx : null,
+    });
+    order.push(...zoneOrder);
+    chainStart = zoneOrder[zoneOrder.length - 1];
   });
 
   const legs = legDurationsSeconds(order, matrix, 0);
