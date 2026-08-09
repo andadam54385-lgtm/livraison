@@ -485,7 +485,23 @@ async function loadMapData() {
     listFavoris(),
     loadCsrFromDb(db),
   ]);
-  const geocoded = allColis.filter((c) => c.geocode?.lat != null && c.geocode?.lon != null);
+  // Bug reel corrige ici (retour terrain : "la carte devient vite illisible
+  // au fil des jours") : allColis contient TOUT l'historique (des semaines
+  // de colis livres/en echec dont la tournee est archivee depuis
+  // longtemps), et rien ne filtrait par date/tournee -- chaque colis
+  // geocode restait un point sur la carte indefiniment. Ne garde que les
+  // colis encore pertinents : pas encore traites (pret/en_tournee/a
+  // verifier, utile pour preparer la prochaine tournee) OU appartenant a la
+  // tournee du jour actuellement active (pour voir la progression du jour,
+  // meme les arrets deja livres/en echec) -- jamais un colis livre/en echec
+  // d'une tournee archivee anterieure.
+  const activeTourColisIds = new Set((activeTour?.stops || []).map((s) => s.colisId));
+  const geocoded = allColis.filter(
+    (c) =>
+      c.geocode?.lat != null &&
+      c.geocode?.lon != null &&
+      (c.statut !== "livre" && c.statut !== "echec" ? true : activeTourColisIds.has(c.id))
+  );
   const depot = activeTour?.depot ?? { lat: settings.depotLat, lon: settings.depotLon, label: settings.depotLabel };
   const favGeoco = favoris.filter((f) => f.lat != null && f.lon != null);
   const returnPoint = activeTour?.returnToDepot && activeTour.depotArrivee ? activeTour.depotArrivee : null;
