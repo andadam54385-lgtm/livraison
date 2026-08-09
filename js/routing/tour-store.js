@@ -115,7 +115,13 @@ export async function reverseRemainingStops(tourId) {
   const tour = await get(db, "tours", tourId);
   if (!tour) return null;
   const stops = tour.stops.slice().sort((a, b) => a.ordre - b.ordre);
-  const pending = stops.filter((s) => !s.statutLivraison);
+  // Bug reel corrige ici : un arret non traite a TOUJOURS statutLivraison =
+  // "a_livrer" (jamais null/undefined, voir computeOptimizedStops et
+  // insertStopCheapest) -- "!s.statutLivraison" etait donc toujours faux,
+  // "pending" toujours vide, et le bouton "Inverser le sens" ne faisait
+  // strictement rien, silencieusement. Meme condition que isPending()
+  // (tour-ui.js) : un arret est "restant" s'il n'est ni livre ni en echec.
+  const pending = stops.filter((s) => s.statutLivraison !== "livre" && s.statutLivraison !== "echec");
   if (pending.length < 2) return tour;
   const ordres = pending.map((s) => s.ordre);
   const reversed = pending.slice().reverse();

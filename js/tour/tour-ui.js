@@ -398,6 +398,21 @@ function computeEtas(tour, stopsSorted, dwellSec) {
   return { etas, depotEta };
 }
 
+// Heure de fin de tournee estimee, affichee en haut de l'ecran (retour
+// terrain : "on ne voit pas comment on avance") -- avec retour au depot,
+// c'est la vraie fin de journee (depotEta) ; sinon, l'heure d'arrivee au
+// DERNIER arret par ordre (deja calculee par computeEtas), ou son heure
+// reelle si ce dernier arret est deja traite (tournee sur le point de finir).
+function computeFinEstimee(tour, stopsSorted, etas, depotEta) {
+  if (tour.returnToDepot && depotEta) return depotEta;
+  const lastEntry = stopsSorted[stopsSorted.length - 1];
+  if (!lastEntry) return null;
+  const { stop, colis } = lastEntry;
+  if (stop.statutLivraison === "livre") return stop.heureLivraison ? new Date(stop.heureLivraison) : null;
+  if (stop.statutLivraison === "echec") return stop.heureEchec ? new Date(stop.heureEchec) : null;
+  return colis ? etas.get(colis.id) || null : null;
+}
+
 async function promptAndMarkFailed(tourId, ordre) {
   const raison = prompt("Motif de l'échec (absent, accès impossible...) :", "");
   if (raison === null) return; // annule
@@ -499,9 +514,14 @@ function renderHeroCard(stop, colis, { navApp, eta, smsTemplates }) {
   `;
 }
 
+// Carte compacte (retour terrain : "trop de place prise" avec potentiellement
+// 20+ arrets a faire defiler d'une traite) -- memes actions qu'avant (rien
+// retire : appeler/naviguer/photo/livre/echec/reordonner), juste densifiees
+// sur UNE seule ligne d'icones plutot que deux lignes de boutons pleine
+// largeur + une 3e ligne pour le reordonnancement. Voir .stop-card* en CSS.
 function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
   if (!colis) {
-    return `<div class="card"><div class="muted">Colis introuvable (${escapeAttr(stop.colisId)})</div></div>`;
+    return `<div class="card stop-card"><div class="muted">Colis introuvable (${escapeAttr(stop.colisId)})</div></div>`;
   }
   const delivered = stop.statutLivraison === "livre";
   const failed = stop.statutLivraison === "echec";
@@ -511,44 +531,39 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
     ? buildNavUrl(navApp, { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse: formatAdresseForNav(colis) })
     : null;
   let heureLabel = null;
-  if (delivered) heureLabel = stop.heureLivraison ? `Livré à ${formatHeure(new Date(stop.heureLivraison))}` : "Livré";
-  else if (failed) heureLabel = stop.heureEchec ? `Échec à ${formatHeure(new Date(stop.heureEchec))}` : "Échec";
+  if (delivered) heureLabel = stop.heureLivraison ? formatHeure(new Date(stop.heureLivraison)) : "Livré";
+  else if (failed) heureLabel = stop.heureEchec ? formatHeure(new Date(stop.heureEchec)) : "Échec";
   else if (eta) heureLabel = `≈ ${formatHeure(eta)}`;
   const hasPhoto = Boolean(colis.preuvePhoto);
   const reorderButtons = reorderMode
     ? `
-      <div class="button-row" style="margin-top:6px;">
         <button type="button" data-move-ordre="${stop.ordre}" data-move-dir="-1" ${canMoveUp ? "" : "disabled"} aria-label="Monter">${icon("chevron-up", { spaced: false })}</button>
         <button type="button" data-move-ordre="${stop.ordre}" data-move-dir="1" ${canMoveDown ? "" : "disabled"} aria-label="Descendre">${icon("chevron-down", { spaced: false })}</button>
-      </div>
     `
     : "";
 
   return `
-    <div class="card" data-stop-card="${escapeAttr(colis.id)}" style="${done ? "opacity:0.55;" : ""}">
+    <div class="card stop-card" data-stop-card="${escapeAttr(colis.id)}" style="${done ? "opacity:0.55;" : ""}">
       <div class="card-row" data-open-detail data-colis-id="${escapeAttr(colis.id)}">
         <div class="card-title">#${stop.ordre} ${escapeHtml(colis.nom || "(nom inconnu)")}</div>
-        <div style="display:flex;gap:4px;align-items:center;">
+        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;">
           ${heureLabel ? `<span class="badge ${failed ? "badge-warn" : "badge-pending"}">${heureLabel}</span>` : ""}
-          ${colis.avant12h ? '<span class="badge badge-urgent">Avant 12h</span>' : ""}
+          ${colis.avant12h ? '<span class="badge badge-urgent">12h</span>' : ""}
         </div>
       </div>
-      <div class="muted" data-open-detail data-colis-id="${escapeAttr(colis.id)}">${escapeHtml(adresse)}</div>
+      <div class="muted stop-card-addr" data-open-detail data-colis-id="${escapeAttr(colis.id)}">${escapeHtml(adresse)}${colis.quantite > 1 ? ` · ${colis.quantite} colis` : ""}</div>
       ${failed && stop.raisonEchec ? `<div class="muted" style="margin-top:2px;">Motif : ${escapeHtml(stop.raisonEchec)}</div>` : ""}
-      ${colis.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:4px;">${colis.quantite} colis</span>` : ""}
-      <div class="button-row">
-        ${colis.tel ? `<a class="btn-link" href="tel:${colis.tel}">${icon("phone")}Appeler</a>` : ""}
-        ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
+      <div class="stop-card-actions">
+        ${colis.tel ? `<a class="btn-link" href="tel:${colis.tel}" aria-label="Appeler">${icon("phone", { spaced: false })}</a>` : ""}
+        ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener" aria-label="Naviguer">${icon("navigation", { spaced: false })}</a>` : ""}
+        <button type="button" data-photo-colis="${escapeAttr(colis.id)}" aria-label="Photo">${icon(hasPhoto ? "check" : "camera", { spaced: false })}</button>
         ${
           done
-            ? `<button type="button" disabled>${delivered ? `${icon("check")}Livré` : "Échec"}</button>`
-            : `<button type="button" class="ok" data-deliver-ordre="${stop.ordre}">Livré</button>`
+            ? `<button type="button" disabled aria-label="${delivered ? "Livré" : "Échec"}">${delivered ? icon("check", { spaced: false }) : icon("x", { spaced: false })}</button>`
+            : `<button type="button" class="ok" data-deliver-ordre="${stop.ordre}" aria-label="Livré">${icon("check", { spaced: false })}</button>`
         }
-      </div>
-      ${reorderButtons}
-      <div class="button-row" style="margin-top:6px;">
-        <button type="button" data-photo-colis="${escapeAttr(colis.id)}">${icon("camera")}${hasPhoto ? `Photo ${icon("check", { spaced: false })}` : "Photo (optionnel)"}</button>
-        ${!done ? `<button type="button" class="hero-fail-btn" data-fail-ordre="${stop.ordre}">Échec</button>` : ""}
+        ${!done ? `<button type="button" class="hero-fail-btn" data-fail-ordre="${stop.ordre}" aria-label="Échec">${icon("x", { spaced: false })}</button>` : ""}
+        ${reorderButtons}
       </div>
     </div>
   `;
@@ -694,9 +709,11 @@ async function renderEtatB(tour) {
   const delivered = stopsWithColis.filter((s) => s.stop.statutLivraison === "livre").length;
   const failed = stopsWithColis.filter((s) => s.stop.statutLivraison === "echec").length;
   const total = stopsWithColis.length;
+  const finEstimee = computeFinEstimee(tour, stopsWithColis, lastEtas, lastDepotEta);
 
   updateHeader({
     title: "Ma tournée",
+    statsHtml: finEstimee ? `<span class="stat-pill">${icon("clock", { spaced: false })} Fin ≈ ${formatHeure(finEstimee)}</span>` : "",
     showProgress: true,
     progressPercent: total === 0 ? 0 : Math.round(((delivered + failed) / total) * 100),
   });

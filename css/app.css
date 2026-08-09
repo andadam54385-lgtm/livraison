@@ -315,6 +315,26 @@ a { color: var(--accent-strong); }
 .card-title { font-weight: 650; margin-bottom: 4px; letter-spacing: -0.01em; }
 .card-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 
+/* Cartes d'arrets compactes (ecran Tournee, Etat B) : retour terrain -- une
+   liste de potentiellement 20+ arrets a faire defiler d'une traite prenait
+   trop de place avec le gabarit ".card" generique (pense pour un item isole).
+   Padding/marges reduits, memes actions qu'avant (rien retire) mais
+   regroupees sur UNE seule ligne d'icones plutot que deux lignes de boutons
+   pleine largeur + une 3e ligne pour le reordonnancement -- voir
+   renderStopCard() dans tour-ui.js. */
+.stop-card { padding: 8px 10px; margin-bottom: 6px; }
+.stop-card .card-title { font-size: 0.92rem; margin-bottom: 1px; }
+.stop-card-addr { font-size: 0.8rem; margin-top: 1px; }
+.stop-card-actions { display: flex; gap: 6px; margin-top: 6px; }
+.stop-card-actions a, .stop-card-actions button {
+  flex: 1;
+  min-height: 38px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Arret courant (ecran Tournee) : seul element mis en avant, tout le reste
    (liste "a venir") reste volontairement discret en dessous. */
 .hero-card {
