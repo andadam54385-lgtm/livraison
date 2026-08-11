@@ -119,6 +119,30 @@ export function mergeDraftInto(existing, incoming) {
   if (incoming.rue && (!existing.rue || incoming.rue.length > existing.rue.length + 3)) existing.rue = incoming.rue;
 }
 
+// Verification BAN EN AMONT de l'ecran de revision (pas seulement au moment
+// d'"Enregistrer") : retour terrain "pourquoi ne pas verifier qu'une adresse
+// existe avant de la valider, pour ne pas perdre de temps ?" -- on ne peut
+// pas se permettre d'ECARTER automatiquement une adresse non reconnue (l'OCR
+// reste faillible : CP correctement lu mais rue mal lue, ou l'inverse, ne
+// veut pas dire que l'adresse n'existe pas -- meme regle que
+// bulkGeocodeAndSave/feedback-colis-ready-rule : une adresse geocodee sans
+// certitude reste proposee, jamais supprimee silencieusement). En revanche,
+// signaler d'emblee dans la liste de revision LESQUELLES sont deja
+// reconnues (l'oeil peut les survoler) et LESQUELLES ont vraiment besoin
+// d'attention concentre le temps de revision sur ce qui le merite.
+async function computeGeocodePreview(draft) {
+  try {
+    const { numero, rue: rueSansNumero } = splitNumeroRue(draft.rue || "");
+    const { best, candidates } = await matchAddress({ rue: rueSansNumero, cp: draft.cp, commune: draft.ville, numero });
+    if (best) return "ok";
+    if (candidates.length > 0) return "ambigu";
+    return "non_geocode";
+  } catch (err) {
+    console.error("[batch-scan] Erreur de verification d'adresse:", err);
+    return "non_geocode";
+  }
+}
+
 function draftToColis(draft) {
   return {
     id: uuid(),
@@ -330,7 +354,19 @@ export function startBatchScan(container) {
       resolve(collected.slice());
     });
   }).then(
-    (drafts) => (drafts.length === 0 ? [] : renderReviewList(container, drafts)),
+    async (drafts) => {
+      if (drafts.length === 0) return [];
+      // Verification BAN de tout le lot AVANT d'afficher la revision (voir
+      // computeGeocodePreview) -- requetes IndexedDB locales, rapides meme
+      // pour plusieurs dizaines d'entrees en parallele, mais un court
+      // message evite que l'ecran semble fige pendant l'attente.
+      container.innerHTML = `<div class="empty-state">Vérification des adresses…</div>`;
+      const previews = await Promise.all(drafts.map((d) => computeGeocodePreview(d)));
+      drafts.forEach((d, i) => {
+        d.geocodePreview = previews[i];
+      });
+      return renderReviewList(container, drafts);
+    },
     (err) => {
       throw err;
     }
@@ -354,10 +390,21 @@ function renderReviewList(container, drafts) {
           const idx = state.indexOf(item);
           const label = item.draft.nom || [item.draft.rue, item.draft.ville].filter(Boolean).join(", ") || "(adresse incomplète)";
           const sub = [item.draft.rue, `${item.draft.cp || ""} ${item.draft.ville || ""}`.trim()].filter(Boolean).join(" — ");
+          // Badge de reconnaissance BAN (voir computeGeocodePreview) : jamais
+          // un motif d'ecarter la ligne, seulement d'orienter l'oeil vers
+          // celles qui meritent vraiment d'etre ouvertes/corrigees.
+          const previewBadge =
+            item.status === "pending" && item.draft.geocodePreview === "ok"
+              ? `<span class="badge badge-ok">${icon("check", { spaced: false })} Reconnue</span>`
+              : item.status === "pending" && item.draft.geocodePreview
+                ? `<span class="badge badge-warn">À vérifier</span>`
+                : "";
           return `
             <div class="card-row" style="padding:10px 0;border-bottom:1px solid var(--border);align-items:flex-start;">
               <div style="flex:1;min-width:0;">
-                <div class="card-title" style="margin-bottom:0;">${item.status === "saved" ? `${icon("check", { spaced: false })} ` : ""}${escapeHtml(label)}</div>
+                <div class="card-title" style="margin-bottom:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  ${item.status === "saved" ? `${icon("check", { spaced: false })} ` : ""}${escapeHtml(label)} ${previewBadge}
+                </div>
                 <div class="muted" style="font-size:0.85rem;">${escapeHtml(sub || "(adresse incomplète)")}</div>
               </div>
               ${
@@ -374,11 +421,16 @@ function renderReviewList(container, drafts) {
         .join("");
 
       const pendingCount = state.filter((s) => s.status === "pending").length;
+      const reconnues = visible.filter((s) => s.status === "pending" && s.draft.geocodePreview === "ok").length;
+      const aVerifier = visible.filter((s) => s.status === "pending").length - reconnues;
 
       container.innerHTML = `
         <div class="import-screen" style="text-align:left;">
           <h1>Vérifie les adresses (${visible.length})</h1>
-          <p class="muted">Corrige ou supprime celles qui ne sont pas bonnes -- les autres seront enregistrées telles quelles.</p>
+          <p class="muted">
+            ${reconnues} reconnue${reconnues > 1 ? "s" : ""} automatiquement, ${aVerifier} à vérifier —
+            corrige ou supprime celles qui ne sont pas bonnes, les autres seront enregistrées telles quelles.
+          </p>
           <div>${rows || `<p class="muted">Plus rien à enregistrer.</p>`}</div>
           <div class="button-row" style="margin-top:14px;">
             <button type="button" id="batch-review-cancel">Tout annuler</button>
