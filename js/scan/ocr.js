@@ -36,6 +36,11 @@ async function getWorker(langs) {
  */
 export async function recognizeCanvas(canvas, { langs = "fra" } = {}) {
   const worker = await getWorker(langs);
+  // PSM explicite (AUTO, le defaut Tesseract) : le worker est partage avec
+  // recognizeCanvasWithLines (voir plus bas), qui le bascule sur un autre
+  // mode -- sans le remettre ici, un scan liste juste avant un scan
+  // etiquette heriterait du mauvais mode de segmentation.
+  await worker.setParameters({ tessedit_pageseg_mode: Tesseract.PSM.AUTO });
   const { data } = await worker.recognize(canvas);
   return { text: data.text, confidence: data.confidence };
 }
@@ -83,6 +88,12 @@ function extractLines(data) {
 // le texte brut reste utilisable, seul le cadrage visuel se degrade.
 export async function recognizeCanvasWithLines(canvas, { langs = "fra" } = {}) {
   const worker = await getWorker(langs);
+  // SINGLE_COLUMN plutot que AUTO (defaut) : le scan en rafale n'OCRise que
+  // la zone-guide de cadrage (voir batch-scan-ui.js), pensee pour contenir
+  // UNE colonne de liste -- AUTO tente de reconnaitre une mise en page de
+  // page complete (titres, colonnes multiples...) et se perd plus facilement
+  // sur du texte d'appli/ecran, moins structure qu'un document classique.
+  await worker.setParameters({ tessedit_pageseg_mode: Tesseract.PSM.SINGLE_COLUMN });
   try {
     const { data } = await worker.recognize(canvas, {}, { blocks: true });
     return { text: data.text, confidence: data.confidence, lines: extractLines(data) };

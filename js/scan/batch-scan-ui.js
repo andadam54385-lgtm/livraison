@@ -1,6 +1,6 @@
 import { recognizeCanvasWithLines } from "./ocr.js";
 import { parseAddressList } from "./parse-address-list.js";
-import { matchAddress } from "../geocode/match-address.js";
+import { matchAddress, streetSimilarity } from "../geocode/match-address.js";
 import { formatEntry } from "../geocode/geocode-ui.js";
 import { normalizeStreet, normalizeCity } from "../geocode/normalize-address.js";
 import { saveColis } from "./colis-store.js";
@@ -29,15 +29,94 @@ import { icon } from "../ui/icons.js";
 const OCR_MIN_INTERVAL_MS = 400; // pause mini entre 2 passes meme si l'OCR est tres rapide sur l'appareil
 const MAX_CAPTURE_DIMENSION = 1400; // plus grand que le decodage code-barres (900px) : l'OCR a besoin de plus de details qu'un simple code-barres
 
+// Zone-guide de cadrage : rectangle fixe (en proportion du cadre camera) que
+// l'utilisateur doit remplir avec la liste -- retour terrain "OCR quasi
+// inexploitable" root-cause : l'ecran du terminal filme n'occupe souvent
+// qu'une petite partie du cadre (tableau de bord/main tout autour), donc le
+// texte reel ne fait plus que quelques pixels de haut une fois la capture
+// mise a l'echelle. On n'OCRise desormais QUE cette zone (pas le cadre
+// entier) : a resolution de capture egale, le texte utile devient
+// nettement plus grand, ET le fond parasite (qui pouvait faire echouer la
+// segmentation de page de Tesseract) disparait entierement.
+const GUIDE_INSET_X = 0.08;
+const GUIDE_INSET_Y = 0.14;
+
+function guideRectNative(videoWidth, videoHeight) {
+  const x0 = Math.round(videoWidth * GUIDE_INSET_X);
+  const y0 = Math.round(videoHeight * GUIDE_INSET_Y);
+  const w = Math.round(videoWidth * (1 - 2 * GUIDE_INSET_X));
+  const h = Math.round(videoHeight * (1 - 2 * GUIDE_INSET_Y));
+  return { x0, y0, w, h };
+}
+
+// Niveaux de gris + etirement de contraste (min/max -> 0-255) : simple mais
+// efficace contre les reflets/eclairage inegal d'un ecran filme a travers un
+// pare-brise, qui ecrasent souvent le contraste texte/fond dont Tesseract a
+// besoin. Cout negligeable (une poignee de ms) face aux 1-3s de l'OCR
+// lui-meme.
+function preprocessForOcr(ctx, canvas) {
+  const { width, height } = canvas;
+  if (width === 0 || height === 0) return;
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const d = imageData.data;
+  let min = 255;
+  let max = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    if (gray < min) min = gray;
+    if (gray > max) max = gray;
+  }
+  const range = Math.max(1, max - min);
+  for (let i = 0; i < d.length; i += 4) {
+    const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const stretched = Math.min(255, Math.max(0, Math.round(((gray - min) / range) * 255)));
+    d[i] = stretched;
+    d[i + 1] = stretched;
+    d[i + 2] = stretched;
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
 function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Cle de deduplication : rue+cp+ville normalises (meme normalisation que le
-// geocodage, coherent avec le reste de l'appli) -- le nom n'entre pas dans
-// la cle (souvent absent/variable), l'adresse suffit a identifier un client.
-function draftKey(draft) {
-  return `${normalizeStreet(draft.rue || "")}|${draft.cp || ""}|${normalizeCity(draft.ville || "")}`;
+// Deduplication FLOUE (pas une simple cle exacte) : bug reel corrige ici,
+// retour terrain "65 arrets reels -> 240 propositions". L'OCR d'un ecran
+// filme (reflets, tremblement, texte minuscule) ne relit JAMAIS deux fois le
+// MEME texte a l'identique pour une meme adresse physique -- une cle exacte
+// (rue+cp+ville normalises) traitait donc chaque nouvelle variante de bruit
+// comme une adresse toute neuve a chaque passage de l'OCR (la boucle tourne
+// en continu tant que la camera reste pointee), d'ou la multiplication.
+// On compare desormais chaque nouvelle detection a celles deja retenues via
+// streetSimilarity (Levenshtein + trigrammes, deja utilise pour le
+// geocodage BAN) : un CP present des deux cotes doit correspondre, une ville
+// presente des deux cotes doit correspondre, et la rue doit depasser
+// FUZZY_DEDUP_THRESHOLD -- suffisamment tolerant au bruit OCR sans fusionner
+// deux rues reellement differentes du meme secteur.
+const FUZZY_DEDUP_THRESHOLD = 0.62;
+
+export function isSameAddress(a, b) {
+  if (a.cp && b.cp && a.cp !== b.cp) return false;
+  const villeA = normalizeCity(a.ville || "");
+  const villeB = normalizeCity(b.ville || "");
+  if (villeA && villeB && villeA !== villeB) return false;
+  const streetA = normalizeStreet(a.rue || "");
+  const streetB = normalizeStreet(b.rue || "");
+  if (!streetA || !streetB) return Boolean(villeA) && villeA === villeB;
+  return streetSimilarity(streetA, streetB) >= FUZZY_DEDUP_THRESHOLD;
+}
+
+// Complete en place un brouillon deja retenu avec les champs qu'une nouvelle
+// capture aurait mieux lus (ex: CP/ville absents la premiere fois, texte de
+// rue plus complet) -- profite du fait que l'OCR se trompe DIFFEREMMENT a
+// chaque passage plutot que de garder seulement la toute premiere lecture,
+// potentiellement la plus incomplete.
+export function mergeDraftInto(existing, incoming) {
+  if (!existing.cp && incoming.cp) existing.cp = incoming.cp;
+  if (!existing.ville && incoming.ville) existing.ville = incoming.ville;
+  if (!existing.nom && incoming.nom) existing.nom = incoming.nom;
+  if (incoming.rue && (!existing.rue || incoming.rue.length > existing.rue.length + 3)) existing.rue = incoming.rue;
 }
 
 function draftToColis(draft) {
@@ -115,9 +194,9 @@ export function startBatchScan(container) {
 
     let stream = null;
     let stopped = false;
-    let captureScale = 1; // rapport capture/native, pour reconvertir les bbox OCR en espace video natif (voir drawBoxes)
+    let captureScale = 1; // rapport capture/zone-guide, pour reconvertir les bbox OCR en espace video natif (voir drawBoxes)
+    let guide = null; // zone-guide en coordonnees natives video (voir guideRectNative), calculee des que la camera est prete
     const collected = []; // drafts confirmes, dans l'ordre de detection
-    const seenKeys = new Set();
 
     function cleanup() {
       stopped = true;
@@ -128,48 +207,71 @@ export function startBatchScan(container) {
       countEl.textContent = String(collected.length);
     }
 
-    // Dessine les cadres directement en coordonnees NATIVES de la video : le
-    // viewBox du SVG (fixe une fois pour toutes a l'initialisation, voir plus
-    // bas) se charge de la mise a l'echelle vers la taille reellement
-    // affichee a l'ecran -- aucun calcul de scale/offset a refaire ici, y
-        // compris si la fenetre est redimensionnee.
+    // Dessine la zone-guide (toujours visible, pointilles) puis les cadres de
+    // detection, en coordonnees NATIVES de la video : le viewBox du SVG (fixe
+    // une fois pour toutes a l'initialisation, voir plus bas) se charge de la
+    // mise a l'echelle vers la taille reellement affichee a l'ecran. Les bbox
+    // OCR sont relatives a la capture CROPEE sur la zone-guide (voir loop()) :
+    // on divise par captureScale puis on rajoute le decalage du guide pour
+    // retrouver leur position dans le cadre video complet.
     function drawBoxes(results) {
-      overlay.innerHTML = results
+      const guideRectSvg = guide
+        ? `<rect x="${guide.x0}" y="${guide.y0}" width="${guide.w}" height="${guide.h}" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3" stroke-dasharray="12 8" rx="12"></rect>`
+        : "";
+      const boxesSvg = results
         .map(({ bbox, isNew }) => {
-          const x = bbox.x0 / captureScale;
-          const y = bbox.y0 / captureScale;
+          const x = bbox.x0 / captureScale + guide.x0;
+          const y = bbox.y0 / captureScale + guide.y0;
           const w = (bbox.x1 - bbox.x0) / captureScale;
           const h = (bbox.y1 - bbox.y0) / captureScale;
           const color = isNew ? "#22c55e" : "#94a3b8";
           return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${color}" stroke-width="4" rx="8"></rect>`;
         })
         .join("");
+      overlay.innerHTML = guideRectSvg + boxesSvg;
+    }
+
+    // Affiche la zone-guide seule, avant meme la premiere passe OCR (qui
+    // prend 1 a plusieurs secondes) -- sans ca, l'utilisateur ne voit ou
+    // cadrer qu'apres un delai frustrant.
+    function drawGuideOnly() {
+      overlay.innerHTML = guide
+        ? `<rect x="${guide.x0}" y="${guide.y0}" width="${guide.w}" height="${guide.h}" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3" stroke-dasharray="12 8" rx="12"></rect>`
+        : "";
     }
 
     async function loop() {
       if (stopped) return;
       const loopStart = Date.now();
       if (video.readyState >= 2 && video.videoWidth > 0) {
-        captureScale = Math.min(1, MAX_CAPTURE_DIMENSION / Math.max(video.videoWidth, video.videoHeight));
-        captureCanvas.width = Math.round(video.videoWidth * captureScale);
-        captureCanvas.height = Math.round(video.videoHeight * captureScale);
-        ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+        const isFirstFrame = guide === null;
+        guide = guideRectNative(video.videoWidth, video.videoHeight);
+        if (isFirstFrame) drawGuideOnly();
+        captureScale = Math.min(1, MAX_CAPTURE_DIMENSION / Math.max(guide.w, guide.h));
+        captureCanvas.width = Math.round(guide.w * captureScale);
+        captureCanvas.height = Math.round(guide.h * captureScale);
+        ctx.drawImage(video, guide.x0, guide.y0, guide.w, guide.h, 0, 0, captureCanvas.width, captureCanvas.height);
+        preprocessForOcr(ctx, captureCanvas);
 
         try {
           const langs = (await getSetting("ocrLangs")) || "fra";
           const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
           const drafts = parseAddressList(lines);
 
-          // isNew : jamais vue avant dans ce balayage -> vient d'etre ajoutee
-          // (cadre vert). Deja vue (le scroll repasse dessus) -> cadre gris,
-          // pas rajoutee (une adresse n'existe normalement qu'une fois).
+          // isNew : ne correspond (floue, voir isSameAddress) a aucun
+          // brouillon deja retenu -> vient d'etre ajoutee (cadre vert).
+          // Correspond a un brouillon existant -> pas rajoutee (cadre gris),
+          // seulement complete si elle apporte des champs manquants
+          // (mergeDraftInto) -- une meme adresse physique redonne
+          // generalement un texte OCR legerement different a chaque passage.
           const boxResults = [];
           for (const draft of drafts) {
-            const key = draftKey(draft);
-            const isNew = !seenKeys.has(key);
+            const matchIdx = collected.findIndex((existing) => isSameAddress(existing, draft));
+            const isNew = matchIdx === -1;
             if (isNew) {
-              seenKeys.add(key);
               collected.push(draft);
+            } else {
+              mergeDraftInto(collected[matchIdx], draft);
             }
             boxResults.push({ bbox: draft.bbox, isNew });
           }
@@ -179,7 +281,7 @@ export function startBatchScan(container) {
             statusEl.textContent =
               collected.length > 0
                 ? `${collected.length} adresse${collected.length > 1 ? "s" : ""} détectée${collected.length > 1 ? "s" : ""} — continue à balayer ou termine.`
-                : "Vise la liste d'adresses…";
+                : "Cadre la liste dans le rectangle, au plus près…";
           }
         } catch (err) {
           console.error("[batch-scan] Erreur OCR:", err);
