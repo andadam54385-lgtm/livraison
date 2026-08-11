@@ -1,8 +1,9 @@
 import { recognizeCanvasWithLines } from "./ocr.js";
 import { parseAddressList } from "./parse-address-list.js";
-import { matchAddress, streetSimilarity } from "../geocode/match-address.js";
+import { matchAddress, streetSimilarity, looseCommune } from "../geocode/match-address.js";
 import { formatEntry } from "../geocode/geocode-ui.js";
 import { normalizeStreet, normalizeCity } from "../geocode/normalize-address.js";
+import { listDistinctCities } from "../geocode/ban-index.js";
 import { saveColis } from "./colis-store.js";
 import { splitNumeroRue, renderReviewForm } from "./scan-ui.js";
 import { getSetting } from "../settings/settings-store.js";
@@ -221,6 +222,23 @@ export function startBatchScan(container) {
     let captureScale = 1; // rapport capture/zone-guide, pour reconvertir les bbox OCR en espace video natif (voir drawBoxes)
     let guide = null; // zone-guide en coordonnees natives video (voir guideRectNative), calculee des que la camera est prete
     const collected = []; // drafts confirmes, dans l'ordre de detection
+    // Communes connues de la base BAN locale (voir classifyBlockLines dans
+    // parse-address-list.js) : seul moyen fiable de distinguer une ligne
+    // "ville" d'une ligne "nom" quand un terminal les affiche chacune sur
+    // leur propre ligne sans aucun autre indice (pas de chiffre, pas de
+    // mot-cle de voie). Chargee une fois au demarrage du scan (le resultat
+    // est deja mis en cache par listDistinctCities() lui-meme -- gratuit si
+    // un autre scan a deja tourne dans la session), en parallele de
+    // l'initialisation camera plus bas.
+    let knownCities = new Set();
+    listDistinctCities()
+      .then((cities) => {
+        // looseCommune (pas juste c.cn tel quel) : voir le meme choix cote
+        // parse-address-list.js, tolerance aux tirets/apostrophes absents
+        // d'un affichage d'ecran par rapport a l'orthographe BAN canonique.
+        knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
+      })
+      .catch((err) => console.error("[batch-scan] Échec chargement des communes connues:", err));
 
     function cleanup() {
       stopped = true;
@@ -280,7 +298,7 @@ export function startBatchScan(container) {
         try {
           const langs = (await getSetting("ocrLangs")) || "fra";
           const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
-          const drafts = parseAddressList(lines);
+          const drafts = parseAddressList(lines, { knownCities });
 
           // isNew : ne correspond (floue, voir isSameAddress) a aucun
           // brouillon deja retenu -> vient d'etre ajoutee (cadre vert).

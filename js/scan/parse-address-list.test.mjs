@@ -66,6 +66,63 @@ console.log("\n=== Cas 4 : bloc sans aucune adresse exploitable (bruit) ignore =
   assertEqual(result.length, 1, "le titre sans rue/cp au-dessus n'est pas retenu comme bloc separe");
 }
 
+console.log("\n=== Cas 5 : vrai format terminal UPS -- rue / ville / CP sur 3 lignes SEPAREES (pas 'cp ville' colle) ===");
+{
+  const knownCities = new Set(["dommartin les toul"]); // forme "loose" (sans tirets) -- voir looseCommune
+  const ocrLines = [
+    line("AKHRAZ HASSAN", 0),
+    line("14 GENERAL LECLERC AVE", 24),
+    line("DOMMARTIN LES TOUL", 48),
+    line("54200", 72),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities });
+  assertEqual(result.length, 1, "1 bloc detecte");
+  assertEqual(result[0].nom, "AKHRAZ HASSAN", "nom correctement isole (pas ecrase par la ville)");
+  assertEqual(result[0].rue, "14 GENERAL LECLERC AVE", "rue sans le CP colle a tort (ancien bug)");
+  assertEqual(result[0].ville, "DOMMARTIN LES TOUL", "ville reconnue via knownCities malgre l'absence de CP sur la meme ligne");
+  assertEqual(result[0].cp, "54200", "CP seul sur sa ligne correctement isole (ancien bug : partait dans la rue)");
+}
+
+console.log("\n=== Cas 6 : retour a la ligne d'une rue trop longue (continuation rattachee a la rue, pas au nom) ===");
+{
+  const ocrLines = [
+    line("Paul Petit", 0),
+    line("3 Rue du General de", 24),
+    line("Gaulle", 48),
+    line("54470 Ansauville", 72),
+  ];
+  const result = parseAddressList(ocrLines);
+  assertEqual(result[0].nom, "Paul Petit", "nom non pollue par la 2e ligne de la rue");
+  assertEqual(result[0].rue, "3 Rue du General de Gaulle", "rue reconstituee sur ses 2 lignes");
+}
+
+console.log("\n=== Cas 7 : ville affichee en double (libelle de zone + ville reelle) -- pas de concatenation ===");
+{
+  const knownCities = new Set(["dommartin les toul"]); // forme "loose" (sans tirets) -- voir looseCommune
+  const ocrLines = [
+    line("CHAUSSEA", 0),
+    line("Dommartin-les-Toul", 24), // libelle de zone au-dessus du bloc (meme ville, redondant)
+    line("JONCHERY RUE", 48),
+    line("Dommartin-les-Toul", 72), // ville propre de l'adresse
+    line("54200", 96),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities });
+  assertEqual(result[0].ville, "Dommartin-les-Toul", "dernier match l'emporte, pas de doublon concatene");
+}
+
+console.log("\n=== Cas 8 : sans knownCities (Set vide, comportement par defaut), une ville seule sans CP est rattachee a la rue (repli continuation) ===");
+{
+  // Degradation gracieuse documentee : sans base de reference, impossible de
+  // distinguer une ville d'un nom par la seule forme du texte -- le repli
+  // "continuation du champ precedent" (ligne suivant une rue) l'emporte,
+  // donc la ville finit ajoutee a la rue plutot que de corrompre le nom.
+  // Le bloc reste retenu (rue non vide), juste sans ville extraite.
+  const ocrLines = [line("14 GENERAL LECLERC AVE", 0), line("DOMMARTIN LES TOUL", 24)];
+  const result = parseAddressList(ocrLines);
+  assertEqual(result[0].rue, "14 GENERAL LECLERC AVE DOMMARTIN LES TOUL", "rue englobe la ligne non identifiee (repli, pas une perte)");
+  assertEqual(result[0].ville, null, "ville non extraite sans knownCities (attendu, pas une regression)");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)

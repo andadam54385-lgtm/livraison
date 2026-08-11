@@ -97,7 +97,11 @@ function normalizeRep(rep) {
 // scoreCandidates) -- volontairement PAS utilisee pour le stockage
 // (entry.cn reste tel que precalcule par data-prep), seulement au moment de
 // la comparaison, donc aucun impact sur ban.json.gz deja genere/deploye.
-function looseCommune(s) {
+// Exportee : reutilisee par parse-address-list.js (reconnaissance d'une
+// ligne "ville" via la liste des communes connues), meme probleme -- un
+// terminal affiche souvent une commune composee SANS tirets ("DOMMARTIN LES
+// TOUL") alors que la BAN la stocke AVEC ("dommartin-les-toul").
+export function looseCommune(s) {
   return String(s || "")
     .replace(/[-']/g, " ")
     .replace(/\s+/g, " ")
