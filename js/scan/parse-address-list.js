@@ -34,6 +34,30 @@ const CP_VILLE_TRAILING_RE = /^(.*\S)\s+(\d{5})\s+([a-zà-ÿ'\-]+(?:\s[a-zà-ÿ'
 // (numero de voie), corrompant l'adresse et laissant cp/ville vides.
 const CP_ONLY_RE = /^(\d{5})$/;
 
+// Bruit d'interface propre au terminal (distance au prochain arret, plage
+// horaire, tag zone/colis) -- bug reel corrige ici, reproduit et verifie sur
+// une vraie capture : ces lignes s'intercalent PILE entre deux adresses,
+// juste sous le CP de l'une et juste au-dessus du nom de la suivante. Deux
+// consequences en cascade avant ce correctif : (1) commencant par un
+// chiffre, elles etaient captees par le repli "numero de voie" et
+// polluaient la RUE ("JONCHERY RUE 21.8km") ; (2) pire, en s'intercalant
+// dans l'ecart vertical qui separe deux clients, elles le decoupaient en
+// DEUX ecarts plus petits dont NI L'UN NI L'AUTRE ne depassait le seuil de
+// groupLinesIntoBlocks -- deux adresses entieres fusionnaient alors en une
+// seule (bloc "JEANNE D'ARC RUE 22.34km AKHRAZ HASSAN 14 GENERAL LECLERC
+// AVE 22.83km" observe en test). Filtrees ICI, avant meme le decoupage en
+// blocs, pour ne jamais entrer dans le calcul des ecarts.
+const NOISE_LINE_PATTERNS = [
+  /^\d+([.,]\d+)?\s?km$/i, // distance : "21.8km", "22,44 km"
+  /^\d{1,2}[:.]\d{2}\s*[-–]\s*\d{1,2}[:.]\d{2}$/, // plage horaire : "08:20 - 10:20"
+  /^\d{3,5}\s*\|\s*\d+\+\d+$/, // tag zone/colis : "8000 | 0+1"
+];
+
+function isNoiseLine(text) {
+  const trimmed = text.trim();
+  return NOISE_LINE_PATTERNS.some((re) => re.test(trimmed));
+}
+
 const STREET_KEYWORDS = [
   "RUE", "AVENUE", "AV", "BD", "BOULEVARD", "ROUTE", "CHEMIN", "IMPASSE",
   "ALLEE", "ALLÉE", "ZONE", "ZI", "ZAC", "LIEU-DIT", "LIEU DIT", "HAMEAU",
@@ -197,7 +221,11 @@ export function groupLinesIntoBlocks(lines) {
  * @returns {{nom: string|null, rue: string|null, cp: string|null, ville: string|null, bbox: object, rawLines: string[]}[]}
  */
 export function parseAddressList(ocrLines, { knownCities = new Set() } = {}) {
-  const blocks = groupLinesIntoBlocks(ocrLines);
+  // Bruit d'interface (distance/horaire/tag, voir NOISE_LINE_PATTERNS) retire
+  // AVANT le decoupage en blocs -- sans ca, ces lignes intercalees entre deux
+  // adresses peuvent casser l'ecart qui les separe et les faire fusionner.
+  const usableLines = ocrLines.filter((l) => !isNoiseLine(l.text));
+  const blocks = groupLinesIntoBlocks(usableLines);
   return blocks
     .map((blockLines) => {
       const classified = classifyBlockLines(

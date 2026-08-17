@@ -123,6 +123,31 @@ console.log("\n=== Cas 8 : sans knownCities (Set vide, comportement par defaut),
   assertEqual(result[0].ville, null, "ville non extraite sans knownCities (attendu, pas une regression)");
 }
 
+console.log("\n=== Cas 9 : bruit d'interface (distance 'Xkm') entre deux clients -- reproduit un bug reel de fusion de blocs ===");
+{
+  // Retour terrain : "il y avait 4 adresses sur la photo, tu m'en a sorti
+  // qu'une" -- reproduit ici avec les VRAIES 4 adresses et la ligne de
+  // distance qui s'affiche entre chaque client sur le vrai terminal, tres
+  // proche du CP precedent. Avant le correctif : la ligne "Xkm" cassait
+  // l'ecart en deux plus petits (ni l'un ni l'autre au-dessus du seuil),
+  // 2 clients fusionnaient en un seul bloc corrompu.
+  const knownCities = new Set(["dommartin les toul"]);
+  const ocrLines = [
+    line("CHAUSSEA", 0), line("Dommartin-les-Toul", 26), line("JONCHERY RUE", 52), line("DOMMARTIN-LES-TOUL", 78), line("54200", 104),
+    line("21.8km", 112),
+    line("Marie-Adele GLOTZ", 180), line("6 8EME BCP RUE", 206), line("DOMMARTIN LES TOUL", 232), line("54200", 258),
+    line("22.44km", 266),
+    line("JEANNE D'ARC RUE", 340), line("DOMMARTIN-LES-TOUL", 366), line("54200", 392),
+    line("22.34km", 400),
+    line("AKHRAZ HASSAN", 460), line("14 GENERAL LECLERC AVE", 486), line("DOMMARTIN LES TOUL", 512), line("54200", 538),
+    line("22.83km", 546),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities });
+  assertEqual(result.length, 4, "les 4 adresses restent 4 blocs distincts (pas de fusion)");
+  assertEqual(result[0].rue, "JONCHERY RUE", "rue non polluee par la distance (pas de '21.8km' ajoute)");
+  assertEqual(result[3].nom, "AKHRAZ HASSAN", "4e adresse bien isolee, pas fusionnee avec la 3e");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)
