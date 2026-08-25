@@ -382,6 +382,20 @@ export function startBatchScan(container) {
       const previews = await Promise.all(drafts.map((d) => computeGeocodePreview(d)));
       drafts.forEach((d, i) => {
         d.geocodePreview = previews[i];
+        // Retour terrain : "au pire on oublie les noms, il prend que rue/CP/
+        // ville deja connus" -- si l'adresse elle-meme ne correspond a RIEN
+        // de connu dans la BAN (non_geocode), le nom capture au meme moment,
+        // par le meme OCR douteux, n'a aucune raison d'etre plus fiable :
+        // souvent un badge/statut d'interface non reconnu par
+        // looksLikeUiChrome (ex: un mot-cle a plusieurs mots, forme non
+        // couverte). Mieux vaut un champ vide (le livreur complete a la main,
+        // comme n'importe quel colis sans nom) qu'un mot au hasard affiche
+        // avec assurance. "ambigu" (candidats trouves mais sous le seuil de
+        // confiance) garde le nom : l'adresse elle-meme est plausible, ce
+        // n'est que le classement final qui est incertain.
+        if (d.geocodePreview === "non_geocode") {
+          d.nom = null;
+        }
       });
       return renderReviewList(container, drafts);
     },
