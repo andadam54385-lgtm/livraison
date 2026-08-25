@@ -51,11 +51,124 @@ const NOISE_LINE_PATTERNS = [
   /^\d+([.,]\d+)?\s?km$/i, // distance : "21.8km", "22,44 km"
   /^\d{1,2}[:.]\d{2}\s*[-–]\s*\d{1,2}[:.]\d{2}$/, // plage horaire : "08:20 - 10:20"
   /^\d{3,5}\s*\|\s*\d+\+\d+$/, // tag zone/colis : "8000 | 0+1"
+  // Bug reel corrige ici (retour terrain : "118 adresses au lieu de 27" sur un
+  // terminal Chronopost, bien plus charge visuellement qu'UPS -- code de
+  // tournee, statut, compteur enveloppe/colis, heure seule en plus de la
+  // distance). Chacun de ces elements, non filtre, devenait soit un faux nom
+  // ("TRANSFERE" pris pour le destinataire), soit polluait la rue, soit
+  // cassait un ecart de bloc comme les lignes "Xkm" avant elles.
+  /^(transfere|en\s?cours|agence|part|pro)$/i, // statut/categorie affiche a cote d'une icone
+  /^c\d{1,2}$/i, // code de tournee/type ("C18", "C13"...)
+  /^agc$/i, // code "agence" (retour en agence)
+  /^\d+\s*\/\s*\d+$/, // compteur enveloppe/colis : "0 / 1"
+  /^\d{1,2}[:.]\d{2}$/, // heure seule (pas une plage) : "11:45"
 ];
 
 function isNoiseLine(text) {
   const trimmed = text.trim();
   return NOISE_LINE_PATTERNS.some((re) => re.test(trimmed));
+}
+
+// Numero de suivi/reference : chaine alphanumerique SANS espace d'au moins 8
+// caracteres contenant au moins un chiffre ("NX014074748JB", "01595217550547T").
+// Jamais une adresse (une rue/ville reelle garde toujours ses espaces entre
+// mots une fois lue par l'OCR), donc sans risque de confondre les deux.
+const TRACKING_CODE_RE = /^(?=.*\d)[a-z0-9]{8,}$/i;
+
+// Bandeau d'instruction en texte libre ("Attention consigne de livraison...",
+// "Doit etre ramene en agence, merci de ne pas le presenter...") : contenu
+// imprevisible (aucune regex fixe ne peut le reconnaitre mot a mot), mais
+// TOUJOURS introduit par une de ces formules-ancres, et TOUJOURS suivi d'un
+// numero de suivi (voir TRACKING_CODE_RE) qui marque la fin du bandeau.
+const BANNER_ANCHOR_RE = /(attention\s+consigne\s+de\s+livraison|doit\s+[eê]tre\s+ramen[ée]\s+en\s+agence|merci\s+de\s+ne\s+pas\s+le\s+pr[ée]senter)/i;
+
+// Limite de securite : si aucun repere de fin de bandeau (CP seul ou numero
+// de suivi) n'apparait dans les MAX_BANNER_LINES lignes suivantes, on
+// abandonne le mode bandeau plutot que d'avaler silencieusement le reste de
+// la liste (pire bug possible ici : perdre des adresses reelles parce que la
+// detection de fin a rate, alors que le but est justement d'en recuperer plus).
+const MAX_BANNER_LINES = 6;
+
+// Repli d'un token de bruit ISOLE en fin de chaine (pas ancre en fin absolue
+// de ligne comme NOISE_LINE_PATTERNS -- ici on nettoie la fin d'une ligne plus
+// longue, ex: l'OCR a fusionne rue + distance + debut de bandeau en UNE seule
+// ligne detectee : "14 GENERAL LECLERC AVE 42 km Attention consigne...").
+// Applique en boucle (plusieurs tokens de bruit peuvent s'empiler en fin de
+// ligne) jusqu'a stabilisation.
+const TRAILING_NOISE_RE = /\s*(\d+([.,]\d+)?\s?km|\d{1,2}[:.]\d{2}(\s*[-–]\s*\d{1,2}[:.]\d{2})?|c\d{1,2}|agc|transfere|en\s?cours|agence|part|pro|\d+\s*\/\s*\d+)\s*$/i;
+
+function stripTrailingNoise(text) {
+  let s = text;
+  let previous;
+  do {
+    previous = s;
+    s = s.replace(TRAILING_NOISE_RE, "").trim();
+  } while (s !== previous && s.length > 0);
+  return s;
+}
+
+// Retire le bruit d'interface AVANT le decoupage en blocs (meme raison que
+// isNoiseLine seul, mais gere en plus les bandeaux d'instruction multi-lignes
+// et le cas ou l'OCR fusionne une ligne reelle et le debut d'un bandeau sur
+// UNE seule ligne detectee ("... 42 km Attention consigne de livraison...") --
+// dans ce cas la partie AVANT l'ancre est conservee (nettoyee via
+// stripTrailingNoise), le reste est traite comme bruit.
+//
+// Bug reel corrige ici, distinct du bruit isole (voir NOISE_LINE_PATTERNS,
+// simplement retire -- fusionner deux petits ecarts en un seul REND le
+// decoupage en blocs plus juste, voir groupLinesIntoBlocks/Cas 9) : un
+// BANDEAU peut faire plusieurs lignes, et le SUPPRIMER completement (comme un
+// bruit isole) fusionne artificiellement les deux petits ecarts qui
+// l'entourent en un seul GRAND ecart -- qui depasse alors a tort le seuil de
+// groupLinesIntoBlocks et coupe un client A EN DEUX (sa carte, puis un faux
+// second bloc a partir du reste du bandeau). Les lignes de bandeau sont donc
+// gardees comme "espaces reservés" (bbox intact, texte vide) : elles comptent
+// toujours pour le calcul des ecarts (le decoupage en blocs reste correct),
+// mais classifyBlockLines les ignore silencieusement (ligne vide -> `if
+// (!line) continue`, deja le cas avant ce correctif).
+function stripInterfaceNoise(ocrLines) {
+  const kept = [];
+  let insideBanner = false;
+  let bannerLinesConsumed = 0;
+
+  for (const l of ocrLines) {
+    const text = l.text.trim();
+    if (!text) continue;
+
+    if (insideBanner) {
+      bannerLinesConsumed++;
+      if (TRACKING_CODE_RE.test(text)) {
+        insideBanner = false;
+        kept.push({ ...l, text: "" }); // numero de suivi : espace reserve, jamais garde comme contenu
+        continue;
+      }
+      if (CP_ONLY_RE.test(text)) {
+        insideBanner = false;
+        kept.push(l); // le CP, lui, est une donnee reelle a garder telle quelle
+        continue;
+      }
+      if (bannerLinesConsumed >= MAX_BANNER_LINES) {
+        insideBanner = false; // repli de securite, voir commentaire plus haut -- traite cette ligne normalement
+      } else {
+        kept.push({ ...l, text: "" });
+        continue;
+      }
+    }
+
+    const anchorMatch = text.match(BANNER_ANCHOR_RE);
+    if (anchorMatch) {
+      const before = anchorMatch.index > 0 ? stripTrailingNoise(text.slice(0, anchorMatch.index)) : "";
+      insideBanner = true;
+      bannerLinesConsumed = 0;
+      kept.push({ ...l, text: before });
+      continue;
+    }
+
+    if (isNoiseLine(text) || TRACKING_CODE_RE.test(text)) continue; // bruit isole (hors bandeau) : retire entierement, voir Cas 9
+    kept.push(l);
+  }
+
+  return kept;
 }
 
 const STREET_KEYWORDS = [
@@ -221,10 +334,12 @@ export function groupLinesIntoBlocks(lines) {
  * @returns {{nom: string|null, rue: string|null, cp: string|null, ville: string|null, bbox: object, rawLines: string[]}[]}
  */
 export function parseAddressList(ocrLines, { knownCities = new Set() } = {}) {
-  // Bruit d'interface (distance/horaire/tag, voir NOISE_LINE_PATTERNS) retire
-  // AVANT le decoupage en blocs -- sans ca, ces lignes intercalees entre deux
-  // adresses peuvent casser l'ecart qui les separe et les faire fusionner.
-  const usableLines = ocrLines.filter((l) => !isNoiseLine(l.text));
+  // Bruit d'interface (distance/horaire/tag/statut/code/bandeau d'instruction,
+  // voir stripInterfaceNoise) retire AVANT le decoupage en blocs -- sans ca,
+  // ces lignes intercalees entre deux adresses peuvent casser l'ecart qui les
+  // separe et les faire fusionner (ou, pire, exploser un client en plusieurs
+  // faux clients quand le bandeau lui-meme cree de faux ecarts).
+  const usableLines = stripInterfaceNoise(ocrLines);
   const blocks = groupLinesIntoBlocks(usableLines);
   return blocks
     .map((blockLines) => {

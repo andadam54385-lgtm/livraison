@@ -148,6 +148,69 @@ console.log("\n=== Cas 9 : bruit d'interface (distance 'Xkm') entre deux clients
   assertEqual(result[3].nom, "AKHRAZ HASSAN", "4e adresse bien isolee, pas fusionnee avec la 3e");
 }
 
+console.log("\n=== Cas 10 : terminal Chronopost (statut/code/compteur/heure/bandeau d'instruction) -- reproduit '118 adresses au lieu de 27' ===");
+{
+  // Retour terrain : un terminal plus charge visuellement qu'UPS (code de
+  // tournee "C18"/"C13", statut "TRANSFERE"/"EN COURS", compteur enveloppe/
+  // colis "0 / 1", heure seule en plus de la distance, et des bandeaux
+  // d'instruction en texte libre suivis d'un numero de suivi) faisait
+  // exploser chaque client en plusieurs faux clients (118 adresses extraites
+  // pour 27 arrets reels) : chaque element non reconnu devenait soit un faux
+  // nom ("TRANSFERE" pris pour le destinataire), soit un faux bloc a part
+  // entiere, soit polluait la rue.
+  const knownCities = new Set(["fremifontaine", "celles sur plaine"]);
+  const ocrLines = [
+    // Client 1 : carte simple (pas de bandeau), avec tout le bruit d'interface autour.
+    line("SERGE CORCERET - SERGE CORCERET", 0),
+    line("C18", 6, 18), // code tournee sur la meme rangee visuelle que le nom (petit decalage y, pas un vrai ecart de bloc)
+    line("30 RUE DES TILLEULS", 30),
+    line("88600 FREMIFONTAINE", 56),
+    line("0 / 0", 82, 16),
+    line("TRANSFERE", 100, 16),
+    line("11 km", 118, 16),
+    line("11:45", 136, 16),
+    // grand ecart -> nouveau client
+    line("RENAUD FROMENT", 260),
+    line("C13", 266, 18),
+    line("33 GRANDE RUE", 290),
+    line("88110 CELLES SUR PLAINE", 316),
+    line("0 / 1", 342, 16),
+    line("EN COURS", 360, 16),
+    line("42 km", 378, 16),
+    line("12:26", 396, 16),
+    // Bandeau d'instruction en texte libre + numero de suivi -- toujours DANS la carte du client 2, ne doit ni le fusionner avec un client 3 ni devenir sa propre entree.
+    line("Attention consigne de livraison", 414, 16),
+    line("Relais/BP interdit. 2e livraison demain si non livre", 432, 16),
+    line("NX006123474FR", 450, 16),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities });
+  assertEqual(result.length, 2, "2 clients extraits (pas 8+ a cause du bruit/bandeau)");
+  assertEqual(result[0].nom, "SERGE CORCERET - SERGE CORCERET", "client 1 : nom non ecrase par 'TRANSFERE'/'C18'/etc.");
+  assertEqual(result[0].rue, "30 RUE DES TILLEULS", "client 1 : rue non polluee par le compteur/statut/distance/heure");
+  assertEqual(result[1].nom, "RENAUD FROMENT", "client 2 : nom non ecrase malgre le bandeau d'instruction qui suit");
+  assertEqual(result[1].rue, "33 GRANDE RUE", "client 2 : rue non polluee par le bandeau ni le numero de suivi");
+  assertEqual(result[1].cp, "88110", "client 2 : CP toujours capture malgre le bruit avant/apres");
+}
+
+console.log("\n=== Cas 11 : bandeau d'instruction fusionne par l'OCR sur la MEME ligne qu'un vrai champ ===");
+{
+  // Cas observe reellement : l'OCR regroupe parfois plusieurs rangees
+  // visuelles en une seule "ligne" detectee -- ici la distance ET le debut du
+  // bandeau atterrissent sur la meme ligne que la rue. Seule la partie AVANT
+  // l'ancre doit etre gardee.
+  const ocrLines = [
+    line("AKHRAZ HASSAN", 0),
+    line("14 GENERAL LECLERC AVE 42 km Attention consigne de livraison", 26),
+    line("Relais/BP interdit. 2e livraison demain si non livre", 52),
+    line("NX006123474FR", 78),
+    line("88600 Dommartin les Toul", 104),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result.length, 1, "1 seul client (pas de faux bloc a partir du bandeau)");
+  assertEqual(result[0].rue, "14 GENERAL LECLERC AVE", "rue tronquee juste avant l'ancre du bandeau, distance/bandeau/suivi exclus");
+  assertEqual(result[0].cp, "88600", "CP toujours capture apres le bandeau/numero de suivi");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)
