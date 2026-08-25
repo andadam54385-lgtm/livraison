@@ -211,6 +211,26 @@ console.log("\n=== Cas 11 : bandeau d'instruction fusionne par l'OCR sur la MEME
   assertEqual(result[0].cp, "88600", "CP toujours capture apres le bandeau/numero de suivi");
 }
 
+console.log("\n=== Cas 12 : badge d'un transporteur JAMAIS rencontre -- verifie la generalisation (pas juste le vocabulaire Chronopost) ===");
+{
+  // Retour terrain : "il faut que ca marche peu importe la mise en forme" --
+  // ce cas invente un mot-badge qui n'apparait dans AUCUN des motifs fixes
+  // (NOISE_LINE_PATTERNS ne connait que TRANSFERE/EN COURS/AGENCE/PART/PRO/
+  // C<n>/AGC). S'il est correctement ignore, c'est que looksLikeUiChrome
+  // (forme : court, sans espace, tout en majuscules -- pas un vocabulaire
+  // fixe) fonctionne bien au-dela des transporteurs deja vus.
+  const ocrLines = [
+    line("XPRESSDEP", 0), // badge fictif, jamais dans NOISE_LINE_PATTERNS
+    line("Julie Renard", 26),
+    line("5 Rue des Merles", 52),
+    line("57000 Metz", 78),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result.length, 1, "1 seul bloc (le badge inconnu ne cree pas de faux client)");
+  assertEqual(result[0].nom, "Julie Renard", "nom correct, pas ecrase par le badge inconnu");
+  assertEqual(result[0].rue, "5 Rue des Merles", "rue non polluee par le badge inconnu");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)

@@ -200,6 +200,23 @@ function splitEmbeddedCpVille(line) {
   return [trimmed];
 }
 
+// Badge/code/statut d'interface GENERIQUE : court, sans espace, tout en
+// majuscules/chiffres. Contrairement a NOISE_LINE_PATTERNS (vocabulaire
+// FIXE -- "TRANSFERE", "C18"... propre a UPS/Chronopost), cette regle repose
+// sur la FORME, pas les mots -- elle attrape donc aussi le badge d'un
+// transporteur JAMAIS rencontre, sans avoir eu besoin de le connaitre a
+// l'avance (retour terrain : "il faut que ca marche peu importe la mise en
+// forme"). Un vrai nom ou une vraie rue a (quasi) toujours un espace (prenom
+// + nom, plusieurs mots) ; un badge d'interface n'en a jamais. Utilisee
+// uniquement dans le REPLI (voir plus bas, apres tous les motifs positifs
+// specifiques) : ne bloque jamais un vrai mot-cle de voie ou une commune
+// connue, deja reconnus avant d'arriver ici.
+function looksLikeUiChrome(line) {
+  if (/\s/.test(line)) return false;
+  if (line.length > 10) return false;
+  return /^[A-ZÀ-Ü0-9\-]+$/.test(line);
+}
+
 // Classifie les lignes d'UN bloc (deja isole par groupLinesIntoBlocks) en
 // nom/rue/CP/ville -- meme heuristique de base que classifyShipToBlock dans
 // parse-ups-label.js (chiffre en tete de ligne ou mot-cle de voie -> rue,
@@ -269,12 +286,24 @@ export function classifyBlockLines(rawLines, { knownCities = new Set() } = {}) {
       continue;
     }
 
+    // Continuation de rue/ville : NON filtree par looksLikeUiChrome (un mot de
+    // retour a la ligne d'une rue/ville coupee, ex: "GAULLE" dans "Rue du
+    // General de Gaulle", a exactement la meme forme courte/majuscule/sans-
+    // espace qu'un badge -- seul le CONTEXTE (ligne precedente deja classee
+    // rue/ville) permet de trancher, la forme seule ne suffit pas ici).
     if (lastCategory === "street") {
       result.streets.push(line);
       continue;
     }
     if (lastCategory === "ville") {
       result.ville = `${result.ville} ${line}`.trim();
+      continue;
+    }
+
+    // Repli final (aucun contexte etabli) : voir looksLikeUiChrome --
+    // generalise au-dela du vocabulaire specifique ci-dessus a n'importe quel
+    // badge/code d'un transporteur non reconnu, jamais retenu comme nom.
+    if (looksLikeUiChrome(line)) {
       continue;
     }
 
