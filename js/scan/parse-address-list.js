@@ -217,6 +217,30 @@ function looksLikeUiChrome(line) {
   return /^[A-ZÀ-Ü0-9\-]+$/.test(line);
 }
 
+// Retour terrain : "un nom c'est 1 ou 2 mots, 3 grand max, on evite les mots
+// a rallonge" -- looksLikeUiChrome n'attrape que les badges SANS espace ;
+// un texte parasite a plusieurs mots (fusion OCR de plusieurs elements
+// d'interface, phrase tronquee...) passait encore au travers. Un vrai nom
+// francais reste court (prenom + nom, parfois un 3e mot) ; un veritable
+// texte parasite est presque toujours plus long. MAX_NOM_WORDS compte les
+// mots de chaque cote d'un " - " separement plutot que la ligne entiere :
+// motif reel observe sur un terminal Chronopost ("SERGE CORCERET - SERGE
+// CORCERET", 2 noms accoles par un tiret) qu'un plafond global aurait
+// injustement rejete.
+const MAX_NOM_WORDS = 3;
+
+function countWords(text) {
+  return text.split(/\s+/).filter((w) => /[a-zà-ÿ]/i.test(w)).length;
+}
+
+function looksLikeName(line) {
+  const clauses = line.split(/\s-\s/);
+  return clauses.every((c) => {
+    const n = countWords(c);
+    return n > 0 && n <= MAX_NOM_WORDS;
+  });
+}
+
 // Classifie les lignes d'UN bloc (deja isole par groupLinesIntoBlocks) en
 // nom/rue/CP/ville -- meme heuristique de base que classifyShipToBlock dans
 // parse-ups-label.js (chiffre en tete de ligne ou mot-cle de voie -> rue,
@@ -300,10 +324,11 @@ export function classifyBlockLines(rawLines, { knownCities = new Set() } = {}) {
       continue;
     }
 
-    // Repli final (aucun contexte etabli) : voir looksLikeUiChrome --
-    // generalise au-dela du vocabulaire specifique ci-dessus a n'importe quel
-    // badge/code d'un transporteur non reconnu, jamais retenu comme nom.
-    if (looksLikeUiChrome(line)) {
+    // Repli final (aucun contexte etabli) : voir looksLikeUiChrome (forme de
+    // badge) et looksLikeName (longueur plausible d'un nom, voir plus haut) --
+    // deux filtres complementaires, jamais retenu comme nom si l'un des deux
+    // echoue.
+    if (looksLikeUiChrome(line) || !looksLikeName(line)) {
       continue;
     }
 

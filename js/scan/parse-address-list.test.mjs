@@ -231,6 +231,41 @@ console.log("\n=== Cas 12 : badge d'un transporteur JAMAIS rencontre -- verifie 
   assertEqual(result[0].rue, "5 Rue des Merles", "rue non polluee par le badge inconnu");
 }
 
+console.log("\n=== Cas 13 : texte parasite a plusieurs mots (trop long pour un nom) -- rejete, contrairement a un vrai nom court ===");
+{
+  // Retour terrain : "un nom c'est 1 ou 2 mots, 3 grand max, on evite les
+  // mots a rallonge" -- looksLikeUiChrome n'attrape que les badges SANS
+  // espace ; un texte parasite plus long (fusion OCR de plusieurs elements)
+  // passait encore au travers avant ce correctif.
+  const ocrLines = [
+    line("Vue synthese generale affichee ici maintenant", 0), // 6 mots, aucun mot-cle de voie -> rejete
+    line("Marie Dupont", 26), // 2 mots -> accepte (dernier "nom" retenu)
+    line("8 Rue des Tilleuls", 52),
+    line("57000 Metz", 78),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result[0].nom, "Marie Dupont", "texte parasite ignore, vrai nom court retenu");
+}
+{
+  // Motif reel a tiret ("SERGE CORCERET - SERGE CORCERET", voir Cas 10) :
+  // verifie ici isolement que 2 clauses courtes de part et d'autre du tiret
+  // restent acceptees (pas juste re-teste via un cas plus large).
+  const ocrLines = [line("Jean Petit - Jean Petit", 0), line("2 Rue du Lac", 26), line("57000 Metz", 52)];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result[0].nom, "Jean Petit - Jean Petit", "nom repete avec tiret toujours accepte (2 mots de chaque cote)");
+}
+{
+  // Mais un vrai texte long des DEUX cotes du tiret reste rejete (le tiret
+  // seul ne doit pas devenir une echappatoire a la limite de mots).
+  const ocrLines = [
+    line("Message affiche pour information seulement - a traiter avant midi", 0),
+    line("9 Cours du Lac", 26),
+    line("57000 Metz", 52),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result[0].nom, null, "texte long de part et d'autre du tiret toujours rejete");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)
