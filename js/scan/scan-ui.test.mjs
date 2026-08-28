@@ -64,5 +64,34 @@ assertEqual(
   "ville composee sur plusieurs mots (jusqu'a 3) correctement isolee"
 );
 
+console.log("\n=== Repli CP en cours de frappe (1-4 chiffres, pas encore les 5 complets) : seulement si allowPartialCp fourni ===");
+// Retour terrain (2e signalement, "encore le meme probleme") : le CP se
+// tape chiffre par chiffre -- sans ce repli, les suggestions disparaissaient
+// pendant TOUTE la frappe du CP, pas seulement une fois les 5 chiffres tapes.
+
+assertEqual(
+  splitAdresseInput("4 rue des jardins 886"),
+  { numero: "4", street: "rue des jardins 886", cpTyped: "", villeTyped: "" },
+  "SANS allowPartialCp (1er essai) : aucune coupure -- le CP partiel reste colle a la rue"
+);
+
+assertEqual(
+  splitAdresseInput("4 rue des jardins 8", { allowPartialCp: true }),
+  { numero: "4", street: "rue des jardins", cpTyped: "8", villeTyped: "" },
+  "1 seul chiffre tape -- deja reconnu comme un CP en cours"
+);
+
+assertEqual(
+  splitAdresseInput("4 rue des jardins 886", { allowPartialCp: true }),
+  { numero: "4", street: "rue des jardins", cpTyped: "886", villeTyped: "" },
+  "3 chiffres tapes -- toujours reconnu comme un CP en cours"
+);
+
+assertEqual(
+  splitAdresseInput("4 rue des jardins 88600"),
+  { numero: "4", street: "rue des jardins", cpTyped: "88600", villeTyped: "" },
+  "5 chiffres complets -- deja gere par la coupure fiable, allowPartialCp pas necessaire"
+);
+
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);
 process.exit(failures === 0 ? 0 : 1);

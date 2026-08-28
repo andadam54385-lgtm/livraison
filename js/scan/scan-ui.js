@@ -203,15 +203,37 @@ async function runOcrPipeline(container, file, { onSaved, barcodeTracking } = {}
 // ville/CP : un groupe de 5 chiffres consecutifs (code postal), ou une
 // virgule -- signaux non ambigus, toujours appliques.
 //
+// allowPartialCp (repli LEGER, pas de requete BAN supplementaire) : le CP
+// se tape chiffre par chiffre -- avant que les 5 chiffres complets ne soient
+// atteints, "4 rue des jardins 88" n'etait reconnu par AUCUN signal (ni CP
+// complet, ni virgule), donc traite comme une rue "rue des jardins 88" qui
+// ne matche jamais rien -- les suggestions disparaissaient pendant toute la
+// frappe du CP, pas seulement une fois les 5 chiffres tapes. Coupe un groupe
+// de 1 a 4 chiffres FINAL comme CP en cours de frappe.
+//
 // knownCityPrefixes (optionnel, noms de commune deja normalises via
 // looseCommune+normalizeCity) : repli pour une ville collee SANS aucune
 // ponctuation ni CP ("rue des jardins nancy"), en testant si les 1 a 3
-// derniers mots forment le debut d'une commune CONNUE. Volontairement PAS
-// applique par defaut (voir bindAdresseAutocomplete) : une vraie rue peut
-// se terminer par un mot qui ressemble a une commune ("Rue de Nancy" existe
-// ailleurs qu'a Nancy) -- n'est tente qu'en repli, apres qu'une recherche
-// sans coupure n'a rien trouve, jamais en premier essai.
-export function splitAdresseInput(rawInput, { knownCityPrefixes = null } = {}) {
+// derniers mots forment le debut d'une commune CONNUE.
+//
+// Les deux replis sont volontairement PAS appliques par defaut (voir
+// bindAdresseAutocomplete) : une vraie rue peut se terminer par un chiffre
+// ("Route Nationale 4") ou un mot qui ressemble a une commune ("Rue de
+// Nancy" existe ailleurs qu'a Nancy) -- ne sont tentes qu'en repli, apres
+// qu'une recherche sans coupure n'a rien trouve, jamais en premier essai.
+function splitVilleSuffix(street, knownCityPrefixes) {
+  const words = street.split(/\s+/).filter(Boolean);
+  for (let take = Math.min(3, words.length - 1); take >= 1; take--) {
+    const tail = words.slice(words.length - take).join(" ");
+    const tailNorm = looseCommune(normalizeCity(tail));
+    if (tailNorm.length >= 2 && knownCityPrefixes.some((p) => p.startsWith(tailNorm))) {
+      return { street: words.slice(0, words.length - take).join(" "), villeTyped: tail };
+    }
+  }
+  return null;
+}
+
+export function splitAdresseInput(rawInput, { knownCityPrefixes = null, allowPartialCp = false } = {}) {
   const { numero, rue: afterNumero } = splitNumeroRue(rawInput);
   let street = afterNumero || rawInput || "";
   let cpTyped = "";
@@ -227,15 +249,16 @@ export function splitAdresseInput(rawInput, { knownCityPrefixes = null } = {}) {
     if (commaIdx !== -1) {
       villeTyped = street.slice(commaIdx + 1).trim();
       street = street.slice(0, commaIdx).trim();
-    } else if (knownCityPrefixes) {
-      const words = street.split(/\s+/).filter(Boolean);
-      for (let take = Math.min(3, words.length - 1); take >= 1; take--) {
-        const tail = words.slice(words.length - take).join(" ");
-        const tailNorm = looseCommune(normalizeCity(tail));
-        if (tailNorm.length >= 2 && knownCityPrefixes.some((p) => p.startsWith(tailNorm))) {
-          villeTyped = tail;
-          street = words.slice(0, words.length - take).join(" ");
-          break;
+    } else {
+      const partialCpMatch = allowPartialCp && street.match(/^(.*\S)\s+(\d{1,4})$/);
+      if (partialCpMatch) {
+        street = partialCpMatch[1].trim();
+        cpTyped = partialCpMatch[2];
+      } else if (knownCityPrefixes) {
+        const villeSplit = splitVilleSuffix(street, knownCityPrefixes);
+        if (villeSplit) {
+          street = villeSplit.street;
+          villeTyped = villeSplit.villeTyped;
         }
       }
     }
@@ -281,18 +304,35 @@ function bindAdresseAutocomplete(container) {
 
     // Repli EN DEUXIEME ESSAI seulement (voir splitAdresseInput) : la
     // recherche "rue seule" n'a rien trouve et aucune coupure fiable
-    // (virgule/CP) n'avait ete detectee -- retente en essayant de couper un
-    // debut de ville colle a la fin, sans ponctuation.
+    // (virgule/CP complet) n'avait ete detectee.
     if (candidates.length === 0 && !parsed.cpTyped && !parsed.villeTyped) {
-      const cities = await listDistinctCities();
-      const knownCityPrefixes = cities.map((c) => looseCommune(c.cn));
-      const retry = splitAdresseInput(rawInput, { knownCityPrefixes });
-      if (retry.villeTyped) {
-        const retryPrefix = normalizeStreet(retry.street);
+      // 2a (leger, pas de requete supplementaire) : CP en cours de frappe,
+      // pas encore les 5 chiffres complets.
+      const retryPartial = splitAdresseInput(rawInput, { allowPartialCp: true });
+      if (retryPartial.cpTyped) {
+        const retryPrefix = normalizeStreet(retryPartial.street);
         if (retryPrefix.length >= 3) {
           const retryCandidates = await queryByStreetPrefix(retryPrefix, 60);
           if (retryCandidates.length > 0) {
-            parsed = retry;
+            parsed = retryPartial;
+            streetPrefix = retryPrefix;
+            candidates = retryCandidates;
+          }
+        }
+      }
+    }
+    // 2b : toujours rien -- essaie de couper un debut de ville colle a la
+    // fin, sans ponctuation (necessite la liste des communes connues).
+    if (candidates.length === 0 && !parsed.cpTyped && !parsed.villeTyped) {
+      const cities = await listDistinctCities();
+      const knownCityPrefixes = cities.map((c) => looseCommune(c.cn));
+      const retryVille = splitAdresseInput(rawInput, { knownCityPrefixes });
+      if (retryVille.villeTyped) {
+        const retryPrefix = normalizeStreet(retryVille.street);
+        if (retryPrefix.length >= 3) {
+          const retryCandidates = await queryByStreetPrefix(retryPrefix, 60);
+          if (retryCandidates.length > 0) {
+            parsed = retryVille;
             streetPrefix = retryPrefix;
             candidates = retryCandidates;
           }
