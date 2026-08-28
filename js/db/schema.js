@@ -1,11 +1,11 @@
 import { openDatabase } from "../lib/idb.js";
 
 export const DB_NAME = "delivery-tour";
-export const DB_VERSION = 5;
+export const DB_VERSION = 6;
 
 let dbPromise = null;
 
-function upgrade(db) {
+function upgrade(db, oldVersion, newVersion, transaction) {
   if (!db.objectStoreNames.contains("graphMeta")) {
     db.createObjectStore("graphMeta", { keyPath: "key" });
   }
@@ -27,6 +27,16 @@ function upgrade(db) {
     const store = db.createObjectStore("banEntries", { keyPath: "id", autoIncrement: true });
     store.createIndex("by_cp", "cp", { unique: false });
     store.createIndex("by_cn", "cn", { unique: false });
+    store.createIndex("by_rn", "rn", { unique: false });
+  } else if (!transaction.objectStore("banEntries").indexNames.contains("by_rn")) {
+    // Migration DB_VERSION 5 -> 6 : ajoute l'index sur le nom de rue
+    // normalise (rn), necessaire pour l'autocompletion "adresse complete sur
+    // une ligne" (voir ban-index.js's queryByStreetPrefix / geocode-ui.js).
+    // db.createObjectStore ne s'applique qu'a un store TOUT NEUF -- pour un
+    // store deja peuple (cas de la quasi-totalite des appareils, la BAN est
+    // deja importee), l'index s'ajoute via la transaction "versionchange" en
+    // cours sur le store EXISTANT.
+    transaction.objectStore("banEntries").createIndex("by_rn", "rn", { unique: false });
   }
   if (!db.objectStoreNames.contains("colis")) {
     const store = db.createObjectStore("colis", { keyPath: "id" });
@@ -67,7 +77,7 @@ function upgrade(db) {
 
 export function openDb() {
   if (!dbPromise) {
-    dbPromise = openDatabase(DB_NAME, DB_VERSION, (db) => upgrade(db));
+    dbPromise = openDatabase(DB_NAME, DB_VERSION, (db, oldVersion, newVersion, transaction) => upgrade(db, oldVersion, newVersion, transaction));
   }
   return dbPromise;
 }

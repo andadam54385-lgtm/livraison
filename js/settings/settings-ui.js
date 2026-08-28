@@ -252,6 +252,16 @@ async function render() {
     setSetting("autoNavAfterDeliver", e.target.checked);
   });
 
+  // Meme correctif que #s-auto-nav ci-dessus, applique ici aussi (bug reel
+  // signale : "je choisis Waze/Google mais ca revient tout seul sur Apple
+  // Plans") -- ce choix est justement celui qu'on va tester tout de suite en
+  // quittant Reglages pour taper "Naviguer" sur un arret, avant meme de
+  // penser a cliquer "Enregistrer" plus bas : sans sauvegarde immediate, le
+  // changement etait perdu des qu'on changeait d'onglet.
+  containerRef.querySelector("#s-nav-app").addEventListener("change", (e) => {
+    setSetting("navApp", e.target.value);
+  });
+
   containerRef.querySelector("#s-export-csv").addEventListener("click", async () => {
     await exportToursCsv();
   });

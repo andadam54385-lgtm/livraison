@@ -7,8 +7,8 @@ import { saveColis, isDuplicateTracking } from "./colis-store.js";
 import { recordCorrectionIfNeeded } from "./ocr-corrections-store.js";
 import { matchAddress } from "../geocode/match-address.js";
 import { renderCandidatePicker, renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
-import { listDistinctCities } from "../geocode/ban-index.js";
-import { normalizeCity } from "../geocode/normalize-address.js";
+import { listDistinctCities, queryByStreetPrefix } from "../geocode/ban-index.js";
+import { normalizeCity, normalizeStreet } from "../geocode/normalize-address.js";
 import { getSetting } from "../settings/settings-store.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
 import { googleMapsSearchUrl } from "../tour/deep-links.js";
@@ -190,6 +190,86 @@ async function runOcrPipeline(container, file, { onSaved, barcodeTracking } = {}
   renderReviewForm(container, colis, { isNew: true, duplicate, onSaved });
 }
 
+// Suggestions d'ADRESSE COMPLETE au fil de la frappe (numero+rue en une
+// ligne, adresses connues de la BAN locale) -- retour terrain : "une ligne
+// pour l'adresse ou tu me fais des propositions en fonction de ce qui
+// existent [...] complètement avec l'adresse sur une ligne", meme principe
+// que bindVilleAutocomplete ci-dessous mais sur toute l'adresse plutot que
+// la seule ville. Purement une aide a la saisie (choisir une suggestion
+// remplit les 4 champs details d'un coup, mais ils restent modifiables
+// ensuite) : le geocodage final revalide toujours via matchAddress
+// independamment de ce qui est tape ici.
+function bindAdresseAutocomplete(container) {
+  const input = container.querySelector("#f-adresse-complete");
+  const list = container.querySelector("#f-adresse-complete-suggestions");
+  const numeroInput = container.querySelector("#f-numero");
+  const rueInput = container.querySelector("#f-rue");
+  const villeInput = container.querySelector("#f-ville");
+  const cpInput = container.querySelector("#f-cp");
+  let debounceTimer = null;
+
+  function hide() {
+    list.innerHTML = "";
+  }
+
+  async function showMatches(rawInput) {
+    // splitNumeroRue isole le numero deja tape (s'il y en a un) du reste --
+    // la recherche elle-meme porte sur le nom de rue (index by_rn, voir
+    // queryByStreetPrefix), le numero ne sert qu'a TRIER les resultats
+    // ensuite, jamais a les exclure (une entree sans numero tape encore
+    // reste utile a montrer).
+    const { numero, rue } = splitNumeroRue(rawInput);
+    const streetPrefix = normalizeStreet(rue || rawInput);
+    if (streetPrefix.length < 3) {
+      hide();
+      return;
+    }
+    const candidates = await queryByStreetPrefix(streetPrefix, 60);
+    if (candidates.length === 0) {
+      hide();
+      return;
+    }
+    const numeroDigits = numero.replace(/\D/g, "");
+    const sorted = numeroDigits
+      ? [...candidates].sort((a, b) => {
+          const aMatch = String(a.n || "") === numeroDigits ? 0 : 1;
+          const bMatch = String(b.n || "") === numeroDigits ? 0 : 1;
+          return aMatch - bMatch;
+        })
+      : candidates;
+    const matches = sorted.slice(0, 6);
+    list.innerHTML = matches
+      .map((entry, i) => `<button type="button" class="candidate-item" data-idx="${i}">${escapeHtml(formatEntry(entry))}</button>`)
+      .join("");
+    list.querySelectorAll(".candidate-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const picked = matches[Number(btn.dataset.idx)];
+        numeroInput.value = picked.n ? `${picked.n}${picked.rep || ""}`.trim() : "";
+        rueInput.value = picked.r || "";
+        villeInput.value = picked.c || "";
+        cpInput.value = picked.cp || "";
+        input.value = formatEntry(picked);
+        hide();
+      });
+    });
+  }
+
+  input.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    const value = input.value.trim();
+    if (value.length < 4) {
+      hide();
+      return;
+    }
+    debounceTimer = setTimeout(() => showMatches(value), 200);
+  });
+  input.addEventListener("blur", () => {
+    // Laisse le temps au clic sur une suggestion de se declencher avant de
+    // la faire disparaitre (blur tire avant click sinon).
+    setTimeout(hide, 150);
+  });
+}
+
 // Suggestions de ville au fil de la frappe (prefixe, communes connues de la
 // BAN locale) : purement une aide a la saisie, ne bloque rien -- le
 // geocodage final revalide toujours via matchAddress independamment de ce
@@ -261,6 +341,12 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
       <button type="button" class="primary btn-lg" id="f-valider">Valider</button>
     </div>
     <div class="field">
+      <label>Adresse</label>
+      <input type="text" id="f-adresse-complete" class="field-lg" placeholder="ex: 12 rue de la Liberté" autocomplete="off">
+      <div id="f-adresse-complete-suggestions" class="candidate-list"></div>
+      <p class="muted" style="margin-top:4px;">Choisis une suggestion pour remplir les champs ci-dessous d'un coup, ou complète-les toi-même.</p>
+    </div>
+    <div class="field">
       <label>Numéro</label>
       <input type="text" id="f-numero" class="field-lg" inputmode="numeric" value="${escapeAttr(numero)}">
     </div>
@@ -295,6 +381,7 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     </div>
   `;
 
+  bindAdresseAutocomplete(container);
   bindVilleAutocomplete(container);
 
   container.querySelector("#f-rescan").addEventListener("click", () => startScanFlow(container, { onSaved }));
@@ -399,10 +486,16 @@ async function warnIfFavoriMatch(colis) {
 
 // Parse "48.6921, 6.1844" (ou variantes d'espacement) -- format qu'on
 // retrouve tel quel quand on fait un appui long sur un point Google Maps puis
-// "Copier les coordonnees". Retourne null si la latitude/longitude n'est pas
-// un nombre plausible plutot que de planter le geocodage manuel.
+// "Copier les coordonnees". Google Maps entoure parfois la paire de
+// parentheses ("(48.6921, 6.1844)", ex: fiche d'un etablissement) -- bug reel
+// corrige ici : parseFloat("(48.6921") echoue silencieusement ("(" n'est pas
+// un debut de nombre valide), le collage direct depuis Google Maps
+// necessitait donc de retirer les parentheses a la main avant de coller.
+// Retourne null si la latitude/longitude n'est pas un nombre plausible
+// plutot que de planter le geocodage manuel.
 function parseLatLon(text) {
-  const parts = String(text || "").split(",").map((s) => parseFloat(s.trim()));
+  const cleaned = String(text || "").replace(/[()]/g, "");
+  const parts = cleaned.split(",").map((s) => parseFloat(s.trim()));
   if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n))) return null;
   const [lat, lon] = parts;
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;

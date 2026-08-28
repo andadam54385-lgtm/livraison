@@ -6,7 +6,11 @@ export function openDatabase(name, version, onUpgrade) {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(name, version);
     req.onupgradeneeded = (event) => {
-      onUpgrade(req.result, event.oldVersion, event.newVersion);
+      // req.transaction (la transaction "versionchange" en cours) : necessaire
+      // pour ajouter un index a un store DEJA EXISTANT (db.createObjectStore
+      // ne fonctionne que pour un store tout neuf) -- voir schema.js pour une
+      // migration d'index sur banEntries.
+      onUpgrade(req.result, event.oldVersion, event.newVersion, req.transaction);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
