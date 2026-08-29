@@ -11,6 +11,7 @@ import { dijkstraSingleTargetPath, createDijkstraScratch } from "../routing/dijk
 import { icon, iconToImage } from "../ui/icons.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
+import { loadingHtml } from "../lib/loading.js";
 
 // Chantier C : vrai fond de carte vectoriel (MapLibre GL JS + PMTiles +
 // basemap Protomaps), 100% local -- remplace le plan SVG maison (rues
@@ -781,7 +782,7 @@ function setupZoneMode(map, geocoded, ordreParColisId) {
 }
 
 async function render() {
-  containerRef.innerHTML = `<div class="empty-state">Chargement de la carte…</div>`;
+  containerRef.innerHTML = loadingHtml("Chargement de la carte…");
 
   const { db, geocoded, settings, csr, depot, favGeoco, returnPoint, ordreParColisId, ordered } = await loadMapData();
 

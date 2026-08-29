@@ -71,7 +71,7 @@ function badgeForStatut(statut) {
   if (statut === "pret") return `<span class="badge badge-ok">Prêt</span>`;
   if (statut === "en_tournee") return `<span class="badge badge-ok">En tournée</span>`;
   if (statut === "echec") return `<span class="badge badge-warn">Échec</span>`;
-  return `<span class="badge badge-pending">À vérifier</span>`;
+  return `<span class="badge badge-check">${icon("alert-triangle", { spaced: false, size: 12, style: "margin-right:4px;" })}À vérifier</span>`;
 }
 
 // Apres un scan/saisie reussi (colis geocode + nomme -> "pret") : si une
@@ -184,21 +184,30 @@ async function render() {
 
 function renderPrepCard(c) {
   const adresse = formatAdresseAffichage(c);
-  const titre = c.nom || adresse;
-  // Bug reel : sans nom, le titre EST deja l'adresse -- la reafficher juste
-  // en dessous la dupliquait a l'identique. Ne montrer la ligne muted que
-  // quand elle apporte une info differente du titre (un vrai nom present).
+  // Sans nom, le titre valait l'adresse et la ligne muted etait supprimee pour
+  // ne pas la dupliquer -- correct sur le fond, mais la carte perdait sa 2e
+  // ligne et la liste "sautait" d'une hauteur a l'autre, en promettant en plus
+  // une adresse en gras comme si c'etait un nom. Repli neutre a la place :
+  // structure identique pour tous les colis, adresse toujours a la meme place.
+  // Un nom manquant n'est PAS une erreur (voir CLAUDE.md : statut "pret" =
+  // geocodage OK, point final), d'ou un repli discret et pas une alerte.
+  const titreHtml = c.nom
+    ? `<div class="card-title">${escapeHtml(c.nom)}</div>`
+    : `<div class="card-title card-title-empty">Sans nom</div>`;
+  // La rangee de badges n'est rendue que si elle a quelque chose a montrer :
+  // vide, elle ajoutait quand meme sa marge a CHAQUE carte de la liste.
+  const badges = [
+    c.avant12h ? `<span class="badge badge-urgent">Avant 12h</span>` : "",
+    c.quantite > 1 ? `<span class="badge badge-pending">${c.quantite} colis</span>` : "",
+  ].join("");
   return `
-    <div class="card" data-colis-id="${escapeAttr(c.id)}" data-open-detail>
+    <div class="card prep-card" data-colis-id="${escapeAttr(c.id)}" data-open-detail>
       <div class="card-row">
-        <div class="card-title">${escapeHtml(titre)}</div>
+        ${titreHtml}
         ${badgeForStatut(c.statut)}
       </div>
-      ${c.nom ? `<div class="muted">${escapeHtml(adresse)}</div>` : ""}
-      <div class="stats-row">
-        ${c.avant12h ? `<span class="badge badge-urgent">Avant 12h</span>` : ""}
-        ${c.quantite > 1 ? `<span class="badge badge-pending">${c.quantite} colis</span>` : ""}
-      </div>
+      <div class="muted prep-card-addr">${escapeHtml(adresse)}</div>
+      ${badges ? `<div class="stats-row prep-card-badges">${badges}</div>` : ""}
     </div>
   `;
 }
@@ -236,7 +245,7 @@ async function renderEtatA() {
     title: "Tournée",
     statsHtml: `
       <span class="stat-pill">${totalQty} colis</span>
-      <span class="stat-pill stat-pill-warn" id="etatA-issues-toggle" style="cursor:pointer;${filterIssuesOnly ? "outline:2px solid var(--warn);" : ""}">${issues} à vérifier</span>
+      <span class="stat-pill stat-pill-check" id="etatA-issues-toggle" style="cursor:pointer;${filterIssuesOnly ? "outline:2px solid var(--text-muted);" : ""}">${issues} à vérifier</span>
     `,
     showProgress: false,
   });

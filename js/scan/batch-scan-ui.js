@@ -10,6 +10,7 @@ import { getSetting } from "../settings/settings-store.js";
 import { uuid } from "../lib/id.js";
 import { icon } from "../ui/icons.js";
 import { escapeHtml } from "../lib/escape.js";
+import { loadingHtml, inlineLoadingHtml } from "../lib/loading.js";
 
 // Scan en rafale : filme un ECRAN affichant plusieurs adresses a la fois
 // (ex: appli/portail du transporteur listant une tournee), par opposition au
@@ -383,7 +384,7 @@ export function startBatchScan(container) {
       // computeGeocodePreview) -- requetes IndexedDB locales, rapides meme
       // pour plusieurs dizaines d'entrees en parallele, mais un court
       // message evite que l'ecran semble fige pendant l'attente.
-      container.innerHTML = `<div class="empty-state">Vérification des adresses…</div>`;
+      container.innerHTML = loadingHtml("Vérification des adresses…");
       const previews = await Promise.all(drafts.map((d) => computeGeocodePreview(d)));
       drafts.forEach((d, i) => {
         d.geocodePreview = previews[i];
@@ -503,7 +504,7 @@ function renderReviewList(container, drafts) {
       container.querySelector("#batch-review-save").addEventListener("click", async () => {
         const btn = container.querySelector("#batch-review-save");
         btn.disabled = true;
-        btn.textContent = "Enregistrement…";
+        btn.innerHTML = inlineLoadingHtml("Enregistrement…");
         for (const item of state) {
           if (item.status === "pending") {
             const colis = draftToColis(item.draft);

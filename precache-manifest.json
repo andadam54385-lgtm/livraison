@@ -1,6 +1,6 @@
 {
-  "version": "4c07cdf0d99d",
-  "generatedAt": "2026-08-29T13:32:16.931Z",
+  "version": "f31cee7d273b",
+  "generatedAt": "2026-08-29T18:39:50.939Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -32,6 +32,7 @@
     "./js/lib/geo-utils.js",
     "./js/lib/id.js",
     "./js/lib/idb.js",
+    "./js/lib/loading.js",
     "./js/lib/toast.js",
     "./js/map/map-ui.js",
     "./js/map/pmtiles-store.js",

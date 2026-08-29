@@ -95,30 +95,36 @@ async function render() {
       <p class="muted" id="s-depot-current" style="margin-top:-4px;">${escapeHtml(settings.depotLabel)}</p>
       <div id="s-depot-search-slot"></div>
       <button type="button" id="s-depot-change">${icon("pencil")}Changer l'adresse du dépôt</button>
+      <p class="muted" style="margin:10px 0 0;">Le départ (dépôt ou position) et le retour au dépôt en fin de tournée se choisissent à chaque calcul, dans l'onglet Tournée.</p>
     </div>
-    <p class="muted" style="margin:8px 0 12px;">Le départ (dépôt ou position) et le retour au dépôt en fin de tournée se choisissent à chaque calcul, dans l'onglet Tournée.</p>
-    <div class="field">
-      <label>Application de navigation</label>
-      <select id="s-nav-app">
-        <option value="apple" ${settings.navApp === "apple" ? "selected" : ""}>Apple Plans</option>
-        <option value="waze" ${settings.navApp === "waze" ? "selected" : ""}>Waze</option>
-        <option value="google" ${settings.navApp === "google" ? "selected" : ""}>Google Maps</option>
-      </select>
+    <div class="card">
+      <div class="card-title">${icon("navigation")}Navigation</div>
+      <div class="field">
+        <label>Application de navigation</label>
+        <select id="s-nav-app">
+          <option value="apple" ${settings.navApp === "apple" ? "selected" : ""}>Apple Plans</option>
+          <option value="waze" ${settings.navApp === "waze" ? "selected" : ""}>Waze</option>
+          <option value="google" ${settings.navApp === "google" ? "selected" : ""}>Google Maps</option>
+        </select>
+      </div>
+      <div class="toggle-row">
+        <label for="s-auto-nav">Ouvrir le GPS automatiquement après "Livré"</label>
+        <input type="checkbox" id="s-auto-nav" style="width:auto;min-height:0;" ${settings.autoNavAfterDeliver ? "checked" : ""}>
+      </div>
+      <p class="muted" style="margin:-6px 0 0;">Enchaîne directement vers l'arrêt suivant sans retaper sur "Naviguer".</p>
     </div>
-    <div class="toggle-row">
-      <label for="s-auto-nav">Ouvrir le GPS automatiquement après "Livré"</label>
-      <input type="checkbox" id="s-auto-nav" style="width:auto;min-height:0;" ${settings.autoNavAfterDeliver ? "checked" : ""}>
+    <div class="card">
+      <div class="card-title">${icon("zap")}Calcul de tournée</div>
+      <div class="field">
+        <label>Pénalité "avant 12h" (minutes par position dans l'ordre)</label>
+        <input type="number" min="0" step="5" id="s-penalty" value="${settings.avant12hPenaltyMinutes}">
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>Durée moyenne par arrêt (minutes)</label>
+        <input type="number" min="0" step="1" id="s-duree-arret" value="${settings.dureeArretMinutes}">
+      </div>
+      <p class="muted" style="margin:6px 0 0;">Utilisée pour estimer l'heure d'arrivée à chaque arrêt (sonnette, remise en main propre...).</p>
     </div>
-    <p class="muted" style="margin-top:-6px;margin-bottom:12px;">Enchaîne directement vers l'arrêt suivant sans retaper sur "Naviguer".</p>
-    <div class="field">
-      <label>Pénalité "avant 12h" (minutes par position dans l'ordre)</label>
-      <input type="number" min="0" step="5" id="s-penalty" value="${settings.avant12hPenaltyMinutes}">
-    </div>
-    <div class="field">
-      <label>Durée moyenne par arrêt (minutes)</label>
-      <input type="number" min="0" step="1" id="s-duree-arret" value="${settings.dureeArretMinutes}">
-    </div>
-    <p class="muted" style="margin-top:-6px;margin-bottom:12px;">Utilisée pour estimer l'heure d'arrivée à chaque arrêt (sonnette, remise en main propre...).</p>
     <div class="card">
       <div class="card-title">Modèles de SMS</div>
       <p class="muted" style="margin-top:-4px;">

@@ -15,6 +15,7 @@ import { googleMapsSearchUrl } from "../tour/deep-links.js";
 import { searchOnlinePlaces } from "../geocode/online-search.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
+import { loadingHtml, inlineLoadingHtml } from "../lib/loading.js";
 import { emit } from "../lib/event-bus.js";
 import { uuid } from "../lib/id.js";
 import { icon } from "../ui/icons.js";
@@ -157,13 +158,13 @@ async function showCropStep(container, canvas) {
 }
 
 async function runOcrPipeline(container, file, { onSaved, barcodeTracking } = {}) {
-  container.innerHTML = `<div class="empty-state">Chargement de la photo…</div>`;
+  container.innerHTML = loadingHtml("Chargement de la photo…");
   const rawCanvas = await loadImageToCanvas(file);
 
   const cropRect = await showCropStep(container, rawCanvas);
   const working = cropRect ? cropCanvas(rawCanvas, cropRect) : rawCanvas;
 
-  container.innerHTML = `<div class="empty-state">Lecture de l'étiquette (OCR)…</div>`;
+  container.innerHTML = loadingHtml("Lecture de l'étiquette (OCR)…");
   preprocessForOcr(working);
 
   const ocrLangs = (await getSetting("ocrLangs")) || "fra";
@@ -256,7 +257,7 @@ function bindAdresseAutocomplete(container, { initialQuery = "" } = {}) {
     // d'un vrai echec).
     loadingTimer = setTimeout(() => {
       if (mySeq !== requestSeq) return;
-      list.innerHTML = `<p class="muted" style="padding:8px;">Recherche…</p>`;
+      list.innerHTML = `<p class="muted" style="padding:8px;">${inlineLoadingHtml("Recherche…")}</p>`;
     }, 300);
     let matches;
     try {
@@ -501,7 +502,7 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
       ville: colis.adresseRaw.ville,
     });
 
-    container.innerHTML = `<div class="empty-state">Géocodage…</div>`;
+    container.innerHTML = loadingHtml("Géocodage…");
     await runGeocodeAndSave(container, colis, { onSaved });
   });
 }
@@ -678,7 +679,7 @@ function renderGeocodePicker(container, colis, { onSaved }) {
       return;
     }
     onlineBtn.disabled = true;
-    onlineResults.innerHTML = `<p class="muted" style="padding:8px;">Recherche…</p>`;
+    onlineResults.innerHTML = `<p class="muted" style="padding:8px;">${inlineLoadingHtml("Recherche en ligne…")}</p>`;
     let places;
     try {
       places = await searchOnlinePlaces(query);

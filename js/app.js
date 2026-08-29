@@ -43,6 +43,20 @@ async function loadViewModule(name) {
   return mod;
 }
 
+// La nav est du HTML statique (elle doit exister avant que le moindre module
+// de vue soit charge), mais ses icones viennent de ui/icons.js comme partout
+// ailleurs plutot que d'etre recopiees en SVG brut dans index.html. Le CSS de
+// .bottom-nav a etait deja ecrit pour une icone au-dessus du libelle
+// (flex-direction: column + gap) -- il ne manquait que les icones.
+const NAV_ICONS = { tour: "clipboard-list", map: "map-pin" };
+
+function decorateNav() {
+  for (const link of document.querySelectorAll("#bottom-nav a")) {
+    const name = NAV_ICONS[link.dataset.nav];
+    if (name) link.insertAdjacentHTML("afterbegin", icon(name, { size: 22, spaced: false }));
+  }
+}
+
 function setActiveNav(name) {
   for (const link of document.querySelectorAll("#bottom-nav a")) {
     link.classList.toggle("active", link.dataset.nav === name);
@@ -95,7 +109,7 @@ async function boot() {
   document.getElementById("scan-fab").innerHTML = icon("camera", { spaced: false, size: 26 });
   document.getElementById("settings-back").innerHTML = icon("arrow-left", { spaced: false });
   document.getElementById("settings-back").addEventListener("click", () => {
-    // Reglages n'est plus un onglet de la nav du bas (accessible depuis le
+    // Reglages n'est pas un onglet de la nav du bas (accessible depuis le
     // menu de l'ecran Carte) : history.back() ramene a l'ecran d'ou on vient
     // plutot que vers une destination fixe supposee.
     if (history.length > 1) history.back();
@@ -120,6 +134,7 @@ async function boot() {
   // de reveler la nav -- sinon un tap rapide juste apres l'affichage peut ne
   // rien faire (import dynamique de tour-ui.js pas encore resolu).
   await onHashChange();
+  decorateNav();
   document.getElementById("bottom-nav").hidden = false;
 
   if (navigator.storage?.persist) {

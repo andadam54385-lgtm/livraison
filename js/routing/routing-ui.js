@@ -8,6 +8,7 @@ import { createTour, saveTour } from "./tour-store.js";
 import { getAllSettings, setSetting } from "../settings/settings-store.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
 import { emit } from "../lib/event-bus.js";
+import { setInlineLoading } from "../lib/loading.js";
 
 // Colis "eligibles" pour un (re)calcul de tournee : les tout juste geocodes
 // ("pret") ET ceux d'une tournee precedente pas encore livres ("en_tournee").
@@ -54,14 +55,14 @@ function legDurationsSeconds(order, matrix, startIdx) {
 // de progression de l'appelant, progressFill est optionnel (Etat B n'a pas
 // forcement de barre de progression dediee).
 async function computeOptimizedStops({ eligibles, start, depotReturnPoint, settings, statusEl, progressFill }) {
-  statusEl.textContent = "Chargement du graphe routier…";
+  setInlineLoading(statusEl, "Chargement du graphe routier…");
   const db = await getDb();
   const csr = await loadCsrFromDb(db);
   if (!csr) {
     throw new Error("Graphe routier indisponible. Réimporte les données dans les réglages.");
   }
 
-  statusEl.textContent = "Positionnement des arrêts sur le réseau routier…";
+  setInlineLoading(statusEl, "Positionnement des arrêts sur le réseau routier…");
   const grid = buildSpatialGrid(csr.nodeLat, csr.nodeLon);
 
   // Si "revenir au depot" est active, le depot est ajoute une seconde fois
@@ -88,16 +89,16 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
     await new Promise((r) => setTimeout(r, 1500));
   }
 
-  statusEl.textContent = `Calcul des temps de trajet (0/${points.length})…`;
+  setInlineLoading(statusEl, `Calcul des temps de trajet (0/${points.length})…`);
   const matrix = await buildTravelTimeMatrix(csr, pointNodeIndices, {
     maxSeconds: 3600,
     onProgress: (done, total) => {
-      statusEl.textContent = `Calcul des temps de trajet (${done}/${total})…`;
+      setInlineLoading(statusEl, `Calcul des temps de trajet (${done}/${total})…`);
       if (progressFill) progressFill.style.width = `${Math.round((done / total) * 100)}%`;
     },
   });
 
-  statusEl.textContent = "Optimisation de l'ordre de tournée…";
+  setInlineLoading(statusEl, "Optimisation de l'ordre de tournée…");
   const avant12hFlags = {};
   eligibles.forEach((c, i) => {
     avant12hFlags[i + 1] = Boolean(c.avant12h);
@@ -193,7 +194,7 @@ export async function runSort(container, { useGps, depotReturn, onDone, disableB
 
     let start = { lat: settings.depotLat, lon: settings.depotLon, label: settings.depotLabel };
     if (useGps) {
-      statusEl.textContent = "Localisation en cours…";
+      setInlineLoading(statusEl, "Localisation en cours…");
       try {
         const pos = await getCurrentPosition();
         start = { ...pos, label: "Position actuelle" };
@@ -262,7 +263,7 @@ export async function runRecalculate(container, { tour, onDone, disableButtons =
     }
 
     let start = tour.depot;
-    statusEl.textContent = "Localisation en cours…";
+    setInlineLoading(statusEl, "Localisation en cours…");
     try {
       const pos = await getCurrentPosition();
       start = { ...pos, label: "Position actuelle" };

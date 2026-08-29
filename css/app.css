@@ -1,8 +1,8 @@
 /* Systeme de design "chantier A" : usage terrain a une main, parfois avec
    des gants, en plein soleil ou dans un depot sombre a 6h. 4 couleurs
    semantiques exactement pour le statut d'un arret -- a_livrer = neutre (pas
-   de couleur), livre = vert (--ok), echec = orange (--warn), avant12h = rouge
-   (--urgent, volontairement distinct de l'orange pour ne jamais les
+   de couleur), livre = vert (--ok), echec = rouge (--warn), avant12h = orange
+   (--urgent, volontairement distinct du rouge pour ne jamais les
    confondre au premier coup d'oeil). --accent est separe : c'est la couleur
    d'action (Naviguer, Valider), pas un statut. Clair par defaut, sombre via
    prefers-color-scheme -- jamais invente, les deux themes sont regles
@@ -206,6 +206,11 @@ a { color: var(--accent-strong); }
   padding: 12px 16px 24px;
   -webkit-overflow-scrolling: touch;
 }
+/* Seul l'ecran Tournee porte le FAB de scan (#scan-fab, HTML statique de
+   #tour-view) : il flotte au-dessus du bas de la liste, et sans cette reserve
+   la derniere carte -- ou le bloc "Depart" -- passe dessous et devient
+   intouchable. 60px de bouton + les 16px qui le separent de la nav. */
+#tour-content.view-content { padding-bottom: calc(24px + 76px); }
 
 .stats-row { display: flex; gap: 8px; margin-top: 8px; }
 .stat-pill {
@@ -322,6 +327,18 @@ a { color: var(--accent-strong); }
    regroupees sur UNE seule ligne d'icones plutot que deux lignes de boutons
    pleine largeur + une 3e ligne pour le reordonnancement -- voir
    renderStopCard() dans tour-ui.js. */
+/* Cartes de preparation (ecran Tournee, Etat A) : meme traitement compact que
+   .stop-card ci-dessous, pour la meme raison -- une liste de 20+ colis a
+   preparer passait la moitie de sa hauteur en marges avec le gabarit .card
+   generique (pense pour un item isole). */
+.prep-card { padding: 9px 11px; margin-bottom: 6px; }
+.prep-card .card-title { font-size: 0.95rem; margin-bottom: 0; }
+.prep-card-addr { font-size: 0.82rem; line-height: 1.35; }
+.prep-card-badges { margin-top: 6px; }
+/* Colis sans nom : repli neutre a la place du nom, jamais une alerte -- le nom
+   n'est pas bloquant pour passer "pret" (voir CLAUDE.md). */
+.card-title-empty { color: var(--text-muted); font-weight: 500; font-style: italic; }
+
 .stop-card { padding: 8px 10px; margin-bottom: 6px; }
 .stop-card .card-title { font-size: 0.92rem; margin-bottom: 1px; }
 .stop-card-addr { font-size: 0.8rem; margin-top: 1px; }
@@ -615,6 +632,21 @@ a { color: var(--accent-strong); }
 .badge-warn { background: var(--warn-bg); color: var(--warn); }
 .badge-urgent { background: var(--urgent-bg); color: var(--urgent); }
 .badge-pending { background: var(--bg-elevated); color: var(--text-muted); }
+/* "A verifier" n'est PAS un statut de livraison mais une alerte de qualite
+   geocodage/OCR : il ne doit donc consommer aucune des 4 couleurs semantiques.
+   Il etait rouge dans la pastille d'en-tete (.stat-pill-warn) et gris muet
+   dans le badge de carte -- soit le meme concept lu de deux facons, et en plus
+   le rouge d'"echec" vole pour autre chose (les deux cohabitent a l'ecran en
+   Etat A : "Non livres" juste au-dessus de la liste de preparation). Contour
+   tirete + icone : visible sans etre une des 4 couleurs, identique aux deux
+   endroits. */
+.badge-check {
+  background: transparent;
+  border: 1px dashed var(--text-muted);
+  color: var(--text-muted);
+  padding: 2px 8px;
+}
+.stat-pill-check { background: transparent; border-style: dashed; border-color: var(--text-muted); color: var(--text-muted); }
 
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 5px; font-weight: 500; }
@@ -670,6 +702,45 @@ a { color: var(--accent-strong); }
   color: var(--text-muted);
   padding: 48px 24px;
   line-height: 1.5;
+}
+/* Chantier polish visuel (retour terrain : "aspect general pas fini") : les
+   etats d'attente reels (OCR, geocodage, chargement de la carte...)
+   utilisaient un simple texte statique ("Geocodage…"), visuellement
+   identique a un ecran fige/plante -- rien ne bougeait pour rassurer que
+   l'appli travaille encore. .spinner est un anneau CSS pur (aucun asset/JS),
+   colore avec --accent comme le reste des elements d'action. */
+.spinner {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.empty-state .spinner { margin-bottom: 12px; }
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.2s; }
+}
+/* Variante en ligne (ligne de statut, bouton, liste de resultats) : meme
+   anneau, calibre sur la hauteur du texte qui l'accompagne. */
+.spinner-inline {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+  vertical-align: -1px;
+  margin-right: 8px;
+}
+/* Dans un bouton, l'anneau suit la couleur du texte (comme les icones, voir
+   ui/icons.js) -- sinon il disparait sur un fond .primary, qui est justement
+   le seul bouton assez long a repondre pour meriter un indicateur. */
+button .spinner-inline,
+.btn-link .spinner-inline {
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
 }
 
 .viewfinder-wrap {
