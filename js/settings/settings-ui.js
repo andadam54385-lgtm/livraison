@@ -11,10 +11,7 @@ import { renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js
 import { getActiveTour } from "../routing/tour-store.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
 import { icon } from "../ui/icons.js";
-
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
+import { escapeHtml } from "../lib/escape.js";
 
 let containerRef = null;
 let showDebugOcr = false;

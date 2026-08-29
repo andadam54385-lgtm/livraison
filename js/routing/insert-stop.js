@@ -49,10 +49,19 @@ export async function insertStopCheapest(tour, colis) {
     }
   }
 
+  // Correctif d'audit : un arret en attente dont le colis n'a plus de
+  // geocodage (adresse modifiee apres coup et nouveau match introuvable,
+  // colis supprime...) etait auparavant simplement absent de la liste
+  // reconstruite plus bas -- il DISPARAISSAIT silencieusement de la tournee
+  // a la prochaine insertion. Ces arrets sont maintenant conserves
+  // (pendingSansGeocode) : exclus du calcul d'itineraire (impossible sans
+  // coordonnees) mais raccroches en fin de tournee, jamais perdus.
   const pendingWithColis = [];
+  const pendingSansGeocode = [];
   for (const stop of pendingStops) {
     const c = await getColis(stop.colisId);
     if (c?.geocode?.lat != null) pendingWithColis.push({ stop, colis: c });
+    else pendingSansGeocode.push(stop);
   }
 
   const points = [
@@ -86,11 +95,15 @@ export async function insertStopCheapest(tour, colis) {
   const newStop = { colisId: colis.id, ordre: 0, statutLivraison: "a_livrer", heureLivraison: null, legDureeSec: null };
   const newPendingOrder = pendingWithColis.map((x) => x.stop);
   newPendingOrder.splice(bestIdx, 0, newStop);
-  newPendingOrder.forEach((s, i) => {
+  // Les arrets sans geocodage sont raccroches en fin de parcours (voir
+  // pendingSansGeocode plus haut) -- pas de position optimale calculable
+  // pour eux, mais ils restent dans la tournee.
+  const finalPending = [...newPendingOrder, ...pendingSansGeocode];
+  finalPending.forEach((s, i) => {
     s.ordre = doneMaxOrdre + i + 1;
   });
 
-  tour.stops = [...doneStops, ...newPendingOrder];
+  tour.stops = [...doneStops, ...finalPending];
   await saveTour(tour);
   return { tour, position: newStop.ordre };
 }

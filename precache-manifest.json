@@ -1,6 +1,6 @@
 {
-  "version": "c77cae0240f1",
-  "generatedAt": "2026-08-29T10:08:13.725Z",
+  "version": "f4a068c05923",
+  "generatedAt": "2026-08-29T10:27:02.490Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -26,6 +26,7 @@
     "./js/geocode/normalize-address.js",
     "./js/import/import-data.js",
     "./js/import/import-ui.js",
+    "./js/lib/escape.js",
     "./js/lib/event-bus.js",
     "./js/lib/geo-utils.js",
     "./js/lib/id.js",

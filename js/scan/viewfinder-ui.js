@@ -1,5 +1,6 @@
 import { loadZxingLib, decodeCode128 } from "./barcode.js";
 import { icon } from "../ui/icons.js";
+import { escapeHtml } from "../lib/escape.js";
 
 const SCAN_INTERVAL_MS = 220; // ~4-5 tentatives/s : reactif sans saturer le CPU mobile
 const MAX_CONSECUTIVE_ERRORS = 5; // au-dela, ce n'est plus un raté isole -- afficher l'erreur plutot que boucler en silence
@@ -14,9 +15,6 @@ const MAX_CONSECUTIVE_ERRORS = 5; // au-dela, ce n'est plus un raté isole -- af
 // elle en pleine resolution (aucun impact visuel).
 const MAX_DECODE_DIMENSION = 900;
 
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 // Scan live du code-barres (flux camera getUserMedia, pas la capture photo
 // native utilisee ailleurs dans l'app -- voir capture.js pour pourquoi celle-

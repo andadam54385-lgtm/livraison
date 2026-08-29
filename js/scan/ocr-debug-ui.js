@@ -3,6 +3,7 @@ import { parseUpsLabelDetailed } from "./parse-ups-label.js";
 import { renderReviewForm } from "./scan-ui.js";
 import { listOcrCorrections } from "./ocr-corrections-store.js";
 import { icon } from "../ui/icons.js";
+import { escapeHtml } from "../lib/escape.js";
 
 // Ecran de diagnostic (Reglages) : montre le texte OCR brut d'un colis
 // scanne et le detail de la classification ligne par ligne (nom / rue /
@@ -12,9 +13,6 @@ import { icon } from "../ui/icons.js";
 // fiche d'edition habituelle (scan-ui.js's renderReviewForm) dans ce meme
 // ecran -- diagnostiquer puis corriger sans changer d'onglet.
 
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 function renderClassificationDetail(colis) {
   if (!colis.ocrRawText) {

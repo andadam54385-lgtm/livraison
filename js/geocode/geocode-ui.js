@@ -1,4 +1,5 @@
 import { queryByCp } from "./ban-index.js";
+import { escapeAttr } from "../lib/escape.js";
 
 // Exportee : sert aussi a construire adresseAffichage (adresse canonique,
 // bien casee) une fois un colis geocode -- voir colis-store.js.
@@ -43,7 +44,7 @@ export function renderManualAddressSearch(container, { initialQuery = "", onPick
   container.innerHTML = `
     <div class="field">
       <label>Recherche libre (numéro, rue et code postal)</label>
-      <input type="text" id="manual-search-input" placeholder="ex: 12 rue de la paix 55300" value="${initialQuery}">
+      <input type="text" id="manual-search-input" placeholder="ex: 12 rue de la paix 55300" value="${escapeAttr(initialQuery)}">
     </div>
     <div id="manual-search-results" class="candidate-list"></div>
     <div class="button-row">

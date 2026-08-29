@@ -1,10 +1,8 @@
 import { reportBug, listBugReports, deleteBugReport } from "./bug-reports-store.js";
 import { showToast } from "../lib/toast.js";
 import { icon } from "../ui/icons.js";
+import { escapeHtml } from "../lib/escape.js";
 
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 // Section Reglages : signalement manuel a chaud ("Signaler un bug", texte
 // libre horodate) + liste/export de tout ce qui a ete capture, manuel ET

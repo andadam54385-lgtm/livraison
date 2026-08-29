@@ -9,6 +9,7 @@ import { splitNumeroRue, renderReviewForm } from "./scan-ui.js";
 import { getSetting } from "../settings/settings-store.js";
 import { uuid } from "../lib/id.js";
 import { icon } from "../ui/icons.js";
+import { escapeHtml } from "../lib/escape.js";
 
 // Scan en rafale : filme un ECRAN affichant plusieurs adresses a la fois
 // (ex: appli/portail du transporteur listant une tournee), par opposition au
@@ -78,9 +79,6 @@ function preprocessForOcr(ctx, canvas) {
   ctx.putImageData(imageData, 0, 0);
 }
 
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 // Deduplication FLOUE (pas une simple cle exacte) : bug reel corrige ici,
 // retour terrain "65 arrets reels -> 240 propositions". L'OCR d'un ecran

@@ -7,6 +7,7 @@ import { buildSmsOptions } from "../tour/sms-template.js";
 import { renderReviewForm } from "./scan-ui.js";
 import { showToast } from "../lib/toast.js";
 import { icon } from "../ui/icons.js";
+import { escapeHtml, escapeAttr } from "../lib/escape.js";
 
 // Fiche colis consolidee : point d'entree UNIQUE pour voir le detail d'un
 // colis et agir dessus (Corriger/Favori/Supprimer), qu'on y arrive depuis la
@@ -14,12 +15,6 @@ import { icon } from "../ui/icons.js";
 // Favori ne vivent QUE ici -- plus jamais de bouton direct sur une carte de
 // liste (voir historique de discussion, chantier fusion Tournee/Scan).
 
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-function escapeAttr(s) {
-  return String(s ?? "").replace(/"/g, "&quot;");
-}
 
 function badgeForStatut(statut) {
   if (statut === "pret") return `<span class="badge badge-ok">Prêt</span>`;

@@ -10,6 +10,7 @@ import { buildSpatialGrid, findNearestNode } from "../routing/spatial-index.js";
 import { dijkstraSingleTargetPath, createDijkstraScratch } from "../routing/dijkstra.js";
 import { icon, iconToImage } from "../ui/icons.js";
 import { showToast } from "../lib/toast.js";
+import { escapeHtml, escapeAttr } from "../lib/escape.js";
 
 // Chantier C : vrai fond de carte vectoriel (MapLibre GL JS + PMTiles +
 // basemap Protomaps), 100% local -- remplace le plan SVG maison (rues
@@ -52,12 +53,6 @@ function moduleRelativeUrl(relativePath) {
   return new URL(relativePath, import.meta.url).href;
 }
 
-function escapeAttr(s) {
-  return String(s ?? "").replace(/"/g, "&quot;");
-}
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 function loadStylesheetOnce(href) {
   if (document.querySelector(`link[href="${href}"]`)) return;

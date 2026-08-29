@@ -13,6 +13,7 @@ import { getSetting } from "../settings/settings-store.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
 import { googleMapsSearchUrl } from "../tour/deep-links.js";
 import { showToast } from "../lib/toast.js";
+import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { emit } from "../lib/event-bus.js";
 import { uuid } from "../lib/id.js";
 import { icon } from "../ui/icons.js";
@@ -24,12 +25,6 @@ import { icon } from "../ui/icons.js";
 // est parametree par son `container` (pas de conteneur global module-level)
 // pour rester appelable depuis n'importe quel ecran.
 
-function escapeAttr(s) {
-  return String(s ?? "").replace(/"/g, "&quot;");
-}
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 // Separe le numero de rue (champ dedie dans la saisie manuelle) du reste --
 // gere le numero en tete ("6 Rue de l'Eglise", forme la plus courante) ET en

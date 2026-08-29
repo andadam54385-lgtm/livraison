@@ -1,7 +1,62 @@
 import { getDb } from "../db/schema.js";
-import { get, put, del, getAllFromIndex } from "../lib/idb.js";
+import { put, del, getAllFromIndex, tx } from "../lib/idb.js";
 import { uuid } from "../lib/id.js";
 import { getColis, saveColis } from "../scan/colis-store.js";
+
+// Lit, modifie et reecrit une tournee dans UNE SEULE transaction readwrite
+// IndexedDB (stores "tours" + "colis") -- correctif d'audit : les mutations
+// d'arret faisaient auparavant get() puis put() dans DEUX transactions
+// separees ; deux mutations partant du meme etat (double-tap rapide sur
+// "Livre" + "Echec", ou l'app ouverte dans deux onglets) pouvaient se
+// chevaucher et la derniere ecriture ecrasait silencieusement l'autre.
+// mutateTour DOIT etre synchrone (une transaction IndexedDB s'auto-commit
+// des que le thread rend la main sans nouvelle requete en vol) ; pour
+// mettre a jour le statut d'un colis dans la meme transaction, elle recoit
+// un collecteur setColisStatut(colisId, statut) plutot que d'appeler
+// getColis/saveColis (qui ouvriraient leurs propres transactions).
+// Retourne la tournee mise a jour, ou null si tourId est introuvable.
+function updateTourAtomic(db, tourId, mutateTour) {
+  return tx(db, ["tours", "colis"], "readwrite", (t) =>
+    new Promise((resolve, reject) => {
+      const toursStore = t.objectStore("tours");
+      const colisStore = t.objectStore("colis");
+      const req = toursStore.get(tourId);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const tour = req.result;
+        if (!tour) {
+          resolve(null);
+          return;
+        }
+        const colisUpdates = [];
+        mutateTour(tour, (colisId, statut) => colisUpdates.push({ colisId, statut }));
+        const putReq = toursStore.put(tour);
+        putReq.onerror = () => reject(putReq.error);
+        let pending = colisUpdates.length;
+        if (pending === 0) {
+          resolve(tour);
+          return;
+        }
+        for (const { colisId, statut } of colisUpdates) {
+          const getReq = colisStore.get(colisId);
+          getReq.onerror = () => reject(getReq.error);
+          getReq.onsuccess = () => {
+            const colis = getReq.result;
+            if (colis) {
+              // Garde colis.statut synchronise avec l'etat de la tournee,
+              // sinon la fiche colis reste marquee "en_tournee" indefiniment.
+              colis.statut = statut;
+              const putColisReq = colisStore.put(colis);
+              putColisReq.onerror = () => reject(putColisReq.error);
+            }
+            pending--;
+            if (pending === 0) resolve(tour);
+          };
+        }
+      };
+    })
+  );
+}
 
 export async function createTour({ depot, stops, totalDureeSec, returnToDepot = false, depotArrivee = null }) {
   const db = await getDb();
@@ -33,31 +88,21 @@ export async function saveTour(tour) {
 
 export async function archiveTour(tourId) {
   const db = await getDb();
-  const tour = await get(db, "tours", tourId);
-  if (!tour) return null;
-  tour.statut = "archivee";
-  await put(db, "tours", tour);
-  return tour;
+  return updateTourAtomic(db, tourId, (tour) => {
+    tour.statut = "archivee";
+  });
 }
 
 export async function markStopDelivered(tourId, ordre) {
   const db = await getDb();
-  const tour = await get(db, "tours", tourId);
-  if (!tour) return null;
-  const stop = tour.stops.find((s) => s.ordre === ordre);
-  if (stop) {
-    stop.statutLivraison = "livre";
-    stop.heureLivraison = new Date().toISOString();
-    // Garde colis.statut synchronise avec l'etat de la tournee, sinon la
-    // fiche colis reste marquee "en_tournee" indefiniment.
-    const colis = await getColis(stop.colisId);
-    if (colis) {
-      colis.statut = "livre";
-      await saveColis(colis);
+  return updateTourAtomic(db, tourId, (tour, setColisStatut) => {
+    const stop = tour.stops.find((s) => s.ordre === ordre);
+    if (stop) {
+      stop.statutLivraison = "livre";
+      stop.heureLivraison = new Date().toISOString();
+      setColisStatut(stop.colisId, "livre");
     }
-  }
-  await put(db, "tours", tour);
-  return tour;
+  });
 }
 
 // Echec de livraison (absent, acces impossible...) : distinct de "livre",
@@ -65,21 +110,15 @@ export async function markStopDelivered(tourId, ordre) {
 // non-livres au lendemain, voir reporterColisEchec ci-dessous).
 export async function markStopFailed(tourId, ordre, raison) {
   const db = await getDb();
-  const tour = await get(db, "tours", tourId);
-  if (!tour) return null;
-  const stop = tour.stops.find((s) => s.ordre === ordre);
-  if (stop) {
-    stop.statutLivraison = "echec";
-    stop.raisonEchec = raison || "";
-    stop.heureEchec = new Date().toISOString();
-    const colis = await getColis(stop.colisId);
-    if (colis) {
-      colis.statut = "echec";
-      await saveColis(colis);
+  return updateTourAtomic(db, tourId, (tour, setColisStatut) => {
+    const stop = tour.stops.find((s) => s.ordre === ordre);
+    if (stop) {
+      stop.statutLivraison = "echec";
+      stop.raisonEchec = raison || "";
+      stop.heureEchec = new Date().toISOString();
+      setColisStatut(stop.colisId, "echec");
     }
-  }
-  await put(db, "tours", tour);
-  return tour;
+  });
 }
 
 // Echange la position (ordre) d'un arret avec son voisin immediat --
@@ -90,18 +129,16 @@ export async function markStopFailed(tourId, ordre, raison) {
 // approximative tant que la tournee n'est pas recalculee.
 export async function moveStop(tourId, ordre, direction) {
   const db = await getDb();
-  const tour = await get(db, "tours", tourId);
-  if (!tour) return null;
-  const stops = tour.stops.slice().sort((a, b) => a.ordre - b.ordre);
-  const idx = stops.findIndex((s) => s.ordre === ordre);
-  const swapIdx = idx + direction;
-  if (idx === -1 || swapIdx < 0 || swapIdx >= stops.length) return tour;
-  const tmp = stops[idx].ordre;
-  stops[idx].ordre = stops[swapIdx].ordre;
-  stops[swapIdx].ordre = tmp;
-  tour.stops = stops;
-  await put(db, "tours", tour);
-  return tour;
+  return updateTourAtomic(db, tourId, (tour) => {
+    const stops = tour.stops.slice().sort((a, b) => a.ordre - b.ordre);
+    const idx = stops.findIndex((s) => s.ordre === ordre);
+    const swapIdx = idx + direction;
+    if (idx === -1 || swapIdx < 0 || swapIdx >= stops.length) return;
+    const tmp = stops[idx].ordre;
+    stops[idx].ordre = stops[swapIdx].ordre;
+    stops[swapIdx].ordre = tmp;
+    tour.stops = stops;
+  });
 }
 
 // Inverse le sens de parcours des arrets restants, sans recalcul de trajet
@@ -112,25 +149,23 @@ export async function moveStop(tourId, ordre, direction) {
 // estimees redeviennent approximatives tant qu'on n'a pas recalcule.
 export async function reverseRemainingStops(tourId) {
   const db = await getDb();
-  const tour = await get(db, "tours", tourId);
-  if (!tour) return null;
-  const stops = tour.stops.slice().sort((a, b) => a.ordre - b.ordre);
-  // Bug reel corrige ici : un arret non traite a TOUJOURS statutLivraison =
-  // "a_livrer" (jamais null/undefined, voir computeOptimizedStops et
-  // insertStopCheapest) -- "!s.statutLivraison" etait donc toujours faux,
-  // "pending" toujours vide, et le bouton "Inverser le sens" ne faisait
-  // strictement rien, silencieusement. Meme condition que isPending()
-  // (tour-ui.js) : un arret est "restant" s'il n'est ni livre ni en echec.
-  const pending = stops.filter((s) => s.statutLivraison !== "livre" && s.statutLivraison !== "echec");
-  if (pending.length < 2) return tour;
-  const ordres = pending.map((s) => s.ordre);
-  const reversed = pending.slice().reverse();
-  reversed.forEach((stop, i) => {
-    stop.ordre = ordres[i];
+  return updateTourAtomic(db, tourId, (tour) => {
+    const stops = tour.stops.slice().sort((a, b) => a.ordre - b.ordre);
+    // Bug reel corrige ici : un arret non traite a TOUJOURS statutLivraison =
+    // "a_livrer" (jamais null/undefined, voir computeOptimizedStops et
+    // insertStopCheapest) -- "!s.statutLivraison" etait donc toujours faux,
+    // "pending" toujours vide, et le bouton "Inverser le sens" ne faisait
+    // strictement rien, silencieusement. Meme condition que isPending()
+    // (tour-ui.js) : un arret est "restant" s'il n'est ni livre ni en echec.
+    const pending = stops.filter((s) => s.statutLivraison !== "livre" && s.statutLivraison !== "echec");
+    if (pending.length < 2) return;
+    const ordres = pending.map((s) => s.ordre);
+    const reversed = pending.slice().reverse();
+    reversed.forEach((stop, i) => {
+      stop.ordre = ordres[i];
+    });
+    tour.stops = stops;
   });
-  tour.stops = stops;
-  await put(db, "tours", tour);
-  return tour;
 }
 
 async function listAllTours(db) {
@@ -187,14 +222,18 @@ export async function markColisDeliveredDirect(colisId) {
   colis.statut = "livre";
   await saveColis(colis);
 
+  // La tournee active est relue et modifiee via updateTourAtomic (meme
+  // garantie que markStopDelivered : pas de get/put en deux transactions
+  // separees qui pourraient ecraser une mutation concurrente).
   const activeTour = await getActiveTour();
   if (activeTour) {
-    const stop = activeTour.stops.find((s) => s.colisId === colisId);
-    if (stop && stop.statutLivraison !== "livre") {
-      stop.statutLivraison = "livre";
-      stop.heureLivraison = new Date().toISOString();
-      await put(db, "tours", activeTour);
-    }
+    await updateTourAtomic(db, activeTour.id, (tour) => {
+      const stop = tour.stops.find((s) => s.colisId === colisId);
+      if (stop && stop.statutLivraison !== "livre") {
+        stop.statutLivraison = "livre";
+        stop.heureLivraison = new Date().toISOString();
+      }
+    });
   }
   return colis;
 }

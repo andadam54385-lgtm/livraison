@@ -10,6 +10,7 @@ import { startBatchScan } from "../scan/batch-scan-ui.js";
 import { renderColisDetail } from "../scan/colis-detail-ui.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
 import { showToast } from "../lib/toast.js";
+import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { icon } from "../ui/icons.js";
 import { reportBug } from "../debug/bug-reports-store.js";
 
@@ -52,12 +53,6 @@ export async function mount(container) {
   await render();
 }
 
-function escapeAttr(s) {
-  return String(s ?? "").replace(/"/g, "&quot;");
-}
-function escapeHtml(s) {
-  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 function updateHeader({ title, statsHtml = "", showProgress = false, progressPercent = 0 }) {
   const titleEl = document.getElementById("tour-header-title");
