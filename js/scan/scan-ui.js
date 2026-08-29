@@ -74,7 +74,18 @@ function joinNumeroRue(numero, rue) {
   return n ? `${n} ${r}`.trim() : r;
 }
 
-export async function startScanFlow(container, { onSaved } = {}) {
+// onCancelled (optionnel) : appele UNIQUEMENT si l'utilisateur annule avant
+// meme d'atteindre la fiche de revue (viseur code-barres ou selecteur de
+// photo natif), jamais en cas de succes ni d'erreur reelle. Bug reel
+// corrige ici, retour terrain : "cliquer sur annuler ne sort pas de la
+// prise de photo" -- avant ce parametre, l'annulation etait avalee en
+// silence (commentaire "on laisse l'ecran tel quel") en supposant que le
+// contenu D'AVANT le scan etait encore la, alors qu'il avait deja ete
+// ECRASE par le rendu du viseur camera (startBarcodeViewfinder ecrit dans
+// le meme container) : l'ecran restait bloque sur ce viseur mort (plus de
+// flux camera, boutons inertes puisque deja geres par une promesse
+// resolue), sans aucun moyen d'en sortir.
+export async function startScanFlow(container, { onSaved, onCancelled } = {}) {
   try {
     // Scan live du code-barres d'abord (plus fiable que l'OCR pour le
     // tracking, suite exacte de chiffres/lettres) ; barcodeTracking vaut
@@ -88,8 +99,9 @@ export async function startScanFlow(container, { onSaved } = {}) {
     if (err.message !== "Aucune photo sélectionnée." && err.message !== "Scan annulé.") {
       console.error(err);
       container.innerHTML = `<div class="empty-state">Erreur photo: ${err.message}</div>`;
+    } else if (onCancelled) {
+      onCancelled();
     }
-    // Annulation (scan ou photo) : on laisse l'ecran appelant tel quel (pas de reset ici).
   }
 }
 
@@ -428,7 +440,11 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
   bindAdresseAutocomplete(container, { initialQuery: initialAdresseQuery });
   bindVilleAutocomplete(container);
 
-  container.querySelector("#f-rescan").addEventListener("click", () => startScanFlow(container, { onSaved }));
+  container.querySelector("#f-rescan").addEventListener("click", () =>
+    // onCancelled : si l'utilisateur annule le rescan, revient a CETTE
+    // fiche de revue (pas la liste) -- voir startScanFlow(onCancelled).
+    startScanFlow(container, { onSaved, onCancelled: () => renderReviewForm(container, colis, { isNew, duplicate, onSaved }) })
+  );
   container.querySelector("#f-valider").addEventListener("click", async () => {
     colis.nom = container.querySelector("#f-nom").value.trim();
     colis.tel = container.querySelector("#f-tel").value.trim();

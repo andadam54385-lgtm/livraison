@@ -99,7 +99,10 @@ async function handleColisSaved(colis) {
 
 function openScanFlow() {
   view = "list"; // valeur de repli si l'utilisateur annule avant la sauvegarde
-  startScanFlow(containerRef, { onSaved: handleColisSaved });
+  // onCancelled : sans ca, "Annuler" pendant le scan laissait l'ecran
+  // bloque sur le viseur camera mort -- voir startScanFlow(onCancelled)
+  // dans scan-ui.js pour le detail du bug corrige.
+  startScanFlow(containerRef, { onSaved: handleColisSaved, onCancelled: () => render() });
 }
 
 function openManualEntry() {
