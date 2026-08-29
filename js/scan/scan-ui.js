@@ -213,14 +213,25 @@ function bindAdresseAutocomplete(container) {
   const rueInput = container.querySelector("#f-rue");
   const villeInput = container.querySelector("#f-ville");
   const cpInput = container.querySelector("#f-cp");
-  let debounceTimer = null;
   let loadingTimer = null;
+  // Identifie la requete de recherche la plus recente -- retour terrain :
+  // "il faut que ca cherche au fur et a mesure pas quand j'arrete
+  // d'ecrire" (le debounce de 200ms donnait l'impression d'attendre une
+  // pause). Chaque frappe lance desormais sa propre recherche IMMEDIATEMENT
+  // (plus de debounce), mais la recherche est asynchrone (async function)
+  // et rien ne garantit qu'une reponse revienne dans l'ordre d'envoi --
+  // sans ce garde-fou, taper vite pourrait afficher une reponse PERIMEE
+  // (correspondant a un texte deja depasse) apres une plus recente.
+  let requestSeq = 0;
 
   function hide() {
+    clearTimeout(loadingTimer);
+    requestSeq++; // invalide toute recherche encore en vol
     list.innerHTML = "";
   }
 
   async function showMatches(rawInput) {
+    const mySeq = ++requestSeq;
     // Le tout premier appel de la session charge toute la base en memoire
     // (voir getAllBanEntriesCached) -- affiche un indicateur si ca prend
     // plus de 300ms, pour ne jamais laisser l'ecran silencieux pendant ce
@@ -228,6 +239,7 @@ function bindAdresseAutocomplete(container) {
     // "marche pas bien" sans autre indice : rien a l'ecran, indiscernable
     // d'un vrai echec).
     loadingTimer = setTimeout(() => {
+      if (mySeq !== requestSeq) return;
       list.innerHTML = `<p class="muted" style="padding:8px;">Recherche…</p>`;
     }, 300);
     let matches;
@@ -235,6 +247,7 @@ function bindAdresseAutocomplete(container) {
       matches = await searchAdresses(rawInput, 6);
     } catch (err) {
       clearTimeout(loadingTimer);
+      if (mySeq !== requestSeq) return; // une frappe plus recente a deja pris le dessus
       // Ne jamais echouer en silence : sans ce catch, une erreur ici (ex:
       // IndexedDB indisponible) ne laissait RIEN a l'ecran -- indiscernable
       // d'une recherche normale sans resultat, ce qui a complique un
@@ -244,8 +257,9 @@ function bindAdresseAutocomplete(container) {
       return;
     }
     clearTimeout(loadingTimer);
+    if (mySeq !== requestSeq) return; // reponse perimee, ignoree
     if (matches.length === 0) {
-      hide();
+      list.innerHTML = "";
       return;
     }
     list.innerHTML = matches
@@ -269,13 +283,12 @@ function bindAdresseAutocomplete(container) {
   // premiers caracteres masque generalement tout le cout du chargement.
   input.addEventListener("focus", () => preloadBanEntries());
   input.addEventListener("input", () => {
-    clearTimeout(debounceTimer);
     const value = input.value.trim();
     if (value.length < 4) {
       hide();
       return;
     }
-    debounceTimer = setTimeout(() => showMatches(value), 200);
+    showMatches(value);
   });
   input.addEventListener("blur", () => {
     // Laisse le temps au clic sur une suggestion de se declencher avant de
