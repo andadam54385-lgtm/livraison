@@ -1,6 +1,6 @@
 {
-  "version": "f4a068c05923",
-  "generatedAt": "2026-08-29T10:27:02.490Z",
+  "version": "8f1fd85616b6",
+  "generatedAt": "2026-08-29T10:35:45.650Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -24,6 +24,7 @@
     "./js/geocode/match-address.js",
     "./js/geocode/match-address.test.mjs",
     "./js/geocode/normalize-address.js",
+    "./js/geocode/online-search.js",
     "./js/import/import-data.js",
     "./js/import/import-ui.js",
     "./js/lib/escape.js",

@@ -12,6 +12,7 @@ import { normalizeCity } from "../geocode/normalize-address.js";
 import { getSetting } from "../settings/settings-store.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
 import { googleMapsSearchUrl } from "../tour/deep-links.js";
+import { searchOnlinePlaces } from "../geocode/online-search.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { emit } from "../lib/event-bus.js";
@@ -562,27 +563,33 @@ function renderGeocodePicker(container, colis, { onSaved }) {
   container.innerHTML = `
     <div class="card">
       <div class="card-title">Adresse à confirmer</div>
-      <p class="muted">${escapeAttr(colis.adresseRaw.rue)}, ${escapeAttr(colis.adresseRaw.cp)} ${escapeAttr(colis.adresseRaw.ville)}</p>
+      <p class="muted">${escapeHtml(colis.adresseRaw.rue)}, ${escapeHtml(colis.adresseRaw.cp)} ${escapeHtml(colis.adresseRaw.ville)}</p>
     </div>
     <div id="geocode-picker-slot"></div>
     <div class="card" style="margin-top:8px;">
       <div class="card-title">Introuvable ? (entreprise, zone industrielle…)</div>
-      <p class="muted">La BAN ne connaît que les adresses officielles, pas les noms d'entreprise.</p>
-      <a class="btn-link" href="${googleMapsSearchUrl(rawQuery)}" target="_blank" rel="noopener">${icon("search")}Chercher "${escapeHtml(rawQuery)}" sur Google Maps</a>
-      <details style="margin-top:8px;">
-        <summary>Comment récupérer les coordonnées GPS ?</summary>
+      <p class="muted">Cherche le nom directement ici (recherche en ligne OpenStreetMap) — la BAN ne connaît que les adresses officielles, pas les noms d'entreprise.</p>
+      <div class="field">
+        <label>Nom / lieu à chercher</label>
+        <input type="text" id="geocode-online-query" class="field-lg" value="${escapeAttr(rawQuery)}" autocomplete="off">
+      </div>
+      <button type="button" class="primary" id="geocode-online-btn">${icon("search")}Chercher en ligne</button>
+      <div id="geocode-online-results" class="candidate-list" style="margin-top:8px;"></div>
+      <details style="margin-top:10px;">
+        <summary>Toujours introuvable ? Passer par Google Maps</summary>
+        <a class="btn-link" style="margin-top:8px;" href="${googleMapsSearchUrl(rawQuery)}" target="_blank" rel="noopener">${icon("search")}Chercher "${escapeHtml(rawQuery)}" sur Google Maps</a>
         <ol class="muted" style="margin:6px 0 0; padding-left:18px;">
           <li>Sur la carte qui s'ouvre, repère l'endroit exact (entrée du bâtiment, portail…).</li>
           <li>Appui long sur ce point précis : un repère (épingle) apparaît.</li>
           <li>Les coordonnées GPS s'affichent — en bas de l'écran sous le nom du lieu, ou en remontant la fiche du repère si besoin. Appuie dessus pour les copier ("Copier les coordonnées" ou une pression longue sur le texte).</li>
           <li>Reviens ici et colle-les dans le champ ci-dessous.</li>
         </ol>
+        <div class="field" style="margin-top:10px;">
+          <label>Coordonnées GPS collées</label>
+          <input type="text" id="geocode-manual-coords" class="field-lg" placeholder="ex: 48.6921, 6.1844" inputmode="decimal">
+        </div>
+        <button type="button" id="geocode-manual-coords-btn">Valider ces coordonnées</button>
       </details>
-      <div class="field" style="margin-top:10px;">
-        <label>Coordonnées GPS collées</label>
-        <input type="text" id="geocode-manual-coords" class="field-lg" placeholder="ex: 48.6921, 6.1844" inputmode="decimal">
-      </div>
-      <button type="button" id="geocode-manual-coords-btn">Valider ces coordonnées</button>
     </div>
     <div class="button-row">
       <button type="button" id="geocode-later">Plus tard (revoir dans la liste)</button>
@@ -630,6 +637,45 @@ function renderGeocodePicker(container, colis, { onSaved }) {
   } else {
     showManual();
   }
+
+  // Recherche en ligne du nom d'entreprise/lieu (voir online-search.js) --
+  // resultats affiches directement ici, un tap = coordonnees posees. Meme
+  // chemin de sortie que le collage manuel de coordonnees (acceptManualCoords,
+  // geocode.manual=true : pas d'entree BAN correspondante).
+  const onlineBtn = container.querySelector("#geocode-online-btn");
+  const onlineResults = container.querySelector("#geocode-online-results");
+  onlineBtn.addEventListener("click", async () => {
+    const query = container.querySelector("#geocode-online-query").value.trim();
+    if (query.length < 3) {
+      showToast("Tape au moins le nom de l'entreprise ou du lieu.");
+      return;
+    }
+    onlineBtn.disabled = true;
+    onlineResults.innerHTML = `<p class="muted" style="padding:8px;">Recherche…</p>`;
+    let places;
+    try {
+      places = await searchOnlinePlaces(query);
+    } catch (err) {
+      console.error("[geocode] Recherche en ligne echouee:", err);
+      onlineResults.innerHTML = `<p class="muted" style="padding:8px;">Recherche en ligne impossible (hors ligne ?). Réessaie, ou passe par Google Maps ci-dessous.</p>`;
+      onlineBtn.disabled = false;
+      return;
+    }
+    onlineBtn.disabled = false;
+    if (places.length === 0) {
+      onlineResults.innerHTML = `<p class="muted" style="padding:8px;">Rien trouvé pour "${escapeHtml(query)}" — essaie avec le nom + la ville, ou passe par Google Maps ci-dessous.</p>`;
+      return;
+    }
+    onlineResults.innerHTML = places
+      .map((p, i) => `<button type="button" class="candidate-item" data-idx="${i}">${escapeHtml(p.label)}</button>`)
+      .join("");
+    onlineResults.querySelectorAll(".candidate-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const picked = places[Number(btn.dataset.idx)];
+        acceptManualCoords(picked.lat, picked.lon);
+      });
+    });
+  });
 
   container.querySelector("#geocode-manual-coords-btn").addEventListener("click", () => {
     const parsed = parseLatLon(container.querySelector("#geocode-manual-coords").value);
