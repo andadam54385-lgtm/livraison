@@ -12,6 +12,7 @@ import { getActiveTour } from "../routing/tour-store.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
 import { icon } from "../ui/icons.js";
 import { escapeHtml } from "../lib/escape.js";
+import { APP_BUILD } from "../version.js";
 
 let containerRef = null;
 let showDebugOcr = false;
@@ -181,6 +182,7 @@ async function render() {
       <p class="muted">Efface tous les colis et tournées (le graphe routier, les adresses et les favoris restent, pas besoin de réimporter).</p>
       <button type="button" class="danger" id="s-reset">Effacer tous les colis et tournées</button>
     </div>
+    <p class="muted" style="text-align:center;margin-top:16px;">Version : build ${APP_BUILD}</p>
   `;
 
   const smsSelect = containerRef.querySelector("#s-sms-template-select");

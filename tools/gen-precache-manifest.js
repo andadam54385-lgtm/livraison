@@ -53,7 +53,30 @@ function walk(dir, files) {
   return files;
 }
 
+// Genere js/version.js a partir du SW_BUILD de sw.js -- AVANT le scan des
+// fichiers, pour que le manifeste inclue la version fraiche. Un module
+// precache (donc servi par le cache actif du service worker) est le SEUL
+// endroit qui reflete fidelement la version REELLEMENT en train de tourner
+// sur l'appareil : sw.js/precache-manifest.json relus par fetch renverraient
+// la derniere version DEPLOYEE, pas celle chargee. Necessaire pour
+// diagnostiquer a distance les "marche pas" dont la cause est simplement
+// une mise a jour PWA pas encore activee (2 ouvertures parfois requises sur
+// iOS) -- affiche dans Reglages, voir settings-ui.js.
+function writeVersionModule() {
+  const swSource = fs.readFileSync(path.join(ROOT, "sw.js"), "utf8");
+  const m = swSource.match(/const SW_BUILD = (\d+);/);
+  if (!m) throw new Error("SW_BUILD introuvable dans sw.js");
+  const content =
+    "// GENERE par tools/gen-precache-manifest.js a partir du SW_BUILD de sw.js\n" +
+    "// -- ne pas editer a la main, relancer le script apres un bump.\n" +
+    `export const APP_BUILD = ${m[1]};\n`;
+  fs.writeFileSync(path.join(ROOT, "js", "version.js"), content);
+  return m[1];
+}
+
 function main() {
+  const build = writeVersionModule();
+  console.log(`js/version.js genere (build ${build})`);
   const files = walk(ROOT, []);
   files.sort();
 
