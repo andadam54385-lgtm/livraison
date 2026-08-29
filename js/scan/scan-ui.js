@@ -309,6 +309,42 @@ async function fetchAdresseCandidates(parsed, streetPrefix) {
   return queryByStreetPrefix(streetPrefix, 60);
 }
 
+// Mots-type de voie francais courants, souvent omis a l'oral/a la frappe
+// rapide ("12 nationale" pour "12 Route Nationale", "l'eglise" pour "Rue de
+// l'Eglise"...). Bug reel corrige ici, retour terrain : "12 nationale
+// doncourt-aux-templiers" (une vraie adresse) ne proposait rien du tout,
+// alors que "Route Nationale" existe bien dans la base a cette commune --
+// la recherche par PREFIXE (voir by_rn) ne peut matcher que depuis le DEBUT
+// du nom normalise ("route nationale"), donc omettre le premier mot casse
+// tout match, meme si le reste est identique.
+const STREET_TYPE_WORDS = [
+  "rue", "route", "chemin", "impasse", "avenue", "allee", "place", "boulevard",
+  "quai", "square", "faubourg", "cours", "sentier", "montee", "cite", "clos",
+  "hameau", "venelle", "traverse", "ruelle", "passage", "voie",
+];
+
+// Retente en anteposant chacun des mots-type ci-dessus au prefixe de rue
+// deja calcule -- reutilise fetchAdresseCandidates (CP exact si connu,
+// sinon prefixe de rue) pour rester coherent avec la recherche normale.
+// N'est tente QUE si la recherche telle quelle (sans mot-type ajoute) n'a
+// rien donne, et jamais si le 1er mot tape est deja lui-meme un mot-type
+// (rien a ajouter dans ce cas).
+async function fetchWithStreetTypeWordFallback(parsed, streetPrefix) {
+  const firstWord = streetPrefix.split(" ")[0];
+  if (STREET_TYPE_WORDS.includes(firstWord)) return [];
+  for (const typeWord of STREET_TYPE_WORDS) {
+    const candidates = await fetchAdresseCandidates(parsed, `${typeWord} ${streetPrefix}`);
+    if (candidates.length > 0) return candidates;
+  }
+  return [];
+}
+
+async function fetchAdresseCandidatesWithFallback(parsed, streetPrefix) {
+  const candidates = await fetchAdresseCandidates(parsed, streetPrefix);
+  if (candidates.length > 0) return candidates;
+  return fetchWithStreetTypeWordFallback(parsed, streetPrefix);
+}
+
 function bindAdresseAutocomplete(container) {
   const input = container.querySelector("#f-adresse-complete");
   const list = container.querySelector("#f-adresse-complete-suggestions");
@@ -333,7 +369,7 @@ function bindAdresseAutocomplete(container) {
       hide();
       return;
     }
-    let candidates = await fetchAdresseCandidates(parsed, streetPrefix);
+    let candidates = await fetchAdresseCandidatesWithFallback(parsed, streetPrefix);
 
     // Repli EN DEUXIEME ESSAI seulement (voir splitAdresseInput) : la
     // recherche "rue seule" n'a rien trouve et aucune coupure fiable
@@ -345,7 +381,7 @@ function bindAdresseAutocomplete(container) {
       if (retryPartial.cpTyped) {
         const retryPrefix = normalizeStreet(retryPartial.street);
         if (retryPrefix.length >= 3) {
-          const retryCandidates = await fetchAdresseCandidates(retryPartial, retryPrefix);
+          const retryCandidates = await fetchAdresseCandidatesWithFallback(retryPartial, retryPrefix);
           if (retryCandidates.length > 0) {
             parsed = retryPartial;
             streetPrefix = retryPrefix;
@@ -363,7 +399,7 @@ function bindAdresseAutocomplete(container) {
       if (retryVille.villeTyped) {
         const retryPrefix = normalizeStreet(retryVille.street);
         if (retryPrefix.length >= 3) {
-          const retryCandidates = await fetchAdresseCandidates(retryVille, retryPrefix);
+          const retryCandidates = await fetchAdresseCandidatesWithFallback(retryVille, retryPrefix);
           if (retryCandidates.length > 0) {
             parsed = retryVille;
             streetPrefix = retryPrefix;
