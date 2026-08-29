@@ -206,7 +206,15 @@ async function runOcrPipeline(container, file, { onSaved, barcodeTracking } = {}
 // remplaces par ce mecanisme unique, suite au retour terrain "rien ne
 // marche fais un truc plus simple qui marche mieux un peu comme fonctionne
 // une recherche plan ou google map".
-function bindAdresseAutocomplete(container) {
+// initialQuery (optionnel) : declenche la recherche IMMEDIATEMENT au
+// rendu, sans attendre que l'utilisateur tape quoi que ce soit -- retour
+// terrain : "il faudrait qu'après la photo ça démarre directement la
+// recherche d'adresse". Avant ce correctif, l'OCR remplissait deja les
+// champs Numero/Rue/Ville/CP separes, mais le champ "Adresse" (recherche
+// intelligente) restait vide et inerte : il fallait retaper toute
+// l'adresse a la main pour obtenir des suggestions, alors que le texte
+// etait deja disponible.
+function bindAdresseAutocomplete(container, { initialQuery = "" } = {}) {
   const input = container.querySelector("#f-adresse-complete");
   const list = container.querySelector("#f-adresse-complete-suggestions");
   const numeroInput = container.querySelector("#f-numero");
@@ -295,6 +303,11 @@ function bindAdresseAutocomplete(container) {
     // la faire disparaitre (blur tire avant click sinon).
     setTimeout(hide, 150);
   });
+
+  if (initialQuery.trim().length >= 4) {
+    preloadBanEntries();
+    showMatches(initialQuery.trim());
+  }
 }
 
 // Suggestions de ville au fil de la frappe (prefixe, communes connues de la
@@ -360,6 +373,10 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
   // postal), le nom en dernier -- seule l'adresse conditionne le geocodage
   // (voir colis-ready-rule), le nom peut se determiner sur place.
   const { numero, rue: rueSansNumero } = splitNumeroRue(colis.adresseRaw.rue);
+  // Pre-remplit le champ "Adresse" (recherche intelligente) avec ce que
+  // l'OCR a deja extrait, pour declencher la recherche des le rendu --
+  // voir bindAdresseAutocomplete(initialQuery) plus haut.
+  const initialAdresseQuery = [colis.adresseRaw.rue, colis.adresseRaw.ville, colis.adresseRaw.cp].filter(Boolean).join(" ").trim();
 
   container.innerHTML = `
     ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>${icon("alert-triangle")}Ce tracking a déjà été scanné.</strong></div>` : ""}
@@ -369,7 +386,7 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     </div>
     <div class="field">
       <label>Adresse</label>
-      <input type="text" id="f-adresse-complete" class="field-lg" placeholder="ex: 12 rue de la Liberté" autocomplete="off">
+      <input type="text" id="f-adresse-complete" class="field-lg" placeholder="ex: 12 rue de la Liberté" autocomplete="off" value="${escapeAttr(initialAdresseQuery)}">
       <div id="f-adresse-complete-suggestions" class="candidate-list"></div>
       <p class="muted" style="margin-top:4px;">Choisis une suggestion pour remplir les champs ci-dessous d'un coup, ou complète-les toi-même.</p>
     </div>
@@ -408,7 +425,7 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     </div>
   `;
 
-  bindAdresseAutocomplete(container);
+  bindAdresseAutocomplete(container, { initialQuery: initialAdresseQuery });
   bindVilleAutocomplete(container);
 
   container.querySelector("#f-rescan").addEventListener("click", () => startScanFlow(container, { onSaved }));
