@@ -444,10 +444,37 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
   container.querySelector("#f-valider").addEventListener("click", async () => {
     colis.nom = container.querySelector("#f-nom").value.trim();
     colis.tel = container.querySelector("#f-tel").value.trim();
+    let numeroField = container.querySelector("#f-numero").value.trim();
+    let rueField = container.querySelector("#f-rue").value.trim();
+    let cpField = container.querySelector("#f-cp").value.trim();
+    const villeField = container.querySelector("#f-ville").value.trim();
+    // Repli : texte tape dans le champ "Adresse" (recherche une ligne) SANS
+    // suggestion choisie -- retour terrain : "je note dans adresse et quand
+    // il trouve pas il ne garde pas ce que j'ai note". Avant ce repli, seuls
+    // les 4 champs detailles comptaient au moment de Valider : tout ce qui
+    // n'avait ete tape QUE dans le champ Adresse (nom d'entreprise, adresse
+    // que la recherche ne reconnait pas...) etait perdu, et le colis se
+    // retrouvait sans la moindre adresse ("(adresse a verifier)" partout, y
+    // compris en titre de carte). Extraction minimale : un groupe de 5
+    // chiffres part en CP, le reste en rue (numero separe via splitNumeroRue
+    // comme pour une saisie normale) -- le texte est ainsi conserve ET
+    // reutilisable tel quel par l'ecran "Adresse a confirmer" (recherche en
+    // ligne pre-remplie avec, voir renderGeocodePicker).
+    if (!rueField) {
+      const adresseLibre = container.querySelector("#f-adresse-complete").value.trim();
+      if (adresseLibre) {
+        const cpMatch = adresseLibre.match(/\b\d{5}\b/);
+        if (cpMatch && !cpField) cpField = cpMatch[0];
+        const sansCp = adresseLibre.replace(/\b\d{5}\b/g, " ").replace(/\s+/g, " ").trim();
+        const { numero: numeroLibre, rue: rueLibre } = splitNumeroRue(sansCp);
+        rueField = rueLibre || sansCp;
+        if (!numeroField && numeroLibre) numeroField = numeroLibre;
+      }
+    }
     colis.adresseRaw = {
-      rue: joinNumeroRue(container.querySelector("#f-numero").value.trim(), container.querySelector("#f-rue").value.trim()),
-      cp: container.querySelector("#f-cp").value.trim(),
-      ville: container.querySelector("#f-ville").value.trim(),
+      rue: joinNumeroRue(numeroField, rueField),
+      cp: cpField,
+      ville: villeField,
     };
     // Champs corriges a la main : l'ancienne adresse canonique (si un
     // geocodage precedent en avait pose une) ne correspond plus forcement,
