@@ -7,7 +7,7 @@ import { saveColis, isDuplicateTracking } from "./colis-store.js";
 import { recordCorrectionIfNeeded } from "./ocr-corrections-store.js";
 import { matchAddress } from "../geocode/match-address.js";
 import { renderCandidatePicker, renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
-import { listDistinctCities, searchAdresses } from "../geocode/ban-index.js";
+import { listDistinctCities, searchAdresses, preloadBanEntries } from "../geocode/ban-index.js";
 import { normalizeCity } from "../geocode/normalize-address.js";
 import { getSetting } from "../settings/settings-store.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
@@ -214,13 +214,36 @@ function bindAdresseAutocomplete(container) {
   const villeInput = container.querySelector("#f-ville");
   const cpInput = container.querySelector("#f-cp");
   let debounceTimer = null;
+  let loadingTimer = null;
 
   function hide() {
     list.innerHTML = "";
   }
 
   async function showMatches(rawInput) {
-    const matches = await searchAdresses(rawInput, 6);
+    // Le tout premier appel de la session charge toute la base en memoire
+    // (voir getAllBanEntriesCached) -- affiche un indicateur si ca prend
+    // plus de 300ms, pour ne jamais laisser l'ecran silencieux pendant ce
+    // chargement ponctuel (peut avoir contribue a un signalement reel
+    // "marche pas bien" sans autre indice : rien a l'ecran, indiscernable
+    // d'un vrai echec).
+    loadingTimer = setTimeout(() => {
+      list.innerHTML = `<p class="muted" style="padding:8px;">Recherche…</p>`;
+    }, 300);
+    let matches;
+    try {
+      matches = await searchAdresses(rawInput, 6);
+    } catch (err) {
+      clearTimeout(loadingTimer);
+      // Ne jamais echouer en silence : sans ce catch, une erreur ici (ex:
+      // IndexedDB indisponible) ne laissait RIEN a l'ecran -- indiscernable
+      // d'une recherche normale sans resultat, ce qui a complique un
+      // signalement reel ("marche pas bien", sans autre indice visible).
+      console.error("[adresse] recherche echouee:", err);
+      list.innerHTML = `<p class="muted" style="padding:8px;">Recherche indisponible pour le moment.</p>`;
+      return;
+    }
+    clearTimeout(loadingTimer);
     if (matches.length === 0) {
       hide();
       return;
@@ -241,6 +264,10 @@ function bindAdresseAutocomplete(container) {
     });
   }
 
+  // Demarre le chargement de la base en arriere-plan des le focus du champ
+  // (voir preloadBanEntries) : le temps que l'utilisateur tape ses
+  // premiers caracteres masque generalement tout le cout du chargement.
+  input.addEventListener("focus", () => preloadBanEntries());
   input.addEventListener("input", () => {
     clearTimeout(debounceTimer);
     const value = input.value.trim();
