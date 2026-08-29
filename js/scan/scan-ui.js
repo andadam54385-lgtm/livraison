@@ -7,7 +7,7 @@ import { saveColis, isDuplicateTracking } from "./colis-store.js";
 import { recordCorrectionIfNeeded } from "./ocr-corrections-store.js";
 import { matchAddress, looseCommune } from "../geocode/match-address.js";
 import { renderCandidatePicker, renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
-import { listDistinctCities, queryByStreetPrefix } from "../geocode/ban-index.js";
+import { listDistinctCities, queryByStreetPrefix, queryByCp } from "../geocode/ban-index.js";
 import { normalizeCity, normalizeStreet } from "../geocode/normalize-address.js";
 import { getSetting } from "../settings/settings-store.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
@@ -276,6 +276,39 @@ export function splitAdresseInput(rawInput, { knownCityPrefixes = null, allowPar
 // remplit les 4 champs details d'un coup, mais ils restent modifiables
 // ensuite) : le geocodage final revalide toujours via matchAddress
 // independamment de ce qui est tape ici.
+// Recupere les adresses candidates pour un `parsed` (voir splitAdresseInput)
+// donne. Bug reel corrige ici, retour terrain concret : "4 rue des jardins
+// 54385" (adresse des parents de l'utilisateur, a Rosieres-en-Haye) ne
+// proposait JAMAIS la bonne commune, meme une fois les 5 chiffres du CP
+// entierement tapes -- alors que le filtre par CP existait deja et semblait
+// correct sur le papier.
+//
+// Root cause : queryByStreetPrefix, pour rester rapide sur ~366k adresses,
+// plafonne a `limit` LIGNES BRUTES lues dans l'index par-nom-de-rue AVANT
+// tout filtrage par CP -- mais "Rue des Jardins" a elle seule compte 805
+// occurrences dans la seule base 54+55 ("Grande Rue", le nom le plus
+// courant, en compte plus de 13 000). Rosieres-en-Haye n'etait tout
+// simplement JAMAIS parmi les 60 premieres lignes brutes remontees par le
+// curseur (ordre d'insertion de la base, sans rapport avec le CP) -- le
+// filtre par CP appliquee ENSUITE, cote client, ne pouvait donc rien
+// trouver, quel que soit le CP tape, meme complet. Repli sur "montrer les
+// resultats non filtres" (voir plus bas) : d'ou une liste figee, toujours
+// la meme, qui ne correspondait jamais a la ville demandee.
+//
+// Fix : des qu'un CP COMPLET (5 chiffres) est connu, on interroge
+// directement par CP EXACT (index by_cp, deja existant) -- une commune
+// compte au plus quelques centaines/milliers d'adresses, jamais tronque,
+// puis on filtre localement par prefixe de rue (operation en memoire,
+// triviale sur ce volume). La recherche par nom de rue (avec son plafond)
+// ne reste utilisee que tant qu'aucun CP complet n'est connu.
+async function fetchAdresseCandidates(parsed, streetPrefix) {
+  if (parsed.cpTyped && parsed.cpTyped.length === 5) {
+    const cpCandidates = await queryByCp(parsed.cpTyped);
+    return cpCandidates.filter((c) => (c.rn || "").startsWith(streetPrefix));
+  }
+  return queryByStreetPrefix(streetPrefix, 60);
+}
+
 function bindAdresseAutocomplete(container) {
   const input = container.querySelector("#f-adresse-complete");
   const list = container.querySelector("#f-adresse-complete-suggestions");
@@ -300,7 +333,7 @@ function bindAdresseAutocomplete(container) {
       hide();
       return;
     }
-    let candidates = await queryByStreetPrefix(streetPrefix, 60);
+    let candidates = await fetchAdresseCandidates(parsed, streetPrefix);
 
     // Repli EN DEUXIEME ESSAI seulement (voir splitAdresseInput) : la
     // recherche "rue seule" n'a rien trouve et aucune coupure fiable
@@ -312,7 +345,7 @@ function bindAdresseAutocomplete(container) {
       if (retryPartial.cpTyped) {
         const retryPrefix = normalizeStreet(retryPartial.street);
         if (retryPrefix.length >= 3) {
-          const retryCandidates = await queryByStreetPrefix(retryPrefix, 60);
+          const retryCandidates = await fetchAdresseCandidates(retryPartial, retryPrefix);
           if (retryCandidates.length > 0) {
             parsed = retryPartial;
             streetPrefix = retryPrefix;
@@ -330,7 +363,7 @@ function bindAdresseAutocomplete(container) {
       if (retryVille.villeTyped) {
         const retryPrefix = normalizeStreet(retryVille.street);
         if (retryPrefix.length >= 3) {
-          const retryCandidates = await queryByStreetPrefix(retryPrefix, 60);
+          const retryCandidates = await fetchAdresseCandidates(retryVille, retryPrefix);
           if (retryCandidates.length > 0) {
             parsed = retryVille;
             streetPrefix = retryPrefix;
