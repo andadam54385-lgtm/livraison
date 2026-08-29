@@ -6,7 +6,7 @@ import { optimizeTourOrder } from "./tsp.js";
 import { listColisByStatut, saveColis, getColis } from "../scan/colis-store.js";
 import { createTour, saveTour } from "./tour-store.js";
 import { getAllSettings, setSetting } from "../settings/settings-store.js";
-import { formatDurationShort } from "../lib/geo-utils.js";
+import { formatDurationShort, hhmmToSec, secondsSinceMidnight } from "../lib/geo-utils.js";
 import { emit } from "../lib/event-bus.js";
 import { setInlineLoading } from "../lib/loading.js";
 
@@ -99,11 +99,25 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   });
 
   setInlineLoading(statusEl, "Optimisation de l'ordre de tournée…");
-  const avant12hFlags = {};
+
+  // Contraintes horaires PAR ARRET (voir tourCost dans tsp.js) : chaque
+  // contrainte ne porte que sur le colis concerne. Un "avant 12h" impose une
+  // heure limite a CE point-la et a lui seul -- tous les autres arrets restent
+  // libres de tomber avant ou apres, l'optimiseur n'est contraint que sur ce
+  // qui l'est reellement.
+  const limiteSec = hhmmToSec(settings.heureLimiteAvant12h);
+  const proDebut = hhmmToSec(settings.proFermetureDebut);
+  const proFin = hhmmToSec(settings.proFermetureFin);
+  const proFerme = proDebut != null && proFin != null && proFin > proDebut;
+  const deadlines = {};
+  const closedWindows = {};
   eligibles.forEach((c, i) => {
-    avant12hFlags[i + 1] = Boolean(c.avant12h);
+    const idx = i + 1;
+    if (c.avant12h && limiteSec != null) deadlines[idx] = limiteSec;
+    if (c.typeClient === "pro" && proFerme) closedWindows[idx] = [proDebut, proFin];
   });
-  const penaltyWeight = (settings.avant12hPenaltyMinutes || 0) * 60;
+  const dwellSec = (settings.dureeArretMinutes || 0) * 60;
+  const departureSec = secondsSinceMidnight(new Date());
 
   // Zones manuelles (voir map-ui.js, selection au lasso sur l'ecran Carte) :
   // chaque colis peut porter un numero de zone (colis.zone) pose a la main
@@ -131,17 +145,22 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   // deviendrait excessif avec de nombreuses petites zones.
   const order = [];
   let chainStart = 0;
+  // L'horloge continue d'une zone a l'autre : la zone N+1 ne repart pas de
+  // l'heure de depart initiale, sinon ses contraintes horaires seraient
+  // evaluees comme si la matinee n'avait pas encore ete entamee.
+  let zoneDepartureSec = departureSec;
   const zoneBudgetMs = Math.max(800, Math.floor(5000 / zoneKeys.length));
   zoneKeys.forEach((z, zi) => {
     const isLastZone = zi === zoneKeys.length - 1;
     const indices = zoneGroups.get(z);
     const finalIndices = isLastZone && depotEndIdx != null ? [...indices, depotEndIdx] : indices;
     const { order: zoneOrder } = optimizeTourOrder(matrix, chainStart, finalIndices, {
-      avant12hFlags,
-      penaltyWeight,
+      timing: { departureSec: zoneDepartureSec, dwellSec, deadlines, closedWindows },
       timeBudgetMs: zoneBudgetMs,
       fixedEndIdx: isLastZone ? depotEndIdx : null,
     });
+    const zoneLegs = legDurationsSeconds(zoneOrder, matrix, chainStart);
+    zoneDepartureSec += zoneLegs.reduce((a, b) => a + b, 0) + zoneOrder.length * dwellSec;
     order.push(...zoneOrder);
     chainStart = zoneOrder[zoneOrder.length - 1];
   });

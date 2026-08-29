@@ -1,6 +1,6 @@
 {
-  "version": "cfd2d72aa797",
-  "generatedAt": "2026-08-29T23:38:46.707Z",
+  "version": "86d1852ca353",
+  "generatedAt": "2026-08-29T23:48:35.411Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -45,6 +45,7 @@
     "./js/routing/spatial-index.js",
     "./js/routing/tour-store.js",
     "./js/routing/tsp.js",
+    "./js/routing/tsp.test.mjs",
     "./js/scan/barcode.js",
     "./js/scan/batch-scan-ui.js",
     "./js/scan/capture.js",
@@ -67,6 +68,7 @@
     "./js/tour/sms-template.js",
     "./js/tour/tour-ui.js",
     "./js/ui/icons.js",
+    "./js/ui/segmented.js",
     "./js/version.js",
     "./lib/maplibre/LICENSE-maplibre-gl.txt",
     "./lib/maplibre/LICENSE-pmtiles.txt",

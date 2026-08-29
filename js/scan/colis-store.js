@@ -73,3 +73,43 @@ export function formatAdresseForNav(colis) {
   if (colis.geocode?.manual) return null;
   return formatAdresseAffichage(colis);
 }
+
+// Champs de qualification poses au moment de valider une adresse (retour
+// terrain). Definis ici plutot que dans chaque ecran : le formulaire de scan
+// ET la fiche colis proposent les memes choix, et le rendu des cartes lit les
+// memes valeurs.
+//
+// typeClient a un effet sur le tri de tournee ("pro" = ferme sur la pause de
+// midi, voir tourCost dans routing/tsp.js) ; operation ne change que le
+// vocabulaire affiche et le modele de SMS propose -- une ramasse suit
+// exactement le meme calcul d'itineraire qu'une livraison.
+export const TYPE_CLIENT_OPTIONS = [
+  { value: "particulier", label: "Particulier", icon: "home" },
+  { value: "pro", label: "Pro", icon: "clipboard-list" },
+];
+
+export const OPERATION_OPTIONS = [
+  { value: "livraison", label: "Livraison", icon: "navigation" },
+  { value: "ramasse", label: "Ramasse", icon: "repeat" },
+];
+
+export const AVANT12H_OPTIONS = [
+  { value: "non", label: "Pas d'urgence" },
+  { value: "oui", label: "Avant 12h", icon: "clock" },
+];
+
+export function isRamasse(colis) {
+  return colis?.operation === "ramasse";
+}
+
+// Vocabulaire : une ramasse n'est pas "livree" mais "ramassee". Le statut
+// stocke reste "livre" dans les deux cas (c'est l'etat "traite avec succes",
+// voir les statuts dans CLAUDE.md) -- seul l'affichage change, pour ne pas
+// dedoubler toute la machine a etats pour une question de mot.
+export function verbeAction(colis) {
+  return isRamasse(colis) ? "Ramassé" : "Livré";
+}
+
+export function verbeActionInfinitif(colis) {
+  return isRamasse(colis) ? "ramasser" : "livrer";
+}

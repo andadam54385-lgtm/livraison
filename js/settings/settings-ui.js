@@ -116,14 +116,23 @@ async function render() {
     <div class="card">
       <div class="card-title">${icon("zap")}Calcul de tournée</div>
       <div class="field">
-        <label>Pénalité "avant 12h" (minutes par position dans l'ordre)</label>
-        <input type="number" min="0" step="5" id="s-penalty" value="${settings.avant12hPenaltyMinutes}">
+        <label>Heure limite des colis "avant 12h"</label>
+        <input type="time" id="s-limite-avant12h" value="${escapeHtml(settings.heureLimiteAvant12h)}">
       </div>
+      <p class="muted" style="margin:-6px 0 12px;">Un colis marqué doit être servi avant cette heure. Tant qu'il y arrive, l'ordre du reste de la tournée reste libre — les autres arrêts peuvent tomber avant ou après.</p>
+      <div class="field">
+        <label>Fermeture de midi des pros</label>
+        <div class="button-row" style="margin-top:0;">
+          <input type="time" id="s-pro-debut" value="${escapeHtml(settings.proFermetureDebut)}">
+          <input type="time" id="s-pro-fin" value="${escapeHtml(settings.proFermetureFin)}">
+        </div>
+      </div>
+      <p class="muted" style="margin:-6px 0 12px;">L'optimiseur évite de placer un client pro sur ce créneau. Mettre les deux heures identiques pour désactiver.</p>
       <div class="field" style="margin-bottom:0;">
         <label>Durée moyenne par arrêt (minutes)</label>
         <input type="number" min="0" step="1" id="s-duree-arret" value="${settings.dureeArretMinutes}">
       </div>
-      <p class="muted" style="margin:6px 0 0;">Utilisée pour estimer l'heure d'arrivée à chaque arrêt (sonnette, remise en main propre...).</p>
+      <p class="muted" style="margin:6px 0 0;">Utilisée pour estimer l'heure d'arrivée à chaque arrêt, et pour vérifier les heures limites ci-dessus.</p>
     </div>
     <div class="card">
       <div class="card-title">Modèles de SMS</div>
@@ -239,7 +248,13 @@ async function render() {
   containerRef.querySelector("#s-save").addEventListener("click", async () => {
     await setSetting("navApp", containerRef.querySelector("#s-nav-app").value);
     await setSetting("autoNavAfterDeliver", containerRef.querySelector("#s-auto-nav").checked);
-    await setSetting("avant12hPenaltyMinutes", parseFloat(containerRef.querySelector("#s-penalty").value));
+    // Un champ <input type="time"> vide renvoie "" : on retombe alors sur la
+    // valeur par defaut plutot que d'enregistrer une heure invalide, que
+    // hhmmToSec traduirait en "contrainte absente" sans rien dire.
+    const heure = (sel, fallback) => containerRef.querySelector(sel).value || fallback;
+    await setSetting("heureLimiteAvant12h", heure("#s-limite-avant12h", DEFAULTS.heureLimiteAvant12h));
+    await setSetting("proFermetureDebut", heure("#s-pro-debut", DEFAULTS.proFermetureDebut));
+    await setSetting("proFermetureFin", heure("#s-pro-fin", DEFAULTS.proFermetureFin));
     await setSetting("dureeArretMinutes", parseFloat(containerRef.querySelector("#s-duree-arret").value));
     // Capture le modele affiche au moment d'enregistrer (input deja tenu a
     // jour pour les autres, celui-ci peut avoir le focus sans avoir declenche

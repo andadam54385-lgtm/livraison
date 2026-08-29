@@ -16,6 +16,8 @@ import { searchOnlinePlaces } from "../geocode/online-search.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { loadingHtml, inlineLoadingHtml } from "../lib/loading.js";
+import { segmentedHtml, bindSegmented, readSegmented } from "../ui/segmented.js";
+import { TYPE_CLIENT_OPTIONS, OPERATION_OPTIONS, AVANT12H_OPTIONS } from "./colis-store.js";
 import { emit } from "../lib/event-bus.js";
 import { uuid } from "../lib/id.js";
 import { icon } from "../ui/icons.js";
@@ -117,6 +119,8 @@ export function startManualEntry(container, { onSaved } = {}) {
     adresseAffichage: null,
     geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
     avant12h: false,
+    typeClient: "particulier",
+    operation: "livraison",
     quantite: 1,
     statut: "a_verifier",
     source: "manuel",
@@ -188,6 +192,8 @@ async function runOcrPipeline(container, file, { onSaved, barcodeTracking } = {}
     adresseAffichage: null,
     geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
     avant12h: false,
+    typeClient: "particulier",
+    operation: "livraison",
     quantite: 1,
     statut: "a_verifier",
     source: "ocr",
@@ -428,11 +434,23 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
       <label>Nom</label>
       <input type="text" id="f-nom" class="field-lg" value="${escapeAttr(colis.nom)}">
     </div>
-    <div class="toggle-row">
-      <label for="f-avant12h">Livrer avant 12h</label>
-      <input type="checkbox" id="f-avant12h" ${colis.avant12h ? "checked" : ""} style="width:26px;height:26px;">
+    <div class="field">
+      <label>Type de client</label>
+      ${segmentedHtml("typeClient", TYPE_CLIENT_OPTIONS, colis.typeClient || "particulier")}
+    </div>
+    <div class="field">
+      <label>Opération</label>
+      ${segmentedHtml("operation", OPERATION_OPTIONS, colis.operation || "livraison")}
+    </div>
+    <div class="field">
+      <label>Heure</label>
+      ${segmentedHtml("avant12h", AVANT12H_OPTIONS, colis.avant12h ? "oui" : "non")}
     </div>
   `;
+
+  bindSegmented(container, "typeClient");
+  bindSegmented(container, "operation");
+  bindSegmented(container, "avant12h");
 
   bindAdresseAutocomplete(container, { initialQuery: initialAdresseQuery });
   bindVilleAutocomplete(container);
@@ -485,7 +503,9 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     // fiable/peu utile a corriger a la main) -- colis.tracking reste tel
     // qu'extrait automatiquement par l'OCR (ou null), utilise seulement pour
     // la detection de doublon (voir isDuplicateTracking).
-    colis.avant12h = container.querySelector("#f-avant12h").checked;
+    colis.typeClient = readSegmented(container, "typeClient") || "particulier";
+    colis.operation = readSegmented(container, "operation") || "livraison";
+    colis.avant12h = readSegmented(container, "avant12h") === "oui";
     const quantiteInput = parseInt(container.querySelector("#f-quantite").value, 10);
     colis.quantite = Number.isFinite(quantiteInput) && quantiteInput > 0 ? quantiteInput : 1;
 

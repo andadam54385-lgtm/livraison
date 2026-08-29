@@ -18,3 +18,28 @@ export function formatDurationShort(seconds) {
   const rem = m % 60;
   return rem === 0 ? `${h} h` : `${h} h ${rem}`;
 }
+
+// Horaires "HH:MM" <-> secondes depuis minuit. Utilise par les contraintes
+// horaires du tri de tournee (voir tourCost dans routing/tsp.js) et par les
+// champs correspondants des Reglages. Une saisie invalide renvoie null plutot
+// que NaN : l'appelant traite alors la contrainte comme absente, jamais comme
+// une contrainte a 0 (= "avant minuit", qui rendrait tout en retard).
+export function hhmmToSec(value) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? "").trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return h * 3600 + min * 60;
+}
+
+export function secToHhmm(seconds) {
+  if (!Number.isFinite(seconds)) return "";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+export function secondsSinceMidnight(date) {
+  return date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+}

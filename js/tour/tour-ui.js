@@ -1,5 +1,5 @@
 import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec } from "../routing/tour-store.js";
-import { getColis, saveColis, listAllColis, formatAdresseAffichage, formatAdresseForNav } from "../scan/colis-store.js";
+import { getColis, saveColis, listAllColis, formatAdresseAffichage, formatAdresseForNav, verbeAction } from "../scan/colis-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
 import { buildSmsOptions } from "./sms-template.js";
@@ -198,6 +198,10 @@ function renderPrepCard(c) {
   // vide, elle ajoutait quand meme sa marge a CHAQUE carte de la liste.
   const badges = [
     c.avant12h ? `<span class="badge badge-urgent">Avant 12h</span>` : "",
+    // Purement informatifs (choix explicite) : savoir en preparant que c'est
+    // un pro ou une ramasse change ce a quoi on s'attend en arrivant.
+    c.operation === "ramasse" ? `<span class="badge badge-info">Ramasse</span>` : "",
+    c.typeClient === "pro" ? `<span class="badge badge-info">Pro</span>` : "",
     c.quantite > 1 ? `<span class="badge badge-pending">${c.quantite} colis</span>` : "",
   ].join("");
   return `
@@ -514,7 +518,7 @@ function renderHeroCard(stop, colis, { navApp, eta, smsTemplates }) {
           ${smsOptions.length > 0 ? `<button type="button" class="btn-link" style="flex:0 0 48px;" id="hero-sms-toggle">${icon("message-circle", { spaced: false })}</button>` : ""}
         </div>
         ${renderSmsOptionsHtml(smsOptions)}
-        <button type="button" class="ok" data-deliver-ordre="${stop.ordre}" data-hero-deliver>${icon("check")}Livré</button>
+        <button type="button" class="ok" data-deliver-ordre="${stop.ordre}" data-hero-deliver>${icon("check")}${verbeAction(colis)}</button>
         <button type="button" class="hero-fail-btn" data-fail-ordre="${stop.ordre}">Marquer en échec</button>
       </div>
     </div>

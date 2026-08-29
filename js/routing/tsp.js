@@ -3,21 +3,54 @@
 // cout complet O(N) -> largement sous la milliseconde par tentative, donc on
 // peut se permettre plusieurs passes completes sans optimisation delta.
 //
-// La contrainte "avant 12h" est une penalite souple ajoutee au cout total
-// (position dans l'ordre x poids), jamais une contrainte dure : le calcul
-// n'echoue jamais, il pousse juste les colis marques vers le debut de
-// tournee quand c'est rentable.
+// Contraintes horaires : souples, jamais dures -- si tout ne peut pas tenir
+// dans les horaires, le calcul n'echoue pas, il minimise le retard total.
+//
+// L'ancienne version ajoutait "position dans l'ordre x poids" au cout pour
+// chaque colis "avant 12h". L'algorithme ne connaissait donc que le RANG dans
+// la liste, jamais l'heure d'arrivee : avec le reglage par defaut (20 min), un
+// colis en 30e position coutait 10 heures fictives, qu'aucun gain de trajet
+// reel ne pouvait compenser. Un "avant 12h" finissait toujours dans les tout
+// premiers, meme quand la tournee laissait largement le temps de faire 30
+// points avant midi -- retour terrain explicite, c'etait le comportement le
+// plus penible de l'optimiseur.
+//
+// Le cout est maintenant : temps de trajet + retard REEL sur les contraintes.
+// Tant que l'ordre candidat respecte les horaires, la penalite est nulle et
+// l'optimiseur est totalement libre de minimiser le trajet. Le modele d'heure
+// d'arrivee est le meme que celui des ETA affichees (voir computeEtas dans
+// tour-ui.js) : depart + trajets cumules + duree d'arret par point deja
+// visite, pour que l'app n'optimise jamais sur un modele different de celui
+// qu'elle affiche.
+export function tourCost(order, matrix, startIdx, timing = {}) {
+  const { departureSec = 0, dwellSec = 0, deadlines = {}, closedWindows = {}, lateWeight = 10 } = timing;
 
-export function tourCost(order, matrix, startIdx, penaltyWeight, avant12hFlags) {
-  let cost = 0;
+  let travel = 0;
+  let penalty = 0;
+  let clock = departureSec;
   let current = startIdx;
+
   for (let pos = 0; pos < order.length; pos++) {
     const idx = order[pos];
-    cost += matrix[current][idx];
-    if (avant12hFlags[idx]) cost += pos * penaltyWeight;
+    const leg = matrix[current][idx];
+    travel += leg;
+    clock += leg;
+
+    const limit = deadlines[idx];
+    if (limit != null && clock > limit) penalty += clock - limit;
+
+    // Arriver pendant une fermeture (pause de midi d'un pro) reviendrait a
+    // attendre la reouverture : on compte cette attente comme penalite sans
+    // decaler l'horloge. Contrainte souple -- le but est que l'optimiseur
+    // evite le creneau, pas de simuler une attente sur place.
+    const win = closedWindows[idx];
+    if (win && clock >= win[0] && clock < win[1]) penalty += win[1] - clock;
+
+    clock += dwellSec;
     current = idx;
   }
-  return cost;
+
+  return travel + penalty * lateWeight;
 }
 
 // fixedEndIdx (optionnel) : force cet index a rester le tout dernier arret
@@ -70,10 +103,10 @@ function reverseInPlace(arr, i, j) {
 // permutations (ex: 1 pour garder le retour au depot fixe en derniere
 // position, voir fixedEndIdx dans optimizeTourOrder/nearestNeighborOrder).
 export function twoOpt(initialOrder, matrix, startIdx, options = {}) {
-  const { avant12hFlags = {}, penaltyWeight = 0, timeBudgetMs = 4000, lockTailCount = 0 } = options;
+  const { timing = {}, timeBudgetMs = 4000, lockTailCount = 0 } = options;
   let order = initialOrder.slice();
   const limit = order.length - lockTailCount; // [0, limit) est permutable, la queue verrouillee ne bouge jamais
-  let bestCost = tourCost(order, matrix, startIdx, penaltyWeight, avant12hFlags);
+  let bestCost = tourCost(order, matrix, startIdx, timing);
   const deadline = (typeof performance !== "undefined" ? performance.now() : Date.now()) + timeBudgetMs;
   const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
@@ -84,7 +117,7 @@ export function twoOpt(initialOrder, matrix, startIdx, options = {}) {
       if (now() > deadline) break;
       for (let j = i + 1; j < limit; j++) {
         reverseInPlace(order, i, j);
-        const cost = tourCost(order, matrix, startIdx, penaltyWeight, avant12hFlags);
+        const cost = tourCost(order, matrix, startIdx, timing);
         if (cost < bestCost - 1e-9) {
           bestCost = cost;
           improved = true;

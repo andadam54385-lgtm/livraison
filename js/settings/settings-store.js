@@ -11,7 +11,15 @@ export const DEFAULTS = {
   depotReturn: false, // revenir au depot en fin de tournee (arrivee), en plus du depart
   navApp: "apple", // "apple" | "waze" | "google"
   ocrLangs: "fra",
-  avant12hPenaltyMinutes: 20,
+  // Contraintes horaires du tri de tournee (voir tourCost dans routing/tsp.js).
+  // Remplace l'ancien avant12hPenaltyMinutes, qui etait une penalite de
+  // position et non une heure : un colis marque finissait toujours en tete de
+  // tournee, meme quand il restait des heures avant l'echeance.
+  heureLimiteAvant12h: "12:00",
+  // Un client "pro" est generalement ferme sur la pause de midi : l'optimiseur
+  // evite d'y passer pendant ce creneau. Mettre debut == fin pour desactiver.
+  proFermetureDebut: "12:00",
+  proFermetureFin: "14:00",
   dureeArretMinutes: 3, // temps moyen passe a chaque arret (sonnette, remise en main propre...), utilise pour l'heure d'arrivee estimee
   autoNavAfterDeliver: false, // ouvre automatiquement le GPS vers l'arret suivant juste apres "Livre" (chantier B, enchainement sans tap)
   storagePersisted: false,
@@ -25,6 +33,10 @@ export const DEFAULTS = {
     {
       label: "Absent au passage",
       body: "Bonjour {nom}, je suis passé livrer votre colis UPS à {adresse} mais vous étiez absent. Merci de me rappeler pour un nouveau passage.",
+    },
+    {
+      label: "Ramassage à venir",
+      body: "Bonjour {nom}, je passe récupérer votre colis UPS dans environ {minutes_estimees} min à : {adresse}. Merci de le préparer.",
     },
   ],
   // Purge des tournees archivees plus vieilles que ca (chantier F) -- garde

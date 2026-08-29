@@ -1,4 +1,15 @@
-import { getColis, saveColis, deleteColis, formatAdresseAffichage, formatAdresseForNav } from "./colis-store.js";
+import {
+  getColis,
+  saveColis,
+  deleteColis,
+  formatAdresseAffichage,
+  formatAdresseForNav,
+  TYPE_CLIENT_OPTIONS,
+  OPERATION_OPTIONS,
+  AVANT12H_OPTIONS,
+  verbeAction,
+} from "./colis-store.js";
+import { segmentedHtml, bindSegmented, readSegmented } from "../ui/segmented.js";
 import { addFavori, updateFavori, findNearbyFavori } from "../favoris/favoris-store.js";
 import { getActiveTour, markStopDelivered, markStopFailed } from "../routing/tour-store.js";
 import { getSetting } from "../settings/settings-store.js";
@@ -93,9 +104,17 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       }
       ${colis.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:6px;">${colis.quantite} colis à cette adresse</span>` : ""}
     </div>
-    <div class="toggle-row">
-      <label for="detail-avant12h">${icon("clock")}Livrer avant 12h</label>
-      <input type="checkbox" id="detail-avant12h" ${colis.avant12h ? "checked" : ""} style="width:26px;height:26px;">
+    <div class="field">
+      <label>Type de client</label>
+      ${segmentedHtml("typeClient", TYPE_CLIENT_OPTIONS, colis.typeClient || "particulier")}
+    </div>
+    <div class="field">
+      <label>Opération</label>
+      ${segmentedHtml("operation", OPERATION_OPTIONS, colis.operation || "livraison")}
+    </div>
+    <div class="field">
+      <label>Heure</label>
+      ${segmentedHtml("avant12h", AVANT12H_OPTIONS, colis.avant12h ? "oui" : "non")}
     </div>
     ${
       canFavori
@@ -114,7 +133,7 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
         ${navUrl ? `<a class="btn-link primary btn-lg" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
       </div>
       <div class="button-row">
-        <button type="button" class="ok btn-lg" id="detail-deliver">${icon("check")}Livré</button>
+        <button type="button" class="ok btn-lg" id="detail-deliver">${icon("check")}${verbeAction(colis)}</button>
       </div>
       <button type="button" class="hero-fail-btn" id="detail-fail">Marquer en échec</button>
     `
@@ -130,11 +149,21 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
 
   container.querySelector("#detail-back").addEventListener("click", () => onBack?.());
 
-  container.querySelector("#detail-avant12h").addEventListener("change", async (e) => {
-    colis.avant12h = e.target.checked;
-    await saveColis(colis);
-    onChange?.();
-  });
+  // Contrairement au formulaire de scan (relu d'un bloc a la validation), la
+  // fiche colis n'a pas de bouton "Enregistrer" : chaque choix est applique
+  // immediatement, comme l'ancienne case a cocher qu'il remplace.
+  for (const champ of ["typeClient", "operation", "avant12h"]) {
+    bindSegmented(container, champ);
+    for (const btn of container.querySelectorAll(`[data-segmented="${champ}"]`)) {
+      btn.addEventListener("click", async () => {
+        colis.typeClient = readSegmented(container, "typeClient") || "particulier";
+        colis.operation = readSegmented(container, "operation") || "livraison";
+        colis.avant12h = readSegmented(container, "avant12h") === "oui";
+        await saveColis(colis);
+        onChange?.();
+      });
+    }
+  }
 
   container.querySelector("#detail-sms-toggle")?.addEventListener("click", () => {
     container.querySelector("#detail-sms-options")?.toggleAttribute("hidden");
