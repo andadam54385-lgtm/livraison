@@ -124,6 +124,15 @@ export function startBarcodeViewfinder(container) {
         }
         stream = s;
         video.srcObject = s;
+        // Retour terrain : "ça devient noir" avant meme de prendre la photo
+        // -- l'attribut autoplay seul ne demarre pas toujours fiablement la
+        // lecture dans Safari iOS en PWA standalone (getUserMedia reussit,
+        // le flux est bien attache, mais rien ne s'affiche). Un appel EXPLICITE
+        // a .play() force la lecture ; .catch() volontairement ignore (si le
+        // navigateur la bloque quand meme, ca ne doit pas faire planter le
+        // scan -- au pire l'ecran reste noir comme avant, ce correctif ne
+        // peut qu'ameliorer la situation, jamais la degrader).
+        video.play().catch(() => {});
         tick();
       })
       .catch((err) => {
