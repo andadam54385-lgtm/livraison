@@ -506,7 +506,7 @@ function renderHeroCard(stop, colis, { navApp, eta, smsTemplates }) {
       <div class="hero-actions">
         <div class="button-row">
           ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
-          ${colis.tel ? `<a class="btn-link" style="flex:0 0 48px;" href="tel:${colis.tel}">${icon("phone", { spaced: false })}</a>` : ""}
+          ${colis.tel ? `<a class="btn-link" style="flex:0 0 48px;" href="tel:${escapeAttr(colis.tel)}">${icon("phone", { spaced: false })}</a>` : ""}
           ${smsOptions.length > 0 ? `<button type="button" class="btn-link" style="flex:0 0 48px;" id="hero-sms-toggle">${icon("message-circle", { spaced: false })}</button>` : ""}
         </div>
         ${renderSmsOptionsHtml(smsOptions)}
@@ -557,7 +557,7 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
       <div class="muted stop-card-addr" data-open-detail data-colis-id="${escapeAttr(colis.id)}">${escapeHtml(adresse)}${colis.quantite > 1 ? ` · ${colis.quantite} colis` : ""}</div>
       ${failed && stop.raisonEchec ? `<div class="muted" style="margin-top:2px;">Motif : ${escapeHtml(stop.raisonEchec)}</div>` : ""}
       <div class="stop-card-actions">
-        ${colis.tel ? `<a class="btn-link" href="tel:${colis.tel}" aria-label="Appeler">${icon("phone", { spaced: false })}</a>` : ""}
+        ${colis.tel ? `<a class="btn-link" href="tel:${escapeAttr(colis.tel)}" aria-label="Appeler">${icon("phone", { spaced: false })}</a>` : ""}
         ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener" aria-label="Naviguer">${icon("navigation", { spaced: false })}</a>` : ""}
         <button type="button" data-photo-colis="${escapeAttr(colis.id)}" aria-label="Photo">${icon(hasPhoto ? "check" : "camera", { spaced: false })}</button>
         ${

@@ -159,14 +159,14 @@ function formatColisDetail(c, { navApp, ordre } = {}) {
   const navUrl = c.geocode?.lat != null ? buildNavUrl(navApp, { lat: c.geocode.lat, lon: c.geocode.lon, label: c.nom, adresse: formatAdresseForNav(c) }) : null;
   return `
     <div class="card-row">
-      <div class="card-title">${ordre != null ? `#${ordre} ` : ""}${c.nom || "(nom inconnu)"}</div>
+      <div class="card-title">${ordre != null ? `#${ordre} ` : ""}${escapeHtml(c.nom || "(nom inconnu)")}</div>
       ${badgeForStatut(c.statut)}
       ${c.avant12h ? '<span class="badge badge-urgent">Avant 12h</span>' : ""}
     </div>
-    <div class="muted">${adresse}</div>
+    <div class="muted">${escapeHtml(adresse)}</div>
     ${c.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:4px;">${c.quantite} colis</span>` : ""}
     <div class="button-row">
-      ${c.tel ? `<a class="btn-link" href="tel:${c.tel}">${icon("phone")}Appeler</a>` : ""}
+      ${c.tel ? `<a class="btn-link" href="tel:${escapeAttr(c.tel)}">${icon("phone")}Appeler</a>` : ""}
       ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
     </div>
     ${

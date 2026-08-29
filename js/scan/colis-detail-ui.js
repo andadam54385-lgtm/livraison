@@ -17,6 +17,9 @@ import { icon } from "../ui/icons.js";
 function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+function escapeAttr(s) {
+  return String(s ?? "").replace(/"/g, "&quot;");
+}
 
 function badgeForStatut(statut) {
   if (statut === "pret") return `<span class="badge badge-ok">Prêt</span>`;
@@ -79,7 +82,7 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
     <div class="card">
       <div class="card-title" style="font-size:1.2rem;">${escapeHtml(titre)}</div>
       ${colis.nom ? `<div class="muted">${escapeHtml(adresse)}</div>` : ""}
-      ${colis.tel ? `<a class="btn-link" style="margin-top:10px;" href="tel:${escapeHtml(colis.tel)}">${icon("phone")}${escapeHtml(colis.tel)}</a>` : ""}
+      ${colis.tel ? `<a class="btn-link" style="margin-top:10px;" href="tel:${escapeAttr(colis.tel)}">${icon("phone")}${escapeHtml(colis.tel)}</a>` : ""}
       ${smsOptions.length > 0 ? `<button type="button" class="btn-link" style="margin-top:8px;" id="detail-sms-toggle">${icon("message-circle")}SMS</button>` : ""}
       ${
         smsOptions.length > 0
