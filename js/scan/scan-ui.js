@@ -299,14 +299,32 @@ export function splitAdresseInput(rawInput, { knownCityPrefixes = null, allowPar
 // directement par CP EXACT (index by_cp, deja existant) -- une commune
 // compte au plus quelques centaines/milliers d'adresses, jamais tronque,
 // puis on filtre localement par prefixe de rue (operation en memoire,
-// triviale sur ce volume). La recherche par nom de rue (avec son plafond)
-// ne reste utilisee que tant qu'aucun CP complet n'est connu.
+// triviale sur ce volume).
+//
+// Meme probleme, retour terrain complementaire : "si je met 55 il devrait
+// deja m'enlever les villes dans le 54" -- avec un CP PARTIEL (1 a 4
+// chiffres) ou une ville deja identifiee, la recherche restait sur le
+// plafond de 60 lignes brutes par nom de rue, donc le filtrage par
+// departement/ville ensuite (voir showMatches) ne pouvait pas plus
+// fonctionner que pour le CP complet -- meme cause, meme effet. Des qu'un
+// indice de narrowing (CP meme partiel, ou ville) existe, on releve donc
+// ce plafond a 3000 -- couvre la quasi-totalite des noms de rue de la base
+// (au-dela de "Rue de l'Eglise", le nom le plus courant apres "Grande Rue",
+// qui culmine a ~2400 occurrences sur 54+55), le filtrage par CP/ville se
+// faisant ensuite normalement sur l'ensemble recupere. Volontairement PAS
+// illimite : "Grande Rue" a elle seule depasse 13 000 occurrences, et un
+// curseur IndexedDB qui en lirait autant a CHAQUE frappe degraderait
+// nettement la reactivite -- ce cas extreme reste, en pratique, un repli
+// imparfait (liste non filtree) le temps que le CP se precise encore. Le
+// plafond de 60 ne reste utilise que pour une recherche encore totalement
+// non qualifiee (aucun CP ni ville tape).
 async function fetchAdresseCandidates(parsed, streetPrefix) {
   if (parsed.cpTyped && parsed.cpTyped.length === 5) {
     const cpCandidates = await queryByCp(parsed.cpTyped);
     return cpCandidates.filter((c) => (c.rn || "").startsWith(streetPrefix));
   }
-  return queryByStreetPrefix(streetPrefix, 60);
+  const limit = parsed.cpTyped || parsed.villeTyped ? 3000 : 60;
+  return queryByStreetPrefix(streetPrefix, limit);
 }
 
 // Mots-type de voie francais courants, souvent omis a l'oral/a la frappe
