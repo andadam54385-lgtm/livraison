@@ -91,10 +91,49 @@ function onHashChange() {
   return navigate(name);
 }
 
+// Bug reel observe sur l'appareil (build 88) : l'ecran affichait le nouveau
+// numero de build tout en gardant l'ANCIENNE interface. sw.js fait
+// skipWaiting() + clients.claim(), donc le nouveau worker prend la main sur
+// une page dont les modules ES sont deja charges en memoire -- les imports
+// dynamiques suivants (l'ecran Reglages, et donc version.js/APP_BUILD)
+// passent par le nouveau cache pendant que le reste de la page reste sur
+// l'ancien code. Etat mi-ancien mi-nouveau, et un numero de build qui ment
+// precisement quand on l'interroge pour diagnostiquer une mise a jour.
+//
+// Correctif : quand un nouveau worker prend le controle, on recharge la page
+// pour repartir d'un code homogene.
+let bootDone = false;
+let reloadPending = false;
+let reloadDone = false;
+
+function applyServiceWorkerUpdate() {
+  if (reloadDone) return;
+  reloadDone = true;
+  location.reload();
+}
+
+function setupServiceWorkerReload() {
+  // Aucun controleur au chargement = toute premiere installation : la page
+  // tourne deja sur le code le plus recent, recharger n'apporterait rien et
+  // couperait l'import initial (plusieurs dizaines de Mo) en plein milieu.
+  if (!navigator.serviceWorker.controller) return;
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    // Jamais pendant l'import : il ecrit en IndexedDB et retelechargerait
+    // tout depuis zero. On differe jusqu'a la fin du demarrage.
+    if (!bootDone) {
+      reloadPending = true;
+      return;
+    }
+    applyServiceWorkerUpdate();
+  });
+}
+
 async function boot() {
   installGlobalErrorCapture();
 
   if ("serviceWorker" in navigator) {
+    setupServiceWorkerReload();
     navigator.serviceWorker.register("./sw.js").catch((err) => {
       console.warn("Service worker non enregistré:", err);
     });
@@ -120,6 +159,8 @@ async function boot() {
   await runImportIfNeeded(renderImportProgress);
 
   importView.hidden = true;
+  bootDone = true;
+  if (reloadPending) applyServiceWorkerUpdate();
 
   // Menage sur la retention de l'historique de tournees (chantier F) : pas
   // sur le chemin critique du demarrage, une erreur ici ne doit jamais
