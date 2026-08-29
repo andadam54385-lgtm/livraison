@@ -5,10 +5,10 @@ import { recognizeCanvas } from "./ocr.js";
 import { parseUpsLabel } from "./parse-ups-label.js";
 import { saveColis, isDuplicateTracking } from "./colis-store.js";
 import { recordCorrectionIfNeeded } from "./ocr-corrections-store.js";
-import { matchAddress, looseCommune } from "../geocode/match-address.js";
+import { matchAddress } from "../geocode/match-address.js";
 import { renderCandidatePicker, renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
-import { listDistinctCities, queryByStreetPrefix, queryByCp } from "../geocode/ban-index.js";
-import { normalizeCity, normalizeStreet } from "../geocode/normalize-address.js";
+import { listDistinctCities, searchAdresses } from "../geocode/ban-index.js";
+import { normalizeCity } from "../geocode/normalize-address.js";
 import { getSetting } from "../settings/settings-store.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
 import { googleMapsSearchUrl } from "../tour/deep-links.js";
@@ -190,83 +190,6 @@ async function runOcrPipeline(container, file, { onSaved, barcodeTracking } = {}
   renderReviewForm(container, colis, { isNew: true, duplicate, onSaved });
 }
 
-// Isole numero / rue / CP-deja-tape / debut-de-ville-deja-tape d'une saisie
-// EN CONTINU sur une seule ligne ("4 rue des jardins", puis en continuant a
-// taper "4 rue des jardins 54000" ou "4 rue des jardins nancy"). Bug reel
-// corrige ici, retour terrain : "je met 4 rue des jardins il propose des
-// choses[,] quand je met le debut du village ou le code postal[,] plus de
-// proposition" -- avant ce correctif, TOUT ce qui suivait le numero
-// (y compris le CP/la ville qu'on continue de taper a la suite) partait
-// dans la recherche de nom de RUE, qui ne matchait plus rien des qu'on
-// depassait la rue elle-meme (aucune vraie rue ne s'appelle "rue des
-// jardins nancy"). Coupe au premier signal clair de transition rue ->
-// ville/CP : un groupe de 5 chiffres consecutifs (code postal), ou une
-// virgule -- signaux non ambigus, toujours appliques.
-//
-// allowPartialCp (repli LEGER, pas de requete BAN supplementaire) : le CP
-// se tape chiffre par chiffre -- avant que les 5 chiffres complets ne soient
-// atteints, "4 rue des jardins 88" n'etait reconnu par AUCUN signal (ni CP
-// complet, ni virgule), donc traite comme une rue "rue des jardins 88" qui
-// ne matche jamais rien -- les suggestions disparaissaient pendant toute la
-// frappe du CP, pas seulement une fois les 5 chiffres tapes. Coupe un groupe
-// de 1 a 4 chiffres FINAL comme CP en cours de frappe.
-//
-// knownCityPrefixes (optionnel, noms de commune deja normalises via
-// looseCommune+normalizeCity) : repli pour une ville collee SANS aucune
-// ponctuation ni CP ("rue des jardins nancy"), en testant si les 1 a 3
-// derniers mots forment le debut d'une commune CONNUE.
-//
-// Les deux replis sont volontairement PAS appliques par defaut (voir
-// bindAdresseAutocomplete) : une vraie rue peut se terminer par un chiffre
-// ("Route Nationale 4") ou un mot qui ressemble a une commune ("Rue de
-// Nancy" existe ailleurs qu'a Nancy) -- ne sont tentes qu'en repli, apres
-// qu'une recherche sans coupure n'a rien trouve, jamais en premier essai.
-function splitVilleSuffix(street, knownCityPrefixes) {
-  const words = street.split(/\s+/).filter(Boolean);
-  for (let take = Math.min(3, words.length - 1); take >= 1; take--) {
-    const tail = words.slice(words.length - take).join(" ");
-    const tailNorm = looseCommune(normalizeCity(tail));
-    if (tailNorm.length >= 2 && knownCityPrefixes.some((p) => p.startsWith(tailNorm))) {
-      return { street: words.slice(0, words.length - take).join(" "), villeTyped: tail };
-    }
-  }
-  return null;
-}
-
-export function splitAdresseInput(rawInput, { knownCityPrefixes = null, allowPartialCp = false } = {}) {
-  const { numero, rue: afterNumero } = splitNumeroRue(rawInput);
-  let street = afterNumero || rawInput || "";
-  let cpTyped = "";
-  let villeTyped = "";
-
-  const cpMatch = street.match(/^(.*?)[,]?\s*(\d{5})\s*(.*)$/);
-  if (cpMatch) {
-    street = cpMatch[1].trim();
-    cpTyped = cpMatch[2];
-    villeTyped = cpMatch[3].trim();
-  } else {
-    const commaIdx = street.indexOf(",");
-    if (commaIdx !== -1) {
-      villeTyped = street.slice(commaIdx + 1).trim();
-      street = street.slice(0, commaIdx).trim();
-    } else {
-      const partialCpMatch = allowPartialCp && street.match(/^(.*\S)\s+(\d{1,4})$/);
-      if (partialCpMatch) {
-        street = partialCpMatch[1].trim();
-        cpTyped = partialCpMatch[2];
-      } else if (knownCityPrefixes) {
-        const villeSplit = splitVilleSuffix(street, knownCityPrefixes);
-        if (villeSplit) {
-          street = villeSplit.street;
-          villeTyped = villeSplit.villeTyped;
-        }
-      }
-    }
-  }
-
-  return { numero, street, cpTyped, villeTyped };
-}
-
 // Suggestions d'ADRESSE COMPLETE au fil de la frappe (numero+rue(+ville/CP)
 // en une ligne, adresses connues de la BAN locale) -- retour terrain : "une
 // ligne pour l'adresse ou tu me fais des propositions en fonction de ce qui
@@ -276,93 +199,13 @@ export function splitAdresseInput(rawInput, { knownCityPrefixes = null, allowPar
 // remplit les 4 champs details d'un coup, mais ils restent modifiables
 // ensuite) : le geocodage final revalide toujours via matchAddress
 // independamment de ce qui est tape ici.
-// Recupere les adresses candidates pour un `parsed` (voir splitAdresseInput)
-// donne. Bug reel corrige ici, retour terrain concret : "4 rue des jardins
-// 54385" (adresse des parents de l'utilisateur, a Rosieres-en-Haye) ne
-// proposait JAMAIS la bonne commune, meme une fois les 5 chiffres du CP
-// entierement tapes -- alors que le filtre par CP existait deja et semblait
-// correct sur le papier.
 //
-// Root cause : queryByStreetPrefix, pour rester rapide sur ~366k adresses,
-// plafonne a `limit` LIGNES BRUTES lues dans l'index par-nom-de-rue AVANT
-// tout filtrage par CP -- mais "Rue des Jardins" a elle seule compte 805
-// occurrences dans la seule base 54+55 ("Grande Rue", le nom le plus
-// courant, en compte plus de 13 000). Rosieres-en-Haye n'etait tout
-// simplement JAMAIS parmi les 60 premieres lignes brutes remontees par le
-// curseur (ordre d'insertion de la base, sans rapport avec le CP) -- le
-// filtre par CP appliquee ENSUITE, cote client, ne pouvait donc rien
-// trouver, quel que soit le CP tape, meme complet. Repli sur "montrer les
-// resultats non filtres" (voir plus bas) : d'ou une liste figee, toujours
-// la meme, qui ne correspondait jamais a la ville demandee.
-//
-// Fix : des qu'un CP COMPLET (5 chiffres) est connu, on interroge
-// directement par CP EXACT (index by_cp, deja existant) -- une commune
-// compte au plus quelques centaines/milliers d'adresses, jamais tronque,
-// puis on filtre localement par prefixe de rue (operation en memoire,
-// triviale sur ce volume).
-//
-// Meme probleme, retour terrain complementaire : "si je met 55 il devrait
-// deja m'enlever les villes dans le 54" -- avec un CP PARTIEL (1 a 4
-// chiffres) ou une ville deja identifiee, la recherche restait sur le
-// plafond de 60 lignes brutes par nom de rue, donc le filtrage par
-// departement/ville ensuite (voir showMatches) ne pouvait pas plus
-// fonctionner que pour le CP complet -- meme cause, meme effet. Des qu'un
-// indice de narrowing (CP meme partiel, ou ville) existe, on releve donc
-// ce plafond a 3000 -- couvre la quasi-totalite des noms de rue de la base
-// (au-dela de "Rue de l'Eglise", le nom le plus courant apres "Grande Rue",
-// qui culmine a ~2400 occurrences sur 54+55), le filtrage par CP/ville se
-// faisant ensuite normalement sur l'ensemble recupere. Volontairement PAS
-// illimite : "Grande Rue" a elle seule depasse 13 000 occurrences, et un
-// curseur IndexedDB qui en lirait autant a CHAQUE frappe degraderait
-// nettement la reactivite -- ce cas extreme reste, en pratique, un repli
-// imparfait (liste non filtree) le temps que le CP se precise encore. Le
-// plafond de 60 ne reste utilise que pour une recherche encore totalement
-// non qualifiee (aucun CP ni ville tape).
-async function fetchAdresseCandidates(parsed, streetPrefix) {
-  if (parsed.cpTyped && parsed.cpTyped.length === 5) {
-    const cpCandidates = await queryByCp(parsed.cpTyped);
-    return cpCandidates.filter((c) => (c.rn || "").startsWith(streetPrefix));
-  }
-  const limit = parsed.cpTyped || parsed.villeTyped ? 3000 : 60;
-  return queryByStreetPrefix(streetPrefix, limit);
-}
-
-// Mots-type de voie francais courants, souvent omis a l'oral/a la frappe
-// rapide ("12 nationale" pour "12 Route Nationale", "l'eglise" pour "Rue de
-// l'Eglise"...). Bug reel corrige ici, retour terrain : "12 nationale
-// doncourt-aux-templiers" (une vraie adresse) ne proposait rien du tout,
-// alors que "Route Nationale" existe bien dans la base a cette commune --
-// la recherche par PREFIXE (voir by_rn) ne peut matcher que depuis le DEBUT
-// du nom normalise ("route nationale"), donc omettre le premier mot casse
-// tout match, meme si le reste est identique.
-const STREET_TYPE_WORDS = [
-  "rue", "route", "chemin", "impasse", "avenue", "allee", "place", "boulevard",
-  "quai", "square", "faubourg", "cours", "sentier", "montee", "cite", "clos",
-  "hameau", "venelle", "traverse", "ruelle", "passage", "voie",
-];
-
-// Retente en anteposant chacun des mots-type ci-dessus au prefixe de rue
-// deja calcule -- reutilise fetchAdresseCandidates (CP exact si connu,
-// sinon prefixe de rue) pour rester coherent avec la recherche normale.
-// N'est tente QUE si la recherche telle quelle (sans mot-type ajoute) n'a
-// rien donne, et jamais si le 1er mot tape est deja lui-meme un mot-type
-// (rien a ajouter dans ce cas).
-async function fetchWithStreetTypeWordFallback(parsed, streetPrefix) {
-  const firstWord = streetPrefix.split(" ")[0];
-  if (STREET_TYPE_WORDS.includes(firstWord)) return [];
-  for (const typeWord of STREET_TYPE_WORDS) {
-    const candidates = await fetchAdresseCandidates(parsed, `${typeWord} ${streetPrefix}`);
-    if (candidates.length > 0) return candidates;
-  }
-  return [];
-}
-
-async function fetchAdresseCandidatesWithFallback(parsed, streetPrefix) {
-  const candidates = await fetchAdresseCandidates(parsed, streetPrefix);
-  if (candidates.length > 0) return candidates;
-  return fetchWithStreetTypeWordFallback(parsed, streetPrefix);
-}
-
+// La recherche elle-meme (tolerante a l'ordre des mots, au CP partiel, aux
+// mots-type de voie omis...) vit dans searchAdresses (ban-index.js) --
+// voir son commentaire pour l'historique des 3 correctifs positionnels
+// remplaces par ce mecanisme unique, suite au retour terrain "rien ne
+// marche fais un truc plus simple qui marche mieux un peu comme fonctionne
+// une recherche plan ou google map".
 function bindAdresseAutocomplete(container) {
   const input = container.querySelector("#f-adresse-complete");
   const list = container.querySelector("#f-adresse-complete-suggestions");
@@ -377,79 +220,11 @@ function bindAdresseAutocomplete(container) {
   }
 
   async function showMatches(rawInput) {
-    // numero ne sert qu'a TRIER les resultats ensuite (jamais a les
-    // exclure : une entree sans numero tape encore reste utile a montrer).
-    // cpTyped/villeTyped, si presents, FILTRENT/priorisent par commune --
-    // voir splitAdresseInput ci-dessus pour le detail du bug corrige.
-    let parsed = splitAdresseInput(rawInput);
-    let streetPrefix = normalizeStreet(parsed.street);
-    if (streetPrefix.length < 3) {
+    const matches = await searchAdresses(rawInput, 6);
+    if (matches.length === 0) {
       hide();
       return;
     }
-    let candidates = await fetchAdresseCandidatesWithFallback(parsed, streetPrefix);
-
-    // Repli EN DEUXIEME ESSAI seulement (voir splitAdresseInput) : la
-    // recherche "rue seule" n'a rien trouve et aucune coupure fiable
-    // (virgule/CP complet) n'avait ete detectee.
-    if (candidates.length === 0 && !parsed.cpTyped && !parsed.villeTyped) {
-      // 2a (leger, pas de requete supplementaire) : CP en cours de frappe,
-      // pas encore les 5 chiffres complets.
-      const retryPartial = splitAdresseInput(rawInput, { allowPartialCp: true });
-      if (retryPartial.cpTyped) {
-        const retryPrefix = normalizeStreet(retryPartial.street);
-        if (retryPrefix.length >= 3) {
-          const retryCandidates = await fetchAdresseCandidatesWithFallback(retryPartial, retryPrefix);
-          if (retryCandidates.length > 0) {
-            parsed = retryPartial;
-            streetPrefix = retryPrefix;
-            candidates = retryCandidates;
-          }
-        }
-      }
-    }
-    // 2b : toujours rien -- essaie de couper un debut de ville colle a la
-    // fin, sans ponctuation (necessite la liste des communes connues).
-    if (candidates.length === 0 && !parsed.cpTyped && !parsed.villeTyped) {
-      const cities = await listDistinctCities();
-      const knownCityPrefixes = cities.map((c) => looseCommune(c.cn));
-      const retryVille = splitAdresseInput(rawInput, { knownCityPrefixes });
-      if (retryVille.villeTyped) {
-        const retryPrefix = normalizeStreet(retryVille.street);
-        if (retryPrefix.length >= 3) {
-          const retryCandidates = await fetchAdresseCandidatesWithFallback(retryVille, retryPrefix);
-          if (retryCandidates.length > 0) {
-            parsed = retryVille;
-            streetPrefix = retryPrefix;
-            candidates = retryCandidates;
-          }
-        }
-      }
-    }
-
-    if (candidates.length === 0) {
-      hide();
-      return;
-    }
-    const { numero, cpTyped, villeTyped } = parsed;
-    let filtered = candidates;
-    if (cpTyped) {
-      const byCp = candidates.filter((c) => String(c.cp || "").startsWith(cpTyped));
-      if (byCp.length > 0) filtered = byCp; // repli sinon (CP tape ne correspond a rien connu) : montrer quand meme les rues trouvees
-    } else if (villeTyped) {
-      const villePrefix = looseCommune(normalizeCity(villeTyped));
-      const byVille = candidates.filter((c) => looseCommune(normalizeCity(c.c || "")).startsWith(villePrefix));
-      if (byVille.length > 0) filtered = byVille;
-    }
-    const numeroDigits = numero.replace(/\D/g, "");
-    const sorted = numeroDigits
-      ? [...filtered].sort((a, b) => {
-          const aMatch = String(a.n || "") === numeroDigits ? 0 : 1;
-          const bMatch = String(b.n || "") === numeroDigits ? 0 : 1;
-          return aMatch - bMatch;
-        })
-      : filtered;
-    const matches = sorted.slice(0, 6);
     list.innerHTML = matches
       .map((entry, i) => `<button type="button" class="candidate-item" data-idx="${i}">${escapeHtml(formatEntry(entry))}</button>`)
       .join("");

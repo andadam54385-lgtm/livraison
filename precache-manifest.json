@@ -1,6 +1,6 @@
 {
-  "version": "b713ad9eb906",
-  "generatedAt": "2026-08-29T00:57:42.797Z",
+  "version": "1c9bfc472f02",
+  "generatedAt": "2026-08-29T01:25:11.154Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -19,6 +19,7 @@
     "./js/export/export-tours.js",
     "./js/favoris/favoris-store.js",
     "./js/geocode/ban-index.js",
+    "./js/geocode/ban-index.test.mjs",
     "./js/geocode/geocode-ui.js",
     "./js/geocode/match-address.js",
     "./js/geocode/match-address.test.mjs",
@@ -56,7 +57,6 @@
     "./js/scan/parse-ups-label.test.mjs",
     "./js/scan/preprocess.js",
     "./js/scan/scan-ui.js",
-    "./js/scan/scan-ui.test.mjs",
     "./js/scan/viewfinder-ui.js",
     "./js/settings/settings-store.js",
     "./js/settings/settings-ui.js",
