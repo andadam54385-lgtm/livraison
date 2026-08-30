@@ -279,8 +279,7 @@ async function renderEtatA() {
     `
         : ""
     }
-    <div id="etatA-list">${listHtml}</div>
-    <div class="card" style="margin-top:18px;">
+    <div class="card" style="margin-bottom:14px;">
       <div class="card-title">Départ</div>
       <div class="button-row" style="margin-top:8px;">
         <button type="button" id="etatA-start-depot" class="${selectedStart === "depot" ? "primary" : ""}">${icon("home")}Dépôt</button>
@@ -294,6 +293,7 @@ async function renderEtatA() {
       <p id="routing-status" class="muted" style="margin-top:10px;"></p>
       <div class="progress-bar"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
     </div>
+    <div id="etatA-list">${listHtml}</div>
   `;
 
   containerRef.querySelector("#etatA-manual").addEventListener("click", () => openManualEntry());
@@ -358,8 +358,18 @@ function isPending(stop) {
   return stop.statutLivraison !== "livre" && stop.statutLivraison !== "echec";
 }
 
+// Une date invalide arrive des que la matrice de trajets contient un Infinity
+// (deux points que le graphe routier ne relie pas, ou au-dela du plafond de
+// buildTravelTimeMatrix) : le cumul devient Infinity et new Date(...) est
+// invalide. Sans ce garde-fou, l'en-tete affichait litteralement
+// "Fin = Invalid Date". formatDurationShort faisait deja ce repli de son cote.
 function formatHeure(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "—";
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function heureConnue(date) {
+  return date instanceof Date && !Number.isNaN(date.getTime());
 }
 
 // Heure d'arrivee estimee par arret : cumul des temps de trajet (legDureeSec,
@@ -544,7 +554,7 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
   let heureLabel = null;
   if (delivered) heureLabel = stop.heureLivraison ? formatHeure(new Date(stop.heureLivraison)) : "Livré";
   else if (failed) heureLabel = stop.heureEchec ? formatHeure(new Date(stop.heureEchec)) : "Échec";
-  else if (eta) heureLabel = `≈ ${formatHeure(eta)}`;
+  else if (heureConnue(eta)) heureLabel = `≈ ${formatHeure(eta)}`;
   const hasPhoto = Boolean(colis.preuvePhoto);
   const reorderButtons = reorderMode
     ? `
@@ -592,7 +602,7 @@ function renderDepotReturnCard(tour, navApp, depotEta) {
     <div class="card">
       <div class="card-row">
         <div class="card-title" style="margin-bottom:0;">${icon("home")}Retour au dépôt</div>
-        ${depotEta ? `<span class="badge badge-pending">≈ ${formatHeure(depotEta)}</span>` : ""}
+        ${heureConnue(depotEta) ? `<span class="badge badge-pending">≈ ${formatHeure(depotEta)}</span>` : ""}
       </div>
       <div class="muted">${escapeAttr(tour.depotArrivee.label)}</div>
       <div class="button-row">
@@ -724,7 +734,7 @@ async function renderEtatB(tour) {
 
   updateHeader({
     title: "Ma tournée",
-    statsHtml: finEstimee ? `<span class="stat-pill">${icon("clock", { spaced: false })} Fin ≈ ${formatHeure(finEstimee)}</span>` : "",
+    statsHtml: heureConnue(finEstimee) ? `<span class="stat-pill">${icon("clock", { spaced: false })} Fin ≈ ${formatHeure(finEstimee)}</span>` : "",
     showProgress: true,
     progressPercent: total === 0 ? 0 : Math.round(((delivered + failed) / total) * 100),
   });
