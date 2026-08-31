@@ -35,7 +35,6 @@
   --urgent: #b45309;
   --urgent-bg: #fdf0d9;
   --danger: #dc2626;
-  --nav-height: 64px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --radius-card: 20px;
@@ -171,7 +170,7 @@ a { color: var(--accent-strong); }
   flex-direction: column;
   min-height: 0;
   padding-top: var(--safe-top);
-  padding-bottom: calc(var(--nav-height) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
 }
 .view[hidden] { display: none; }
 
@@ -218,53 +217,13 @@ a { color: var(--accent-strong); }
 }
 .stat-pill-warn { border-color: var(--warn); color: var(--warn); }
 
-.bottom-nav {
-  position: fixed;
-  left: 0; right: 0; bottom: 0;
-  height: calc(var(--nav-height) + var(--safe-bottom));
-  padding-bottom: var(--safe-bottom);
-  display: flex;
-  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
-  border-top: 1px solid var(--border-soft);
-  box-shadow: var(--shadow-elevated);
-  z-index: 10;
-}
-.bottom-nav[hidden] { display: none; }
-.bottom-nav a {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  text-decoration: none;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  font-weight: 600;
-  position: relative;
-  transition: color 0.15s var(--ease);
-}
-.bottom-nav a::before {
-  content: "";
-  position: absolute;
-  top: 6px;
-  width: 28px;
-  height: 3px;
-  border-radius: 999px;
-  background: var(--accent-strong);
-  opacity: 0;
-  transform: scaleX(0.4);
-  transition: opacity 0.15s var(--ease), transform 0.15s var(--ease);
-}
-.bottom-nav a.active { color: var(--accent-strong); }
-.bottom-nav a.active::before { opacity: 1; transform: scaleX(1); }
+/* (nav du bas supprimee : fusion Carte + Tournee, un seul ecran) */
 
 .fab {
   position: fixed;
   right: 20px;
-  bottom: calc(var(--nav-height) + var(--safe-bottom) + 16px);
+  bottom: calc(var(--safe-bottom) + 20px);
+  z-index: 12;
   width: 60px; height: 60px;
   padding: 0;
   display: flex;
@@ -276,7 +235,6 @@ a { color: var(--accent-strong); }
   border: none;
   font-size: 1.5rem;
   box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 45%, transparent);
-  z-index: 5;
   transition: transform 0.12s var(--ease);
 }
 .fab:active { transform: scale(0.92); }
@@ -383,11 +341,52 @@ a { color: var(--accent-strong); }
 }
 .hero-fail-btn:active { color: var(--warn); }
 
-/* MapLibre (WebGL) a besoin d'un parent a hauteur concrete, contrairement a
-   l'ancien SVG maison qui se dimensionnait via son viewBox (height:auto).
-   #map-content passe donc en colonne flex non-scrollable, et
-   .map-canvas-wrap occupe tout l'espace restant sous les pastilles de legende. */
-#map-content.view-content { overflow: hidden; display: flex; flex-direction: column; }
+/* ============== Fusion Carte + Tournee (un seul ecran) ==============
+   #tour-map-slot est un frere STATIQUE de la feuille : les renders de
+   tour-ui n'y touchent jamais, l'instance MapLibre y survit.
+   - mode "backdrop" (tournee active) : le slot prend l'espace sous le
+     header, la feuille #tour-sheet coulisse par-dessus (hauteur inline
+     posee par tour-ui, crans collapsed/half/full).
+   - mode "overlay" (preparation, bouton Carte du header) : le slot passe
+     plein ecran au-dessus de tout, bouton X pour fermer.
+   Hors de ces modes, #tour-sheet est en display:contents : #tour-content
+   redevient un simple enfant de flux, layout identique a l'avant-fusion. */
+#tour-view { position: relative; }
+#tour-map-slot { display: none; }
+#tour-map-slot[data-map-variant] { display: block; }
+#tour-map-slot[hidden] { display: none; }
+.map-backdrop #tour-map-slot {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.map-overlay #tour-map-slot {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--bg);
+  padding-top: var(--safe-top);
+}
+#tour-sheet { display: contents; }
+.map-backdrop #tour-sheet {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  background: var(--bg);
+  border-top: 1px solid var(--border-soft);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  box-shadow: var(--shadow-elevated);
+  height: 48vh;
+}
+.map-backdrop #tour-content { flex: 1; min-height: 0; }
+/* MapLibre (WebGL) a besoin d'un parent a hauteur concrete : le slot/canvas
+   est une colonne flex non-scrollable, .map-canvas-wrap prend tout. */
+#tour-map-slot[data-map-variant] { display: flex; flex-direction: column; }
+#tour-map-slot[hidden] { display: none !important; }
 .map-canvas-wrap { position: relative; flex: 1; min-height: 0; }
 #maplibre-map { position: absolute; inset: 0; }
 /* Grille de controles MapLibre par defaut (~29px) agrandie pour rester
@@ -448,6 +447,18 @@ a { color: var(--accent-strong); }
    besoin de desactiver dragPan separement), bandeau d'aide + panneau de
    confirmation flottants. Voir setupZoneMode() dans map-ui.js. */
 .zone-mode-btn { left: 64px; }
+/* Bouton de fermeture de la carte : uniquement en overlay (en backdrop c'est
+   la feuille qui gouverne, en onglet il n'existait pas). En haut a droite,
+   SOUS les controles MapLibre zoom/geoloc deplaces par la marge standard --
+   place le X au meme niveau que le menu, cote oppose. */
+.map-close-btn { display: none; left: auto; right: 12px; }
+[data-map-variant="overlay"] .map-close-btn { display: flex; }
+/* MapLibre pose zoom/geoloc en haut a droite : en overlay le X y est aussi,
+   decale leur pile sous lui. */
+[data-map-variant="overlay"] .maplibregl-ctrl-top-right { margin-top: 56px; }
+/* En fond de tournee, la liste d'arrets interne de la carte doublonnerait la
+   feuille de tour-ui juste au-dessus. */
+[data-map-variant="backdrop"] .stop-panel { display: none; }
 .zone-mode-btn.active { background: var(--accent); color: var(--accent-ink); }
 /* Un <div> (pas un <svg>) : hit-testable sur toute sa boite meme transparent,
    contrairement a un <svg> racine vide dont Safari ne detecte de facon fiable
@@ -557,6 +568,9 @@ a { color: var(--accent-strong); }
   touch-action: none;
   cursor: grab;
 }
+/* L'attribut hidden doit gagner sur le display:flex de la classe (la
+   poignee statique de #tour-sheet est masquee hors mode backdrop). */
+.stop-panel-handle[hidden] { display: none; }
 .stop-panel-bar {
   position: absolute;
   top: 6px;

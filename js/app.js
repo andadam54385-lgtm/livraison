@@ -30,44 +30,25 @@ function installGlobalErrorCapture() {
 // Tournee est l'ecran d'accueil et heberge le scan (bouton flottant camera,
 // voir tour-ui.js) : machine a 2 etats (preparation/execution), plus de tab
 // Scan separe. Carte/Reglages restent a 1 tap.
-const VIEWS = ["tour", "map", "settings"];
+const VIEWS = ["tour", "settings"];
 const viewModules = {};
 
 async function loadViewModule(name) {
   if (viewModules[name]) return viewModules[name];
   let mod;
   if (name === "tour") mod = await import("./tour/tour-ui.js");
-  else if (name === "map") mod = await import("./map/map-ui.js");
   else if (name === "settings") mod = await import("./settings/settings-ui.js");
   viewModules[name] = mod;
   return mod;
 }
 
-// La nav est du HTML statique (elle doit exister avant que le moindre module
-// de vue soit charge), mais ses icones viennent de ui/icons.js comme partout
-// ailleurs plutot que d'etre recopiees en SVG brut dans index.html. Le CSS de
-// .bottom-nav a etait deja ecrit pour une icone au-dessus du libelle
-// (flex-direction: column + gap) -- il ne manquait que les icones.
-const NAV_ICONS = { tour: "clipboard-list", map: "map-pin" };
-
-function decorateNav() {
-  for (const link of document.querySelectorAll("#bottom-nav a")) {
-    const name = NAV_ICONS[link.dataset.nav];
-    if (name) link.insertAdjacentHTML("afterbegin", icon(name, { size: 22, spaced: false }));
-  }
-}
-
-function setActiveNav(name) {
-  for (const link of document.querySelectorAll("#bottom-nav a")) {
-    link.classList.toggle("active", link.dataset.nav === name);
-  }
-}
-
+// Plus de nav du bas depuis la fusion Carte + Tournee (un seul ecran) :
+// Reglages s'ouvre par l'engrenage du header ou le menu de la carte, et les
+// anciens liens/l'historique "#map" retombent sur "#tour" via onHashChange.
 async function navigate(name) {
   for (const v of VIEWS) {
     document.getElementById(`${v}-view`).hidden = v !== name;
   }
-  setActiveNav(name);
   try {
     const mod = await loadViewModule(name);
     const container = document.getElementById(`${name}-content`);
@@ -170,13 +151,7 @@ async function boot() {
     .catch((err) => console.warn("Purge de l'historique des tournées échouée:", err));
 
   window.addEventListener("hashchange", onHashChange);
-  // Attend que la vue initiale soit montee (et ses ecouteurs, notamment le
-  // FAB de scan qui vit dans le HTML statique de #tour-view, branches) avant
-  // de reveler la nav -- sinon un tap rapide juste apres l'affichage peut ne
-  // rien faire (import dynamique de tour-ui.js pas encore resolu).
   await onHashChange();
-  decorateNav();
-  document.getElementById("bottom-nav").hidden = false;
 
   if (navigator.storage?.persist) {
     navigator.storage.persist().catch(() => {});

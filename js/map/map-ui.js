@@ -27,6 +27,16 @@ import { loadingHtml } from "../lib/loading.js";
 
 let containerRef = null;
 let mapInstance = null;
+// Fusion Carte + Tournee : la carte vit dans un slot STATIQUE de #tour-view
+// (jamais reecrit par les renders de tour-ui), donc l'instance MapLibre
+// SURVIT d'un rendu a l'autre -- fini le "recree a chaque mount()" de
+// l'ancien onglet Carte. Deux variantes d'affichage du meme slot :
+// - "backdrop" (tournee active) : fond de carte sous la feuille de tour-ui,
+//   la liste d'arrets interne (.stop-panel) est masquee (doublon).
+// - "overlay" (preparation) : plein ecran a la demande (lasso, vue
+//   d'ensemble), avec bouton de fermeture et liste interne visible.
+let currentVariant = null;
+let onCloseCallback = null;
 let themeMediaCleanup = null;
 // Mode "selection par zones" (lasso) : etat local a l'ecran Carte, reinitialise
 // a chaque mount() -- voir setupZoneMode().
@@ -562,7 +572,11 @@ function bindStopListDeliverButtons(scopeEl) {
 // encore ou si ses sources ne sont pas encore posees (fenetre de montage
 // avant que le "load" de MapLibre n'ait tourne, voir addMapLayers plus haut) --
 // getSource() ne leve pas d'exception, retourne juste undefined.
-async function refreshMapData() {
+export async function refreshMapData() {
+  // Peut etre appele par tour-ui alors que la carte n'a jamais ete ouverte
+  // (aucun slot rendu) : no-op. mapInstance null avec un slot rendu = ecran
+  // liste sans WebGL/fond de carte -> re-render complet leger, comme avant.
+  if (!containerRef || !containerRef.dataset.mapVariant) return;
   if (!mapInstance || !layersReady) return render();
 
   const { geocoded, csr, depot, returnPoint, ordreParColisId, ordered, settings } = await loadMapData();
@@ -796,6 +810,7 @@ async function render() {
       <div class="map-canvas-wrap">
         <div class="empty-state">Aucun colis géocodé pour le moment. Scanne ou saisis des colis, puis reviens ici.</div>
         <button type="button" class="map-menu-btn" id="map-menu-toggle" aria-label="Menu">${icon("menu", { spaced: false, size: 22 })}</button>
+        <button type="button" class="map-menu-btn map-close-btn" id="map-close-btn" aria-label="Fermer la carte">${icon("x", { spaced: false, size: 22 })}</button>
         <div class="map-menu-panel" id="map-menu-panel" hidden>
           <a class="btn-link" href="#settings">${icon("settings")}Réglages</a>
           ${!csr ? `<p class="map-menu-warn">${icon("alert-triangle", { spaced: false })}Trajet en ligne droite (graphe routier non chargé)</p>` : ""}
@@ -833,6 +848,7 @@ async function render() {
       ${hasMap ? `<div class="zone-draw-overlay" id="zone-draw-overlay"><svg class="zone-draw-svg"></svg></div>` : ""}
       <button type="button" class="map-menu-btn" id="map-menu-toggle" aria-label="Menu">${icon("menu", { spaced: false, size: 22 })}</button>
       ${hasMap ? `<button type="button" class="map-menu-btn zone-mode-btn" id="zone-mode-toggle" aria-label="Sélection par zones">${icon("lasso", { spaced: false, size: 20 })}</button>` : ""}
+      <button type="button" class="map-menu-btn map-close-btn" id="map-close-btn" aria-label="Fermer la carte">${icon("x", { spaced: false, size: 22 })}</button>
       <div class="map-menu-panel" id="map-menu-panel" hidden>
         <a class="btn-link" href="#settings">${icon("settings")}Réglages</a>
         <div class="map-legend">
@@ -879,6 +895,7 @@ async function render() {
   const menuToggle = containerRef.querySelector("#map-menu-toggle");
   const menuPanel = containerRef.querySelector("#map-menu-panel");
   menuToggle.addEventListener("click", () => menuPanel.toggleAttribute("hidden"));
+  containerRef.querySelector("#map-close-btn")?.addEventListener("click", () => onCloseCallback?.());
 
   const stopPanel = containerRef.querySelector("#stop-panel");
   if (stopPanel) {
@@ -995,7 +1012,26 @@ async function render() {
   });
 }
 
-export async function mount(container) {
-  containerRef = container;
+// Point d'entree de la fusion : idempotent tant que le slot ne change pas.
+// Premier appel = rendu complet + creation MapLibre ; appels suivants =
+// simple bascule de variante + rafraichissement des donnees + resize
+// (obligatoire apres tout changement de taille/visibilite du conteneur,
+// MapLibre ne l'observe pas lui-meme).
+export async function ensureMap(slotEl, variant, { onClose } = {}) {
+  onCloseCallback = onClose || null;
+  const reuse = mapInstance && containerRef === slotEl;
+  containerRef = slotEl;
+  slotEl.dataset.mapVariant = variant;
+  currentVariant = variant;
+  if (reuse) {
+    await refreshMapData();
+    requestAnimationFrame(() => mapInstance?.resize());
+    return;
+  }
   await render();
+  requestAnimationFrame(() => mapInstance?.resize());
+}
+
+export function isMapMounted() {
+  return Boolean(mapInstance && containerRef?.isConnected);
 }

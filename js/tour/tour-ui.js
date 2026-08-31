@@ -12,6 +12,7 @@ import { insertStopCheapest } from "../routing/insert-stop.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { icon } from "../ui/icons.js";
+import { ensureMap, refreshMapData, isMapMounted } from "../map/map-ui.js";
 import { reportBug } from "../debug/bug-reports-store.js";
 
 // Ecran "Tournee" fusionne (chantier fusion Tournee/Scan) : machine a 2
@@ -46,11 +47,128 @@ export async function mount(container) {
   if (!fabBound) {
     const fab = document.getElementById("scan-fab");
     if (fab) fab.addEventListener("click", () => openScanFlow());
+    // Fusion Carte + Tournee : chrome statique de #tour-view, lie une seule
+    // fois (comme le FAB) -- ces elements survivent a tous les renders.
+    const settingsBtn = document.getElementById("tour-settings-btn");
+    settingsBtn.innerHTML = icon("settings", { spaced: false, size: 20 });
+    settingsBtn.addEventListener("click", () => { location.hash = "#settings"; });
+    const mapBtn = document.getElementById("tour-map-btn");
+    mapBtn.innerHTML = icon("map-pin", { spaced: false, size: 20 });
+    mapBtn.addEventListener("click", () => openMapOverlay());
+    sheetControl = setupTourSheet();
     fabBound = true;
   }
   view = "list";
   currentDetailColisId = null;
   await render();
+}
+
+// ============== Fusion Carte + Tournee : chrome carte/feuille ==============
+
+// "none"   : preparation (Etat A), liste pleine hauteur, pas de carte.
+// "overlay": carte plein ecran a la demande (lasso/vue d'ensemble, Etat A).
+// "backdrop": tournee active (Etat B), carte en fond + feuille coulissante.
+let mapChrome = "none";
+let sheetControl = null;
+
+function applyMapChrome(mode) {
+  mapChrome = mode;
+  const viewEl = document.getElementById("tour-view");
+  const slot = document.getElementById("tour-map-slot");
+  const handle = document.getElementById("tour-sheet-handle");
+  const mapBtn = document.getElementById("tour-map-btn");
+  viewEl.classList.toggle("map-backdrop", mode === "backdrop");
+  viewEl.classList.toggle("map-overlay", mode === "overlay");
+  slot.hidden = mode === "none";
+  handle.hidden = mode !== "backdrop";
+  // Le bouton Carte du header n'a de sens qu'en preparation : en tournee la
+  // carte est deja la, et en overlay c'est le X de la carte qui ferme.
+  mapBtn.hidden = mode !== "none";
+}
+
+async function openMapOverlay() {
+  applyMapChrome("overlay");
+  await ensureMap(document.getElementById("tour-map-slot"), "overlay", {
+    onClose: () => {
+      applyMapChrome("none");
+    },
+  });
+}
+
+// Feuille coulissante de l'Etat B : memes crans que l'ancienne liste
+// d'arrets de l'ecran Carte (collapsed/half/full), poignee statique.
+const TOUR_SHEET_STATES = { collapsed: 88, half: 0.48, full: 0.88 };
+
+function setupTourSheet() {
+  const sheet = document.getElementById("tour-sheet");
+  const handle = document.getElementById("tour-sheet-handle");
+  const heightFor = (name) =>
+    name === "collapsed" ? TOUR_SHEET_STATES.collapsed : Math.round(window.innerHeight * TOUR_SHEET_STATES[name]);
+  let state = "half";
+  let dragged = false;
+  let dragStartY = null;
+  let dragStartHeight = null;
+
+  function applyState(name, animate = true) {
+    state = name;
+    sheet.style.transition = animate ? "height 0.22s var(--ease)" : "none";
+    sheet.style.height = `${heightFor(name)}px`;
+    sheet.dataset.state = name;
+  }
+
+  function nearestState(height) {
+    let best = "collapsed";
+    let bestDist = Infinity;
+    for (const name of Object.keys(TOUR_SHEET_STATES)) {
+      const d = Math.abs(height - heightFor(name));
+      if (d < bestDist) {
+        bestDist = d;
+        best = name;
+      }
+    }
+    return best;
+  }
+
+  handle.addEventListener("click", () => {
+    if (dragged) {
+      dragged = false;
+      return;
+    }
+    const order = ["collapsed", "half", "full"];
+    applyState(order[(order.indexOf(state) + 1) % order.length]);
+  });
+  handle.addEventListener("pointerdown", (e) => {
+    dragStartY = e.clientY;
+    dragStartHeight = sheet.getBoundingClientRect().height;
+    sheet.style.transition = "none";
+    handle.setPointerCapture(e.pointerId);
+  });
+  handle.addEventListener("pointermove", (e) => {
+    if (dragStartY === null) return;
+    const dy = dragStartY - e.clientY;
+    if (Math.abs(dy) > 4) dragged = true;
+    const h = Math.min(heightFor("full"), Math.max(heightFor("collapsed"), dragStartHeight + dy));
+    sheet.style.height = `${h}px`;
+  });
+  function endDrag() {
+    if (dragStartY === null) return;
+    dragStartY = null;
+    applyState(nearestState(sheet.getBoundingClientRect().height));
+  }
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+
+  return {
+    applyState,
+    reset() {
+      // Hors mode backdrop la feuille redevient un simple conteneur en flux
+      // (display:contents via CSS) : la hauteur inline doit disparaitre.
+      sheet.style.height = "";
+      sheet.style.transition = "";
+      delete sheet.dataset.state;
+      state = "half";
+    },
+  };
 }
 
 
@@ -159,6 +277,9 @@ function closeDetail() {
 async function render() {
   try {
     if (view === "detail" && currentDetailColisId) {
+      // En tournee (carte en fond), la fiche s'ouvre dans la feuille : la
+      // deplier, sinon le detail se lit par le trou d'une feuille a mi-course.
+      if (mapChrome === "backdrop") sheetControl?.applyState("full");
       updateHeader({ title: "Détail du colis", showProgress: false });
       await renderColisDetail(containerRef, currentDetailColisId, {
         onBack: closeDetail,
@@ -169,10 +290,28 @@ async function render() {
 
     const tour = await getActiveTour();
     if (!tour) {
+      // Retour en preparation : la carte de fond n'a plus de raison d'etre
+      // (l'overlay a la demande reste accessible via le bouton du header).
+      // applyMapChrome("none") aussi au tout premier rendu : c'est lui qui
+      // revele le bouton Carte du header (hidden dans le HTML statique).
+      if (mapChrome !== "overlay") {
+        if (mapChrome === "backdrop") sheetControl?.reset();
+        applyMapChrome("none");
+      }
       await renderEtatA();
     } else {
+      if (mapChrome !== "backdrop") {
+        applyMapChrome("backdrop");
+        sheetControl?.applyState("half", false);
+      }
       await renderEtatB(tour);
+      // Fond de carte : cree au premier passage en Etat B, ensuite simple
+      // setData/resize -- l'instance MapLibre persiste (slot statique).
+      await ensureMap(document.getElementById("tour-map-slot"), "backdrop");
     }
+    // La carte (fond OU overlay reste ouvert) doit refleter toute mutation
+    // qui vient de re-rendre l'ecran : livraison, echec, insertion, recalcul.
+    if (isMapMounted() && mapChrome !== "none") await refreshMapData();
   } catch (err) {
     console.error("Erreur d'affichage de l'écran Tournée:", err);
     reportBug({ type: "auto", message: err.message || String(err), stack: err.stack, context: "tour-ui render()" }).catch(() => {});
@@ -738,6 +877,10 @@ async function renderEtatB(tour) {
     showProgress: true,
     progressPercent: total === 0 ? 0 : Math.round(((delivered + failed) / total) * 100),
   });
+
+  const pendingCount = stopsWithColis.filter(({ stop }) => isPending(stop)).length;
+  const sheetLabel = document.getElementById("tour-sheet-label");
+  if (sheetLabel) sheetLabel.textContent = pendingCount > 0 ? `${pendingCount} arrêt${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}` : "Tournée traitée";
 
   const heroEntry = stopsWithColis.find(({ stop, colis }) => isPending(stop) && colis);
   const heroHtml = heroEntry

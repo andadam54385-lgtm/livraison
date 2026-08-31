@@ -93,7 +93,18 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   conteneur : État A (pas de tournée active → liste de préparation des colis + "Optimiser
   la tournée") / État B (tournée active → carte "hero" pour l'arrêt courant + liste des
   suivants). Plus d'onglet Scan séparé — bouton caméra flottant (`#scan-fab`, HTML statique
-  de `#tour-view`) visible dans les 2 états. Nav = 3 onglets : Tournée / Carte / Réglages.
+  de `#tour-view`) visible dans les 2 états.
+  **Fusion Carte + Tournée (2026-08-31)** : plus AUCUNE nav du bas, un seul écran.
+  `#tour-map-slot` (frère statique de `#tour-sheet`/`#tour-content` dans `index.html`,
+  jamais réécrit par les renders) héberge une instance MapLibre **persistante** —
+  `map-ui.js` n'exporte plus `mount()` mais `ensureMap(slot, variant, {onClose})`
+  (idempotent, setData+resize en réutilisation), `refreshMapData()` et `isMapMounted()`.
+  Deux variantes : "backdrop" (État B, carte en fond + feuille coulissante `#tour-sheet`
+  à 3 crans gérée par tour-ui, liste interne `.stop-panel` de la carte masquée en CSS)
+  et "overlay" (État A, plein écran à la demande via le bouton carte du header, X pour
+  fermer — c'est là que vit le lasso de zones). Réglages : engrenage du header + lien du
+  menu carte. L'ancien hash `#map` retombe sur `#tour` (redirection déjà dans
+  `onHashChange`).
 - **`js/scan/colis-detail-ui.js`** = fiche colis consolidée (seul endroit avec
   Corriger/Favori/Supprimer — jamais sur les cartes de liste).
 - **`js/scan/scan-ui.js`** = fonctions de flux (pas de vue auto-montée), paramétrées par
