@@ -104,16 +104,9 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       }
       ${colis.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:6px;">${colis.quantite} colis à cette adresse</span>` : ""}
     </div>
-    <div class="field">
-      <label>Type de client</label>
+    <div class="segmented-stack">
       ${segmentedHtml("typeClient", TYPE_CLIENT_OPTIONS, colis.typeClient || "particulier")}
-    </div>
-    <div class="field">
-      <label>Opération</label>
       ${segmentedHtml("operation", OPERATION_OPTIONS, colis.operation || "livraison")}
-    </div>
-    <div class="field">
-      <label>Heure</label>
       ${segmentedHtml("avant12h", AVANT12H_OPTIONS, colis.avant12h ? "oui" : "non")}
     </div>
     ${

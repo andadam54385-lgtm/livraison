@@ -434,16 +434,9 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
       <label>Nom</label>
       <input type="text" id="f-nom" class="field-lg" value="${escapeAttr(colis.nom)}">
     </div>
-    <div class="field">
-      <label>Type de client</label>
+    <div class="segmented-stack">
       ${segmentedHtml("typeClient", TYPE_CLIENT_OPTIONS, colis.typeClient || "particulier")}
-    </div>
-    <div class="field">
-      <label>Opération</label>
       ${segmentedHtml("operation", OPERATION_OPTIONS, colis.operation || "livraison")}
-    </div>
-    <div class="field">
-      <label>Heure</label>
       ${segmentedHtml("avant12h", AVANT12H_OPTIONS, colis.avant12h ? "oui" : "non")}
     </div>
   `;

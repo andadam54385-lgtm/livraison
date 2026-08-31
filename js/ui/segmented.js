@@ -17,7 +17,7 @@ export function segmentedHtml(name, options, current) {
   const boutons = options
     .map((o) => {
       const actif = o.value === current;
-      return `<button type="button" class="segmented-btn${actif ? " active" : ""}" data-segmented="${escapeAttr(name)}" data-value="${escapeAttr(o.value)}" aria-pressed="${actif}">${o.icon ? icon(o.icon) : ""}${escapeHtml(o.label)}</button>`;
+      return `<button type="button" class="segmented-btn${actif ? " active" : ""}" data-segmented="${escapeAttr(name)}" data-value="${escapeAttr(o.value)}" aria-pressed="${actif}">${o.icon ? icon(o.icon, { size: 14 }) : ""}${escapeHtml(o.label)}</button>`;
     })
     .join("");
   return `<div class="segmented" role="group">${boutons}</div>`;

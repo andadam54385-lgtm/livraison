@@ -651,12 +651,18 @@ a { color: var(--accent-strong); }
 /* Boutons a choix unique (type de client, operation, avant 12h) -- voir
    ui/segmented.js. Cibles tactiles pleine largeur, a une main et avec des
    gants, la ou une case a cocher de 26px demandait de viser. */
-.segmented { display: flex; gap: 8px; }
+.segmented { display: flex; gap: 6px; }
+/* Compact (retour terrain "en plus petit") : ces boutons restent des cibles
+   tactiles correctes (~36px) mais ne dominent plus le formulaire -- trois
+   groupes empiles a 46px chacun mangeaient un demi-ecran. Les libelles de
+   groupe ("Type de client"...) ont saute en meme temps : les options se
+   suffisent. */
+.segmented-stack { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .segmented-btn {
   flex: 1;
-  min-height: 46px;
-  padding: 8px 10px;
-  font-size: 0.9rem;
+  min-height: 36px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
   font-weight: 550;
   display: flex;
   align-items: center;
