@@ -731,25 +731,91 @@ function setupZoneMode(map, geocoded, ordreParColisId) {
     });
   }
 
+  // Retour terrain : "en mode entoure, avec 2 doigts je veux quand meme
+  // deplacer la carte". Convention des applis de dessin : UN doigt trace le
+  // lasso, DEUX doigts naviguent (pan + pinch). L'overlay capture tout (il
+  // doit intercepter le doigt qui dessine), donc la navigation a deux doigts
+  // est re-implementee ici sur l'instance MapLibre (panBy + easeTo autour du
+  // milieu des deux doigts) plutot que "laissee passer" -- des pointeurs
+  // deja captures ne peuvent pas etre re-cibles vers le canvas en cours de
+  // geste. Un 2e doigt qui se pose ANNULE le trace en cours (c'etait un
+  // geste de navigation, pas un lasso), et le doigt restant ne reprend pas
+  // le dessin tant que tout n'est pas releve (suppressDraw).
+  const pointers = new Map(); // pointerId -> [x, y] (coordonnees client)
+  let gesture = null; // { mid: [x,y], dist } du dernier move a 2 doigts
+  let suppressDraw = false;
+
+  function gestureState() {
+    const pts = [...pointers.values()];
+    const mid = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2];
+    const dist = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
+    return { mid, dist };
+  }
+
   overlay.addEventListener("pointerdown", (e) => {
     if (!zoneMode) return;
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    overlay.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    if (pointers.size === 2) {
+      // Bascule en navigation : le trace entame (s'il y en a un) est annule.
+      drawing = false;
+      suppressDraw = true;
+      drawPoints = [];
+      renderDrawPath();
+      gesture = gestureState();
+      return;
+    }
+    if (pointers.size > 2 || suppressDraw) return;
     drawing = true;
     overlayRect = overlay.getBoundingClientRect();
     drawPoints = [pointFromEvent(e)];
-    overlay.setPointerCapture(e.pointerId);
-    e.preventDefault();
     renderDrawPath();
   });
   overlay.addEventListener("pointermove", (e) => {
-    if (!drawing) return;
-    drawPoints.push(pointFromEvent(e));
-    renderDrawPath();
+    if (!pointers.has(e.pointerId)) {
+      if (drawing) {
+        drawPoints.push(pointFromEvent(e));
+        renderDrawPath();
+      }
+      return;
+    }
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pointers.size === 2 && gesture) {
+      const next = gestureState();
+      map.panBy([gesture.mid[0] - next.mid[0], gesture.mid[1] - next.mid[1]], { animate: false });
+      if (gesture.dist > 0 && next.dist > 0) {
+        const zoomDelta = Math.log2(next.dist / gesture.dist);
+        if (Math.abs(zoomDelta) > 0.01) {
+          const rect = overlay.getBoundingClientRect();
+          map.easeTo({
+            zoom: map.getZoom() + zoomDelta,
+            around: map.unproject([next.mid[0] - rect.left, next.mid[1] - rect.top]),
+            duration: 0,
+          });
+        }
+      }
+      gesture = next;
+      return;
+    }
+    if (drawing) {
+      drawPoints.push(pointFromEvent(e));
+      renderDrawPath();
+    }
   });
+
+  function liftPointer(e) {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) gesture = null;
+    if (pointers.size === 0) suppressDraw = false;
+  }
+
   overlay.addEventListener("pointerup", async (e) => {
-    if (!drawing) return;
+    const wasDrawing = drawing && !suppressDraw;
+    liftPointer(e);
+    if (!wasDrawing) return;
     drawing = false;
     overlayRect = null;
-    overlay.releasePointerCapture(e.pointerId);
     const points = drawPoints;
     drawPoints = [];
     renderDrawPath();
@@ -766,7 +832,8 @@ function setupZoneMode(map, geocoded, ordreParColisId) {
     }
     showZoneConfirmPanel(selected);
   });
-  overlay.addEventListener("pointercancel", () => {
+  overlay.addEventListener("pointercancel", (e) => {
+    liftPointer(e);
     drawing = false;
     overlayRect = null;
     drawPoints = [];
