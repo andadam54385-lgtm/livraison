@@ -1,7 +1,7 @@
 import { openDatabase } from "../lib/idb.js";
 
 export const DB_NAME = "delivery-tour";
-export const DB_VERSION = 6;
+export const DB_VERSION = 7;
 
 let dbPromise = null;
 
@@ -70,6 +70,11 @@ function upgrade(db, oldVersion, newVersion, transaction) {
   // captures automatiques d'erreurs JS non attrapees (voir app.js) -- meme
   // esprit que ocrCorrections, mais pour n'importe quel souci technique, pas
   // seulement l'OCR. Voir js/debug/bug-reports-store.js.
+  // Comptes rendus de scan de LISTE (video/live) -- voir
+  // js/scan/scan-reports-store.js. Ajoute en DB_VERSION 7.
+  if (!db.objectStoreNames.contains("scanReports")) {
+    db.createObjectStore("scanReports", { keyPath: "id" });
+  }
   if (!db.objectStoreNames.contains("bugReports")) {
     db.createObjectStore("bugReports", { keyPath: "id" });
   }

@@ -12,6 +12,7 @@ import { icon } from "../ui/icons.js";
 import { escapeHtml } from "../lib/escape.js";
 import { loadingHtml, inlineLoadingHtml } from "../lib/loading.js";
 import { emit } from "../lib/event-bus.js";
+import { saveScanReport } from "./scan-reports-store.js";
 
 // Scan en rafale : filme un ECRAN affichant plusieurs adresses a la fois
 // (ex: appli/portail du transporteur listant une tournee), par opposition au
@@ -178,6 +179,22 @@ function analyzeVideoFile(file, container) {
     const collected = [];
     let stopped = false;
     let done = false;
+    // Compte rendu exportable (retour terrain "l'OCR devrait faire un compte
+    // rendu quand c'est une video") : texte OCR brut de chaque image, seule
+    // matiere qui permette de comprendre apres coup pourquoi une adresse a
+    // ete ratee. Declare ICI et pas dans la boucle : les DEUX sorties (fin
+    // d'analyse et bouton "Terminer") doivent pouvoir l'enregistrer.
+    const rapportFrames = [];
+    const debutMs = Date.now();
+
+    function enregistrerRapport() {
+      return saveScanReport({
+        source: "video",
+        frames: rapportFrames,
+        drafts: collected,
+        dureeMs: Date.now() - debutMs,
+      }).catch((err) => console.warn("[batch-scan] compte rendu non enregistre:", err));
+    }
 
     function cleanup() {
       stopped = true;
@@ -189,8 +206,9 @@ function analyzeVideoFile(file, container) {
     });
     // "Terminer" disponible pendant l'analyse aussi : si tout est deja
     // detecte au bout de la moitie de la video, inutile d'attendre la fin.
-    finishBtn.addEventListener("click", () => {
+    finishBtn.addEventListener("click", async () => {
       cleanup();
+      await enregistrerRapport();
       resolve(collected.slice());
     });
 
@@ -319,6 +337,7 @@ function analyzeVideoFile(file, container) {
               preprocessForOcr(ctx, captureCanvas);
               const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
               if (stopped) break;
+              rapportFrames.push({ index, lignes: lines.map((l) => l.text) });
               ingestDrafts(collected, parseAddressList(lines, { knownCities, knownCps }));
               framesOk++;
               seekFailures = 0;
@@ -339,6 +358,7 @@ function analyzeVideoFile(file, container) {
           if (!stopped) {
             done = true;
             cleanup();
+            await enregistrerRapport();
             resolve(collected.slice());
           }
         } catch (err) {

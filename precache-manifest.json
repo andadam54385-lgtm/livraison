@@ -1,6 +1,6 @@
 {
-  "version": "99248a6c1356",
-  "generatedAt": "2026-09-01T18:53:55.365Z",
+  "version": "ff863321951e",
+  "generatedAt": "2026-09-01T19:02:53.996Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -60,6 +60,7 @@
     "./js/scan/parse-ups-label.js",
     "./js/scan/parse-ups-label.test.mjs",
     "./js/scan/preprocess.js",
+    "./js/scan/scan-reports-store.js",
     "./js/scan/scan-ui.js",
     "./js/scan/viewfinder-ui.js",
     "./js/settings/settings-store.js",

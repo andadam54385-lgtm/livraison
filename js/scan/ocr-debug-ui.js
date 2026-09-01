@@ -2,6 +2,7 @@ import { listAllColis } from "./colis-store.js";
 import { parseUpsLabelDetailed } from "./parse-ups-label.js";
 import { renderReviewForm } from "./scan-ui.js";
 import { listOcrCorrections } from "./ocr-corrections-store.js";
+import { listScanReports } from "./scan-reports-store.js";
 import { icon } from "../ui/icons.js";
 import { escapeHtml } from "../lib/escape.js";
 
@@ -64,6 +65,46 @@ function renderClassificationDetail(colis) {
 // n'est pas de corriger CE colis (deja fait par le bouton ci-dessus) mais
 // d'accumuler des cas reels a partager plus tard pour ameliorer
 // parse-ups-label.js -- copier/coller ce JSON dans une prochaine session.
+// Compte rendu du dernier scan de LISTE (video/live) -- retour terrain :
+// "l'OCR devrait faire un compte rendu quand c'est une video, la j'ai rien".
+// Contrairement au journal des corrections (qui ne couvre que le scan d'UNE
+// etiquette), on expose ici le texte OCR BRUT image par image : c'est la
+// seule matiere qui permette de comprendre apres coup pourquoi une adresse a
+// ete ratee, et de rejouer le cas dans les tests du parser.
+function renderScanReportsSection(reports) {
+  if (reports.length === 0) {
+    return `
+      <div class="card" style="margin-top:16px;">
+        <div class="card-title">${icon("camera")}Compte rendu du scan de liste</div>
+        <p class="muted">Aucun scan de liste enregistré pour l'instant. Après un scan par vidéo, le texte OCR brut de chaque image apparaîtra ici, prêt à être copié.</p>
+      </div>
+    `;
+  }
+  const r = reports[0];
+  const resume = [
+    `Scan ${r.source === "video" ? "par vidéo" : "en direct"} du ${new Date(r.date).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`,
+    `${r.framesAnalysees} image(s) analysée(s) en ${Math.round((r.dureeMs || 0) / 1000)} s`,
+    `${r.adressesRetenues} adresse(s) retenue(s)`,
+  ].join(" — ");
+  const texte = [
+    resume,
+    "",
+    "=== TEXTE OCR BRUT, IMAGE PAR IMAGE ===",
+    ...r.frames.flatMap((f) => [`--- image ${f.index} ---`, ...f.lignes]),
+    "",
+    "=== ADRESSES RETENUES PAR LE PARSER ===",
+    ...r.resultats.map((x, i) => `${i + 1}. nom=${JSON.stringify(x.nom)} rue=${JSON.stringify(x.rue)} cp=${JSON.stringify(x.cp)} ville=${JSON.stringify(x.ville)}`),
+  ].join("\n");
+  return `
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">${icon("camera")}Compte rendu du scan de liste</div>
+      <p class="muted">${escapeHtml(resume)}</p>
+      <p class="muted">Texte OCR brut de chaque image, puis ce que le parser en a tiré — tap dedans pour tout sélectionner, puis copie et partage pour améliorer la reconnaissance.</p>
+      <textarea id="scan-report-export" readonly class="field-lg" rows="8" style="min-height:0;font-family:monospace;font-size:0.72rem;">${escapeHtml(texte)}</textarea>
+    </div>
+  `;
+}
+
 function renderCorrectionsSection(corrections) {
   return `
     <div class="card" style="margin-top:16px;">
@@ -78,14 +119,26 @@ function renderCorrectionsSection(corrections) {
   `;
 }
 
+// Tap dans un export = tout selectionner (pas de bouton "copier" : le
+// presse-papier programmatique est capricieux en PWA standalone iOS, la
+// selection native suivie du menu Copier est plus fiable).
+function bindExports(container) {
+  for (const id of ["#scan-report-export", "#ocr-corrections-export"]) {
+    const el = container.querySelector(id);
+    el?.addEventListener("click", () => el.select());
+  }
+}
+
 export async function renderOcrDebug(container, { preselectColisId } = {}) {
   const allColis = await listAllColis();
   const scans = allColis.filter((c) => c.source === "ocr").reverse(); // plus recent d'abord
   const corrections = await listOcrCorrections();
   const correctionsHtml = renderCorrectionsSection(corrections);
+  const scanReportsHtml = renderScanReportsSection(await listScanReports());
 
   if (scans.length === 0) {
-    container.innerHTML = `<p class="muted">Aucun colis scanné par OCR pour l'instant.</p>${correctionsHtml}`;
+    container.innerHTML = `<p class="muted">Aucun colis scanné par OCR pour l'instant.</p>${scanReportsHtml}${correctionsHtml}`;
+    bindExports(container);
     return;
   }
 
@@ -104,13 +157,13 @@ export async function renderOcrDebug(container, { preselectColisId } = {}) {
       </select>
     </div>
     <div id="ocr-debug-detail"></div>
+    ${scanReportsHtml}
     ${correctionsHtml}
   `;
 
   const select = container.querySelector("#ocr-debug-select");
   const detail = container.querySelector("#ocr-debug-detail");
-  const exportEl = container.querySelector("#ocr-corrections-export");
-  exportEl?.addEventListener("click", () => exportEl.select());
+  bindExports(container);
 
   function showSelected() {
     const colis = scans[Number(select.value)];
