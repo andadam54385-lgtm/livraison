@@ -87,8 +87,20 @@ let bootDone = false;
 let reloadPending = false;
 let reloadDone = false;
 
+// Un <video> vivant dans le DOM = viseur code-barres ou analyse d'une video de
+// liste en cours. Ce sont les deux seuls moments ou un rechargement detruit un
+// travail non enregistre (une analyse dure plusieurs minutes et ne sauvegarde
+// qu'a la fin) : on differe jusqu'a ce que l'ecran soit revenu au calme.
+function rechargementSansRisque() {
+  return !document.querySelector("video");
+}
+
 function applyServiceWorkerUpdate() {
   if (reloadDone) return;
+  if (!rechargementSansRisque()) {
+    reloadPending = true;
+    return;
+  }
   reloadDone = true;
   location.reload();
 }
@@ -110,14 +122,48 @@ function setupServiceWorkerReload() {
   });
 }
 
+// Verification EXPLICITE des mises a jour (retour terrain : un build refusait
+// d'arriver sur l'iPhone alors que le serveur etait sain, tous les fichiers du
+// precache en 200). En PWA standalone, iOS ne relance quasiment jamais le
+// controle d'octets sur sw.js tout seul : l'appli est restauree depuis un
+// instantane, sans vraie navigation, donc sans "soft update". On force donc le
+// controle au demarrage, puis a chaque retour au premier plan.
+const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+let derniereVerifMaj = 0;
+
+function setupUpdateChecks(reg) {
+  const verifier = () => {
+    const maintenant = Date.now();
+    if (maintenant - derniereVerifMaj < UPDATE_CHECK_INTERVAL_MS) return;
+    derniereVerifMaj = maintenant;
+    // Echec silencieux : hors ligne, c'est le cas nominal de cette appli.
+    reg.update().catch(() => {});
+  };
+  verifier();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    verifier();
+    // Un rechargement mis en attente pendant un scan peut repartir ici.
+    if (reloadPending && bootDone) applyServiceWorkerUpdate();
+  });
+}
+
 async function boot() {
   installGlobalErrorCapture();
 
   if ("serviceWorker" in navigator) {
     setupServiceWorkerReload();
-    navigator.serviceWorker.register("./sw.js").catch((err) => {
-      console.warn("Service worker non enregistré:", err);
-    });
+    // updateViaCache "none" : le navigateur ne doit JAMAIS servir sw.js
+    // depuis son cache HTTP, sinon les octets qui declenchent la mise a
+    // jour sont ceux d'une version perimee et rien ne bouge.
+    navigator.serviceWorker
+      .register("./sw.js", { updateViaCache: "none" })
+      .then((reg) => {
+        setupUpdateChecks(reg);
+      })
+      .catch((err) => {
+        console.warn("Service worker non enregistré:", err);
+      });
   }
 
   const importView = document.getElementById("import-view");
