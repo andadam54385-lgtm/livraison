@@ -13,6 +13,7 @@ import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { icon } from "../ui/icons.js";
 import { ensureMap, refreshMapData, isMapMounted } from "../map/map-ui.js";
+import { on } from "../lib/event-bus.js";
 import { reportBug } from "../debug/bug-reports-store.js";
 
 // Ecran "Tournee" fusionne (chantier fusion Tournee/Scan) : machine a 2
@@ -53,6 +54,10 @@ export async function mount(container) {
     settingsBtn.innerHTML = icon("settings", { spaced: false, size: 20 });
     settingsBtn.addEventListener("click", () => { location.hash = "#settings"; });
     sheetControl = setupTourSheet();
+    // Tap sur un point de la carte -> la feuille s'ouvre et defile jusqu'a
+    // la carte du colis (voir l'emit dans map-ui.js). Bind unique, comme le
+    // FAB : l'ecouteur survit a tous les renders.
+    on("map:stop-tap", (e) => focusColisInSheet(e.detail?.colisId));
     fabBound = true;
   }
   view = "list";
@@ -77,6 +82,26 @@ function applyMapChrome() {
   document.getElementById("tour-view").classList.add("map-backdrop");
   document.getElementById("tour-map-slot").hidden = false;
   document.getElementById("tour-sheet-handle").hidden = false;
+}
+
+// Ouvre la feuille (si repliee) et met la carte du colis en evidence --
+// cible les trois formes possibles : carte d'arret (Etat B), carte de
+// preparation (Etat A), et la hero card (l'arret courant n'a pas de carte
+// dans la liste, on remonte alors en haut de la feuille).
+function focusColisInSheet(colisId) {
+  if (!colisId) return;
+  const sheet = document.getElementById("tour-sheet");
+  if (sheet.dataset.state === "collapsed") sheetControl?.applyState("half");
+  setTimeout(() => {
+    const el =
+      containerRef.querySelector(`[data-stop-card="${colisId}"]`) ||
+      containerRef.querySelector(`.prep-card[data-colis-id="${colisId}"]`) ||
+      (containerRef.querySelector(`.hero-card [data-colis-id="${colisId}"]`) ? containerRef.querySelector(".hero-card") : null);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("flash-target");
+    setTimeout(() => el.classList.remove("flash-target"), 2600);
+  }, 260); // laisse la feuille finir sa transition avant de defiler
 }
 
 // Feuille coulissante de l'Etat B : memes crans que l'ancienne liste

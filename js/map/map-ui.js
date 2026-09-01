@@ -9,7 +9,7 @@ import { loadCsrFromDb } from "../routing/graph-loader.js";
 import { buildSpatialGrid, findNearestNode } from "../routing/spatial-index.js";
 import { dijkstraSingleTargetPath, createDijkstraScratch } from "../routing/dijkstra.js";
 import { icon, iconToImage } from "../ui/icons.js";
-import { on } from "../lib/event-bus.js";
+import { on, emit } from "../lib/event-bus.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { loadingHtml } from "../lib/loading.js";
@@ -200,47 +200,6 @@ function badgeForStatut(statut) {
   if (statut === "echec") return `<span class="badge badge-warn">Échec</span>`;
   if (statut === "a_verifier") return `<span class="badge badge-pending">À vérifier</span>`;
   return "";
-}
-
-function formatColisDetail(c, { navApp, ordre } = {}) {
-  const adresse = formatAdresseAffichage(c);
-  const done = c.statut === "livre" || c.statut === "echec";
-  const navUrl = c.geocode?.lat != null ? buildNavUrl(navApp, { lat: c.geocode.lat, lon: c.geocode.lon, label: c.nom, adresse: formatAdresseForNav(c) }) : null;
-  return `
-    <div class="card-row">
-      <div class="card-title">${ordre != null ? `#${ordre} ` : ""}${escapeHtml(c.nom || "(nom inconnu)")}</div>
-      ${c.avant12h ? '<span class="badge badge-urgent">12h</span>' : ""}
-    </div>
-    <div class="muted">${escapeHtml(adresse)}${c.quantite > 1 ? ` — ${c.quantite} colis` : ""}</div>
-    <div class="button-row">
-      ${c.tel ? `<a class="btn-link" href="tel:${escapeAttr(c.tel)}" aria-label="Appeler">${icon("phone", { spaced: false })}</a>` : ""}
-      ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
-      ${
-        done
-          ? `<button type="button" disabled>${c.statut === "livre" ? `Livré ${icon("check", { spaced: false, size: 14 })}` : "Échec"}</button>`
-          : `<button type="button" class="ok" data-map-deliver="${escapeAttr(c.id)}">${icon("check", { spaced: false, size: 14, style: "margin-right:4px;" })}Livré</button>`
-      }
-    </div>
-  `;
-}
-
-// Enveloppe commune des fiches flottantes de la carte : popup compacte avec
-// bouton de fermeture (un tap a cote sur la carte ferme aussi, voir le
-// map.on("click") generique dans le handler de load).
-function showMapPopup(detailEl, innerHtml) {
-  detailEl.innerHTML = `<div class="map-popup"><button type="button" class="map-popup-close" aria-label="Fermer">${icon("x", { spaced: false, size: 16 })}</button>${innerHtml}</div>`;
-  detailEl.querySelector(".map-popup-close").addEventListener("click", () => {
-    detailEl.innerHTML = "";
-  });
-}
-
-function formatFavoriDetail(f) {
-  const adresse = `${f.rue || ""}, ${f.cp || ""} ${f.ville || ""}`;
-  return `
-    <div class="card-title">${icon("star")}${f.rue || "Favori"}</div>
-    <div class="muted">${adresse}</div>
-    ${f.note ? `<p style="margin-top:8px;">${f.note}</p>` : `<p class="muted" style="margin-top:8px;">Pas de note.</p>`}
-  `;
 }
 
 // Liste des arrets sous la carte (comme une appli de navigation grand
@@ -641,23 +600,6 @@ export async function refreshMapData() {
     bindStopListDeliverButtons(stopListEl);
   }
 
-  // Si la fiche detail ouverte concerne justement le colis qu'on vient de
-  // livrer, la rafraichir aussi (sinon son bouton "Marquer livre" reste
-  // affiche par erreur jusqu'au prochain montage complet).
-  const detailEl = containerRef.querySelector("#map-detail");
-  const openBtn = detailEl?.querySelector("[data-map-deliver]");
-  if (openBtn) {
-    const colis = geocoded.find((c) => c.id === openBtn.dataset.mapDeliver);
-    if (colis) {
-      showMapPopup(detailEl, formatColisDetail(colis, { navApp: settings.navApp, ordre: ordreParColisId.get(colis.id) }));
-      const btn = detailEl.querySelector("[data-map-deliver]");
-      btn?.addEventListener("click", async () => {
-        await markColisDeliveredDirect(btn.dataset.mapDeliver);
-        detailEl.innerHTML = ""; // meme regle : valide = fiche fermee
-        await refreshMapData();
-      });
-    }
-  }
 }
 
 // Ray casting standard (point en coordonnees ecran, polygone = tableau de
@@ -925,7 +867,6 @@ async function render() {
       `
           : ""
       }
-      <div id="map-detail"></div>
       ${
         stopListHtml
           ? `
@@ -952,20 +893,6 @@ async function render() {
   }
 
   const navApp = settings.navApp;
-  const detailEl = containerRef.querySelector("#map-detail");
-
-  function bindDeliverButton() {
-    const btn = detailEl.querySelector("[data-map-deliver]");
-    if (!btn) return;
-    btn.addEventListener("click", async () => {
-      await markColisDeliveredDirect(btn.dataset.mapDeliver);
-      // Valide = fiche fermee (retour terrain) : le point passe au vert sur
-      // la carte, c'est le retour visuel suffisant -- re-taper le pin rouvre.
-      detailEl.innerHTML = "";
-      await refreshMapData();
-    });
-  }
-
   const initialStopListEl = containerRef.querySelector(".stop-panel-list");
   if (initialStopListEl) bindStopListDeliverButtons(initialStopListEl);
 
@@ -1126,23 +1053,19 @@ async function render() {
       }
     }
 
+    // Plus de fiche flottante sur la carte (retour terrain : "on supprime le
+    // cadre, cliquer sur une adresse amene a l'adresse sur le tableau du
+    // bas") : le tap NOTIFIE la feuille, qui s'ouvre, defile jusqu'a la
+    // carte du colis et la met en evidence -- toutes les actions y sont deja.
     map.on("click", "stops-circle", (e) => {
       const props = e.features[0].properties;
-      const colis = geocoded.find((c) => c.id === props.colisId);
-      if (!colis) return;
-      showMapPopup(detailEl, formatColisDetail(colis, { navApp, ordre: ordreParColisId.get(colis.id) }));
-      bindDeliverButton();
-    });
-    map.on("click", (e) => {
-      const layers = ["stops-circle", "favoris-label"].filter((l) => map.getLayer(l));
-      const hits = layers.length ? map.queryRenderedFeatures(e.point, { layers }) : [];
-      if (hits.length === 0) detailEl.innerHTML = "";
+      emit("map:stop-tap", { colisId: props.colisId });
     });
     map.on("click", "favoris-label", (e) => {
       const props = e.features[0].properties;
       const fav = favGeoco.find((f) => f.id === props.favoriId);
       if (!fav) return;
-      showMapPopup(detailEl, formatFavoriDetail(fav));
+      showToast(`⭐ ${fav.rue || "Favori"}${fav.note ? ` — ${fav.note}` : ""}`);
     });
   });
 }
