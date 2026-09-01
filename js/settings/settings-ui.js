@@ -209,7 +209,13 @@ async function render() {
       <button type="button" class="danger" id="s-reset-tours" style="width:100%;">${icon("clock")}Effacer l'historique des tournées</button>
       <p class="muted" style="margin:6px 0 0;">Uniquement les tournées archivées (et celle en cours). Les colis restent dans la préparation.</p>
     </div>
-    <p class="muted" style="text-align:center;margin-top:16px;">Version : build ${APP_BUILD}</p>
+    <div class="card" style="margin-top:20px;">
+      <div class="card-title">${icon("rotate-ccw")}Mise à jour</div>
+      <p class="muted">Version installée : <strong>build ${APP_BUILD}</strong></p>
+      <p class="muted">iOS ne revérifie que rarement si une nouvelle version existe. Ce bouton force la vérification tout de suite.</p>
+      <button type="button" id="s-check-update" style="width:100%;">${icon("rotate-ccw")}Vérifier les mises à jour</button>
+      <p class="muted" id="s-update-status" style="margin:8px 0 0;"></p>
+    </div>
   `;
 
   const smsSelect = containerRef.querySelector("#s-sms-template-select");
@@ -299,6 +305,51 @@ async function render() {
   // Deux effacements SEPARES (retour terrain) : supprimer les colis du jour
   // ne doit pas emporter l'historique des journees, et faire le menage dans
   // l'historique ne doit pas jeter les colis en preparation.
+  // Verification EXPLICITE des mises a jour (retour terrain : "118 veut pas
+  // se telecharger"). iOS Safari ne refait le controle d'octets sur sw.js
+  // que tres paresseusement en PWA standalone -- une version peut rester
+  // invisible pendant des heures malgre plusieurs fermetures completes.
+  // registration.update() force le controle immediatement ; le worker
+  // installe prend la main tout seul (skipWaiting dans sw.js) et le
+  // rechargement automatique (voir app.js) fait le reste.
+  containerRef.querySelector("#s-check-update")?.addEventListener("click", async () => {
+    const statut = containerRef.querySelector("#s-update-status");
+    const btn = containerRef.querySelector("#s-check-update");
+    if (!("serviceWorker" in navigator)) {
+      statut.textContent = "Mises à jour non gérées par ce navigateur.";
+      return;
+    }
+    btn.disabled = true;
+    statut.innerHTML = inlineLoadingHtml("Vérification…");
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) {
+        statut.textContent = "Aucune installation détectée — rouvre l'appli depuis l'écran d'accueil.";
+        btn.disabled = false;
+        return;
+      }
+      await reg.update();
+      // installing/waiting non nuls = une nouvelle version a ete trouvee.
+      const nouvelle = reg.installing || reg.waiting;
+      if (nouvelle) {
+        statut.textContent = "Nouvelle version trouvée — installation puis redémarrage…";
+        nouvelle.addEventListener("statechange", () => {
+          if (nouvelle.state === "activated") location.reload();
+        });
+        // Repli : si l'evenement n'arrive pas (iOS capricieux), on recharge
+        // quand meme apres un delai raisonnable.
+        setTimeout(() => location.reload(), 6000);
+      } else {
+        statut.textContent = `Aucune nouvelle version : tu es déjà sur le build ${APP_BUILD}.`;
+        btn.disabled = false;
+      }
+    } catch (err) {
+      console.error("[settings] verification de mise a jour echouee:", err);
+      statut.textContent = `Vérification impossible (${escapeHtml(err?.message || String(err))}).`;
+      btn.disabled = false;
+    }
+  });
+
   containerRef.querySelector("#s-reset-colis").addEventListener("click", async () => {
     if (!confirm("Effacer tous les colis (préparation et tournée en cours) ? L'historique des journées est conservé. Action irréversible.")) return;
     const db = await getDb();
