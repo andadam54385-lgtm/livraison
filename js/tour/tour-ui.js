@@ -302,10 +302,19 @@ async function render() {
     }
     // Fond de carte : cree au premier rendu, ensuite simple setData/resize
     // -- l'instance MapLibre persiste (slot statique, jamais reecrit).
-    await ensureMap(document.getElementById("tour-map-slot"), "backdrop");
-    // Et toute mutation qui vient de re-rendre l'ecran (scan, livraison,
-    // echec, insertion, recalcul) doit se refleter sur la carte.
-    if (isMapMounted()) await refreshMapData();
+    // Dans son PROPRE try/catch : un echec de la carte ne doit JAMAIS
+    // emporter la liste (bug reel : "Erreur d'affichage" plein ecran sur
+    // l'appareil alors que la preparation elle-meme n'avait rien). L'erreur
+    // est quand meme capturee dans le journal de bugs pour diagnostic.
+    try {
+      await ensureMap(document.getElementById("tour-map-slot"), "backdrop");
+      // Et toute mutation qui vient de re-rendre l'ecran (scan, livraison,
+      // echec, insertion, recalcul) doit se refleter sur la carte.
+      if (isMapMounted()) await refreshMapData();
+    } catch (mapErr) {
+      console.error("Erreur carte (liste conservee):", mapErr);
+      reportBug({ type: "auto", message: mapErr.message || String(mapErr), stack: mapErr.stack, context: "tour-ui render() carte" }).catch(() => {});
+    }
   } catch (err) {
     console.error("Erreur d'affichage de l'écran Tournée:", err);
     reportBug({ type: "auto", message: err.message || String(err), stack: err.stack, context: "tour-ui render()" }).catch(() => {});
