@@ -209,21 +209,29 @@ function formatColisDetail(c, { navApp, ordre } = {}) {
   return `
     <div class="card-row">
       <div class="card-title">${ordre != null ? `#${ordre} ` : ""}${escapeHtml(c.nom || "(nom inconnu)")}</div>
-      ${badgeForStatut(c.statut)}
-      ${c.avant12h ? '<span class="badge badge-urgent">Avant 12h</span>' : ""}
+      ${c.avant12h ? '<span class="badge badge-urgent">12h</span>' : ""}
     </div>
-    <div class="muted">${escapeHtml(adresse)}</div>
-    ${c.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:4px;">${c.quantite} colis</span>` : ""}
+    <div class="muted">${escapeHtml(adresse)}${c.quantite > 1 ? ` — ${c.quantite} colis` : ""}</div>
     <div class="button-row">
-      ${c.tel ? `<a class="btn-link" href="tel:${escapeAttr(c.tel)}">${icon("phone")}Appeler</a>` : ""}
+      ${c.tel ? `<a class="btn-link" href="tel:${escapeAttr(c.tel)}" aria-label="Appeler">${icon("phone", { spaced: false })}</a>` : ""}
       ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation")}Naviguer</a>` : ""}
+      ${
+        done
+          ? `<button type="button" disabled>${c.statut === "livre" ? `Livré ${icon("check", { spaced: false, size: 14 })}` : "Échec"}</button>`
+          : `<button type="button" class="ok" data-map-deliver="${escapeAttr(c.id)}">${icon("check", { spaced: false, size: 14, style: "margin-right:4px;" })}Livré</button>`
+      }
     </div>
-    ${
-      done
-        ? `<button type="button" disabled style="margin-top:10px;width:100%;">${c.statut === "livre" ? `Livré ${icon("check", { spaced: false })}` : "Échec"}</button>`
-        : `<button type="button" class="ok" data-map-deliver="${escapeAttr(c.id)}" style="margin-top:10px;width:100%;">Marquer livré</button>`
-    }
   `;
+}
+
+// Enveloppe commune des fiches flottantes de la carte : popup compacte avec
+// bouton de fermeture (un tap a cote sur la carte ferme aussi, voir le
+// map.on("click") generique dans le handler de load).
+function showMapPopup(detailEl, innerHtml) {
+  detailEl.innerHTML = `<div class="map-popup"><button type="button" class="map-popup-close" aria-label="Fermer">${icon("x", { spaced: false, size: 16 })}</button>${innerHtml}</div>`;
+  detailEl.querySelector(".map-popup-close").addEventListener("click", () => {
+    detailEl.innerHTML = "";
+  });
 }
 
 function formatFavoriDetail(f) {
@@ -641,7 +649,7 @@ export async function refreshMapData() {
   if (openBtn) {
     const colis = geocoded.find((c) => c.id === openBtn.dataset.mapDeliver);
     if (colis) {
-      detailEl.innerHTML = `<div class="card" style="margin:0 16px 12px;">${formatColisDetail(colis, { navApp: settings.navApp, ordre: ordreParColisId.get(colis.id) })}</div>`;
+      showMapPopup(detailEl, formatColisDetail(colis, { navApp: settings.navApp, ordre: ordreParColisId.get(colis.id) }));
       const btn = detailEl.querySelector("[data-map-deliver]");
       btn?.addEventListener("click", async () => {
         await markColisDeliveredDirect(btn.dataset.mapDeliver);
@@ -1118,14 +1126,19 @@ async function render() {
       const props = e.features[0].properties;
       const colis = geocoded.find((c) => c.id === props.colisId);
       if (!colis) return;
-      detailEl.innerHTML = `<div class="card" style="margin:0 16px 12px;">${formatColisDetail(colis, { navApp, ordre: ordreParColisId.get(colis.id) })}</div>`;
+      showMapPopup(detailEl, formatColisDetail(colis, { navApp, ordre: ordreParColisId.get(colis.id) }));
       bindDeliverButton();
+    });
+    map.on("click", (e) => {
+      const layers = ["stops-circle", "favoris-label"].filter((l) => map.getLayer(l));
+      const hits = layers.length ? map.queryRenderedFeatures(e.point, { layers }) : [];
+      if (hits.length === 0) detailEl.innerHTML = "";
     });
     map.on("click", "favoris-label", (e) => {
       const props = e.features[0].properties;
       const fav = favGeoco.find((f) => f.id === props.favoriId);
       if (!fav) return;
-      detailEl.innerHTML = `<div class="card" style="margin:0 16px 12px;">${formatFavoriDetail(fav)}</div>`;
+      showMapPopup(detailEl, formatFavoriDetail(fav));
     });
   });
 }

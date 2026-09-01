@@ -509,15 +509,51 @@ a { color: var(--accent-strong); }
   padding: 12px;
 }
 
-/* Fiche de detail (tap sur un pin/favori) : flotte au-dessus de la carte
-   plutot que de pousser son contenu en dessous (sinon la carte ne serait
-   plus "plein ecran" des qu'une fiche est affichee). */
+/* Fiche de detail (tap sur un pin/favori) : flotte au-dessus de la carte.
+   COMPACTE (retour terrain : "le cadre du point doit etre vraiment plus
+   petit") -- l'ancienne carte pleine largeur avec deux gros boutons empiles
+   mangeait un tiers de la carte ; ici largeur bornee, une seule rangee de
+   petits boutons, et un X pour fermer (ou un tap a cote sur la carte). */
 #map-detail:not(:empty) {
   position: absolute;
   top: 64px;
   left: 12px;
-  right: 12px;
+  max-width: min(300px, calc(100vw - 24px));
   z-index: 5;
+}
+.map-popup {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  padding: 9px 34px 9px 11px;
+  box-shadow: var(--shadow-elevated);
+}
+.map-popup .card-title { font-size: 0.92rem; margin-bottom: 1px; }
+.map-popup .muted { font-size: 0.8rem; line-height: 1.35; }
+.map-popup .button-row { margin-top: 8px; gap: 6px; }
+.map-popup .button-row .btn-link,
+.map-popup .button-row button {
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  border-radius: 10px;
+  flex: 0 1 auto;
+}
+.map-popup-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
 }
 
 /* Feuille glissante a 3 positions (repliee/mi-hauteur/pleine hauteur, voir
