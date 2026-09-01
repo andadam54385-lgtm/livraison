@@ -1040,7 +1040,37 @@ async function render() {
   bindVisibilityRebuild();
 
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
-  const onThemeChange = () => loadBasemapStyle(currentFlavor()).then((s) => map.setStyle(s));
+  // Bug reel (fusion) : map.setStyle() EFFACE toutes les sources/couches
+  // ajoutees (points, trajet, favoris, icones). Du temps de l'onglet Carte,
+  // l'instance etait recreee a chaque visite et le bug restait invisible ;
+  // avec la carte persistante, le premier changement de theme (l'iPhone
+  // bascule sombre->clair au lever du jour...) faisait disparaitre les
+  // points POUR TOUJOURS -- et chaque refreshMapData suivant echouait sur
+  // getSource() disparu ("plus de point sur la carte", retour terrain).
+  // Toutes les couches sont donc rebaties une fois le nouveau style charge.
+  const onThemeChange = () =>
+    loadBasemapStyle(currentFlavor()).then((s) => {
+      if (map !== mapInstance) return;
+      layersReady = false;
+      map.setStyle(s);
+      map.once("style.load", async () => {
+        if (map !== mapInstance) return;
+        try {
+          const data = await loadMapData();
+          if (map !== mapInstance) return;
+          await ensureMapIcons(map);
+          addMapLayers(map, {
+            routeGeoJson: buildRouteGeoJson(data.depot, data.ordered, data.returnPoint, data.csr),
+            stopsGeoJson: buildStopsGeoJson(data.geocoded, data.ordreParColisId),
+            favorisGeoJson: buildFavorisGeoJson(data.favGeoco),
+            waypointsGeoJson: buildWaypointsGeoJson(data.depot, data.returnPoint),
+          });
+          layersReady = true;
+        } catch (err) {
+          console.error("[map] reconstruction des couches apres changement de theme:", err);
+        }
+      });
+    });
   mq.addEventListener("change", onThemeChange);
   themeMediaCleanup = () => mq.removeEventListener("change", onThemeChange);
 
