@@ -22,6 +22,18 @@
 // tour-ui.js) : depart + trajets cumules + duree d'arret par point deja
 // visite, pour que l'app n'optimise jamais sur un modele different de celui
 // qu'elle affiche.
+// Un troncon inatteignable (graphe deconnecte, au-dela du plafond de la
+// matrice) vaut Infinity dans la matrice : sans plafond fini, le cout TOTAL
+// devient Infinity pour TOUS les ordres candidats, plus aucune comparaison ne
+// distingue rien, et le 2-opt ne peut plus rien ameliorer -- l'ordre reste le
+// plus-proche-voisin brut, connu pour ses croisements/allers-retours. Une
+// valeur finie enorme garde le point "cher" sans aveugler l'optimiseur.
+const UNREACHABLE_LEG_SECONDS = 4 * 3600;
+
+// Cout forfaitaire d'une arrivee pendant la fermeture d'un pro (~un
+// repassage) -- voir le commentaire dans tourCost.
+const WINDOW_MISS_SECONDS = 30 * 60;
+
 export function tourCost(order, matrix, startIdx, timing = {}) {
   const { departureSec = 0, dwellSec = 0, deadlines = {}, closedWindows = {}, lateWeight = 10 } = timing;
 
@@ -32,25 +44,33 @@ export function tourCost(order, matrix, startIdx, timing = {}) {
 
   for (let pos = 0; pos < order.length; pos++) {
     const idx = order[pos];
-    const leg = matrix[current][idx];
+    const rawLeg = matrix[current][idx];
+    const leg = Number.isFinite(rawLeg) ? rawLeg : UNREACHABLE_LEG_SECONDS;
     travel += leg;
     clock += leg;
 
     const limit = deadlines[idx];
-    if (limit != null && clock > limit) penalty += clock - limit;
+    if (limit != null && clock > limit) penalty += (clock - limit) * lateWeight;
 
-    // Arriver pendant une fermeture (pause de midi d'un pro) reviendrait a
-    // attendre la reouverture : on compte cette attente comme penalite sans
-    // decaler l'horloge. Contrainte souple -- le but est que l'optimiseur
-    // evite le creneau, pas de simuler une attente sur place.
+    // Arriver pendant une fermeture (pause de midi d'un pro) : penalite
+    // FORFAITAIRE, pas proportionnelle -- double bug reel corrige ici
+    // (retour terrain : "des allers-retours"). (1) Ponderee x10 comme les
+    // retards, une arrivee a 12h01 coutait ~20h fictives : n'importe quel
+    // detour devenait "rentable", un ou deux colis "pro" tordaient toute la
+    // tournee. (2) Proportionnelle a l'attente restante (win[1]-clock), elle
+    // RECOMPENSAIT une arrivee tard dans le creneau (13h51 "moins cher" que
+    // 12h05) -- alors que ferme, c'est ferme, l'arret est perdu pareil. Le
+    // forfait (~cout reel d'un repassage) borne mecaniquement les detours
+    // acceptes : l'optimiseur ne deplace un pro que si ca coute moins que
+    // WINDOW_MISS_SECONDS de trajet en plus, sinon il n'y touche pas.
     const win = closedWindows[idx];
-    if (win && clock >= win[0] && clock < win[1]) penalty += win[1] - clock;
+    if (win && clock >= win[0] && clock < win[1]) penalty += WINDOW_MISS_SECONDS;
 
     clock += dwellSec;
     current = idx;
   }
 
-  return travel + penalty * lateWeight;
+  return travel + penalty;
 }
 
 // fixedEndIdx (optionnel) : force cet index a rester le tout dernier arret

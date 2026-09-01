@@ -106,11 +106,15 @@ console.log("\n=== Fermeture de midi d un pro : creneau evite, pas un rang impos
 {
   const matrix = buildLineMatrix(3, 3600);
   const timing = { departureSec: H(10), dwellSec: 300, deadlines: {}, lateWeight: 1 };
-  // Point 2 atteint a 12h05, en pleine fermeture 12h-14h -> attente facturee
-  // jusqu a la reouverture (1h55).
+  // Point 2 atteint a 12h05, en pleine fermeture 12h-14h -> penalite
+  // FORFAITAIRE (30 min, ~un repassage), identique quelle que soit l heure
+  // d arrivee DANS le creneau -- ferme c est ferme, pas de "moins pire".
   const ferme = tourCost([1, 2], matrix, 0, { ...timing, closedWindows: { 2: [H(12), H(14)] } });
   const ouvert = tourCost([1, 2], matrix, 0, { ...timing, closedWindows: {} });
-  check("attente jusqu a la reouverture facturee", ferme - ouvert, H(14) - (H(10) + 2 * 3600 + 300));
+  check("penalite forfaitaire d arrivee pendant la fermeture", ferme - ouvert, 30 * 60);
+  const fermeTard = tourCost([1, 2], matrix, 0, { ...timing, departureSec: H(11, 30), closedWindows: { 2: [H(12), H(14)] } });
+  const ouvertTard = tourCost([1, 2], matrix, 0, { ...timing, departureSec: H(11, 30), closedWindows: {} });
+  check("meme forfait plus tard dans le creneau (pas de rabais)", fermeTard - ouvertTard, 30 * 60);
 
   // Arriver APRES la reouverture ne coute rien.
   const tardif = tourCost([1, 2], matrix, 0, { ...timing, departureSec: H(15), closedWindows: { 2: [H(12), H(14)] } });
@@ -128,6 +132,46 @@ console.log("\n=== Contrainte souple : jamais d echec, meme si tout est intenabl
     timeBudgetMs: 300,
   });
   check("tous les arrets sont quand meme ordonnances", order.slice().sort((a, b) => a - b), stops);
+}
+
+console.log("\n=== Regression 'allers-retours' : la fermeture d un pro ne tord pas la tournee ===");
+{
+  // 8 arrets en ligne, 8 min de trajet entre voisins, 3 min d arret.
+  // Depart 11h30 : l arret 5 (pro, ferme 12h-14h) tombe en pleine fermeture
+  // quel que soit l ordre raisonnable. L eviter exigerait de le repousser
+  // apres 14h, soit ~2h a tourner en rond -- bien PLUS cher que l attente
+  // reelle a la porte. Pondere x10 (l ancien bug), l optimiseur choisissait
+  // quand meme le grand detour : c est le "des allers-retours" du terrain.
+  const n = 9;
+  const matrix = buildLineMatrix(n, 480);
+  const stops = [];
+  for (let i = 1; i < n; i++) stops.push(i);
+
+  const { order } = optimizeTourOrder(matrix, 0, stops, {
+    timing: { departureSec: H(11, 30), dwellSec: 180, deadlines: {}, closedWindows: { 5: [H(12), H(14)] } },
+    timeBudgetMs: 500,
+  });
+  check("l ordre reste le parcours en ligne (pas de detour absurde)", order, stops);
+}
+
+console.log("\n=== Un arret inatteignable n aveugle plus le 2-opt ===");
+{
+  // 6 arrets en ligne + un point 7 isole (Infinity vers/depuis tout le
+  // monde). Avant le plafond fini, TOUT ordre coutait Infinity : le 2-opt ne
+  // pouvait plus rien comparer et l ordre restait le plus-proche-voisin brut.
+  const n = 8;
+  const matrix = buildLineMatrix(n, 300);
+  for (let i = 0; i < n; i++) {
+    matrix[i][7] = Infinity;
+    matrix[7][i] = Infinity;
+  }
+  const stops = [1, 2, 3, 4, 5, 6, 7];
+  const { order, cost } = optimizeTourOrder(matrix, 0, stops, {
+    timing: { departureSec: H(8), dwellSec: 120, deadlines: {}, closedWindows: {} },
+    timeBudgetMs: 300,
+  });
+  checkTrue("le cout reste fini (comparable/optimisable)", Number.isFinite(cost));
+  check("les arrets atteignables restent en ligne, l isole en dernier", order, [1, 2, 3, 4, 5, 6, 7]);
 }
 
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} TEST(S) EN ECHEC`);
