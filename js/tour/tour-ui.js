@@ -54,6 +54,23 @@ export async function mount(container) {
     const settingsBtn = document.getElementById("tour-settings-btn");
     settingsBtn.innerHTML = icon("settings", { spaced: false, size: 20 });
     settingsBtn.addEventListener("click", () => { location.hash = "#settings"; });
+    // Recalcul dans le header (retour terrain : "a cote de Reglages en
+    // haut") : toujours accessible sans deplier la feuille. Visible en Etat
+    // B uniquement (voir render()) ; le retour visuel (statut + barre de
+    // progression) reste DANS la feuille, la ou l'oeil suit la liste.
+    const recalcBtn = document.getElementById("tour-recalc-btn");
+    recalcBtn.innerHTML = icon("rotate-ccw", { spaced: false, size: 20 });
+    recalcBtn.addEventListener("click", () => {
+      if (recalcBtn.disabled || !lastTour) return;
+      runRecalculate(containerRef, {
+        tour: lastTour,
+        disableButtons: [recalcBtn],
+        onDone: () => {
+          reorderMode = false;
+          render();
+        },
+      });
+    });
     sheetControl = setupTourSheet();
     // Tap sur un point de la carte -> la feuille s'ouvre et defile jusqu'a
     // la carte du colis (voir l'emit dans map-ui.js). Bind unique, comme le
@@ -321,6 +338,8 @@ async function render() {
     if (firstChrome) sheetControl?.applyState("half", false);
 
     const tour = await getActiveTour();
+    const headerRecalc = document.getElementById("tour-recalc-btn");
+    if (headerRecalc) headerRecalc.hidden = !tour || view === "detail";
     if (!tour) {
       await renderEtatA();
     } else {
@@ -968,9 +987,6 @@ async function renderEtatB(tour) {
         <span class="muted">${formatDurationShort(tour.totalDureeSec)} estimées</span>
       </div>
     </div>
-    <div class="button-row" style="margin:0 0 6px;">
-      <button type="button" id="recalc-tour-btn">${icon("zap")}Recalculer la tournée</button>
-    </div>
     <p id="routing-status" class="muted" style="margin:-2px 0 6px;"></p>
     <div class="progress-bar" style="margin:-2px 0 12px;"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
     ${heroHtml}
@@ -1030,18 +1046,7 @@ async function renderEtatB(tour) {
     render();
   });
 
-  containerRef.querySelector("#recalc-tour-btn").addEventListener("click", () => {
-    const recalcBtn = containerRef.querySelector("#recalc-tour-btn");
-    const endBtn = containerRef.querySelector("#end-tour-btn");
-    runRecalculate(containerRef, {
-      tour,
-      disableButtons: [recalcBtn, endBtn],
-      onDone: () => {
-        reorderMode = false;
-        render();
-      },
-    });
-  });
+
 
   containerRef.querySelector("#end-tour-btn").addEventListener("click", async () => {
     if (!confirm("Terminer cette tournée ? Les arrêts restants (non livrés) resteront dans l'historique tels quels — utilise plutôt \"Recalculer\" s'il reste des arrêts à faire.")) return;
