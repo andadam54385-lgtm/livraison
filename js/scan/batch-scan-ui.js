@@ -1,8 +1,7 @@
 import { recognizeCanvasWithLines } from "./ocr.js";
 import { parseAddressList } from "./parse-address-list.js";
-import { matchAddress, streetSimilarity, looseCommune } from "../geocode/match-address.js";
+import { matchAddress, looseCommune } from "../geocode/match-address.js";
 import { formatEntry } from "../geocode/geocode-ui.js";
-import { normalizeStreet, normalizeCity } from "../geocode/normalize-address.js";
 import { listDistinctCities } from "../geocode/ban-index.js";
 import { saveColis } from "./colis-store.js";
 import { splitNumeroRue, renderReviewForm } from "./scan-ui.js";
@@ -13,6 +12,7 @@ import { escapeHtml } from "../lib/escape.js";
 import { loadingHtml, inlineLoadingHtml } from "../lib/loading.js";
 import { emit } from "../lib/event-bus.js";
 import { saveScanReport } from "./scan-reports-store.js";
+import { ingestDrafts } from "./dedup-drafts.js";
 
 // Scan en rafale : filme un ECRAN affichant plusieurs adresses a la fois
 // (ex: appli/portail du transporteur listant une tournee), par opposition au
@@ -82,72 +82,6 @@ function preprocessForOcr(ctx, canvas) {
   ctx.putImageData(imageData, 0, 0);
 }
 
-
-// Deduplication FLOUE (pas une simple cle exacte) : bug reel corrige ici,
-// retour terrain "65 arrets reels -> 240 propositions". L'OCR d'un ecran
-// filme (reflets, tremblement, texte minuscule) ne relit JAMAIS deux fois le
-// MEME texte a l'identique pour une meme adresse physique -- une cle exacte
-// (rue+cp+ville normalises) traitait donc chaque nouvelle variante de bruit
-// comme une adresse toute neuve a chaque passage de l'OCR (la boucle tourne
-// en continu tant que la camera reste pointee), d'ou la multiplication.
-// On compare desormais chaque nouvelle detection a celles deja retenues via
-// streetSimilarity (Levenshtein + trigrammes, deja utilise pour le
-// geocodage BAN) : un CP present des deux cotes doit correspondre, une ville
-// presente des deux cotes doit correspondre, et la rue doit depasser
-// FUZZY_DEDUP_THRESHOLD -- suffisamment tolerant au bruit OCR sans fusionner
-// deux rues reellement differentes du meme secteur.
-const FUZZY_DEDUP_THRESHOLD = 0.62;
-
-export function isSameAddress(a, b) {
-  if (a.cp && b.cp && a.cp !== b.cp) return false;
-  const villeA = normalizeCity(a.ville || "");
-  const villeB = normalizeCity(b.ville || "");
-  if (villeA && villeB && villeA !== villeB) return false;
-  const streetA = normalizeStreet(a.rue || "");
-  const streetB = normalizeStreet(b.rue || "");
-  if (!streetA || !streetB) return Boolean(villeA) && villeA === villeB;
-  // Fiche COUPEE au bord du cadre de capture (retour terrain "138 points au
-  // lieu de 60" sur un ecran qui defile) : une image attrape "15 RUE DU
-  // MARECHAL", la suivante la fiche entiere avec la commune repliee dans la
-  // rue -- la similarite Levenshtein/trigrammes s'effondre alors que c'est le
-  // MEME client. Une rue strictement contenue dans l'autre (des le debut,
-  // normalisees toutes les deux) suffit a les identifier.
-  const shorter = streetA.length <= streetB.length ? streetA : streetB;
-  const longer = streetA.length <= streetB.length ? streetB : streetA;
-  if (shorter.length >= 8 && longer.startsWith(shorter)) return true;
-  return streetSimilarity(streetA, streetB) >= FUZZY_DEDUP_THRESHOLD;
-}
-
-// Complete en place un brouillon deja retenu avec les champs qu'une nouvelle
-// capture aurait mieux lus (ex: CP/ville absents la premiere fois, texte de
-// rue plus complet) -- profite du fait que l'OCR se trompe DIFFEREMMENT a
-// chaque passage plutot que de garder seulement la toute premiere lecture,
-// potentiellement la plus incomplete.
-export function mergeDraftInto(existing, incoming) {
-  if (!existing.cp && incoming.cp) existing.cp = incoming.cp;
-  if (!existing.ville && incoming.ville) existing.ville = incoming.ville;
-  if (!existing.nom && incoming.nom) existing.nom = incoming.nom;
-  if (incoming.rue && (!existing.rue || incoming.rue.length > existing.rue.length + 3)) existing.rue = incoming.rue;
-}
-
-// Absorbe les brouillons d'une passe OCR dans la collecte (deduplication
-// floue + complement des champs manquants) -- partage entre le mode camera
-// live et l'analyse d'une video importee, qui produisent exactement les
-// memes brouillons par des chemins differents.
-function ingestDrafts(collected, drafts) {
-  const boxResults = [];
-  for (const draft of drafts) {
-    const matchIdx = collected.findIndex((existing) => isSameAddress(existing, draft));
-    const isNew = matchIdx === -1;
-    if (isNew) {
-      collected.push(draft);
-    } else {
-      mergeDraftInto(collected[matchIdx], draft);
-    }
-    boxResults.push({ bbox: draft.bbox, isNew });
-  }
-  return boxResults;
-}
 
 // Analyse d'une VIDEO enregistree avec la camera native puis importee --
 // retour terrain : "si je mettais la video directement sur l'app, ce serait
@@ -337,7 +271,14 @@ function analyzeVideoFile(file, container) {
               preprocessForOcr(ctx, captureCanvas);
               const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
               if (stopped) break;
-              rapportFrames.push({ index, lignes: lines.map((l) => l.text) });
+              // La POSITION verticale part avec le texte : sans elle, un
+              // compte rendu ne permet pas de rejouer le decoupage en blocs
+              // (groupLinesIntoBlocks travaille sur les ecarts entre lignes),
+              // donc pas de rejeu fidele d'un cas reel dans les tests.
+              rapportFrames.push({
+                index,
+                lignes: lines.map((l) => ({ texte: l.text, y0: Math.round(l.bbox?.y0 ?? 0), y1: Math.round(l.bbox?.y1 ?? 0) })),
+              });
               ingestDrafts(collected, parseAddressList(lines, { knownCities, knownCps }));
               framesOk++;
               seekFailures = 0;

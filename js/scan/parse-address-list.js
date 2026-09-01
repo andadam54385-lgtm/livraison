@@ -142,7 +142,25 @@ function stripNoiseTokens(text) {
   for (const re of NOISE_TOKEN_PATTERNS) out = out.replace(re, " ");
   // Residus de separateurs isoles laisses par les suppressions ci-dessus.
   out = out.replace(/\s{2,}/g, " ").trim();
-  out = out.replace(/^[\s,;:.|>\-\u2013_*"'\u00b0]+/, "").replace(/[\s,;:|>_*"'\u00b0]+$/, "").trim();
+  // Ponctuation orpheline AU MILIEU de la ligne : "55000 ,, BAR LE DUC" ou
+  // "55000 ) BAR-LE-DUC". Elle separait le code postal de la commune et
+  // empechait CP_VILLE_RE de les reconnaitre comme un couple -- la fiche
+  // repartait alors sans CP ni ville, donc non geocodable. Seuls les amas
+  // ENTOURES d'espaces sont vises : la virgule collee a un mot reste intacte
+  // ("60, Rue des Etats-Unis").
+  let previous;
+  do {
+    previous = out;
+    out = out.replace(/\s[,;:.|*'"°«»~=()]{1,3}(?=\s)/g, "").replace(/\s{2,}/g, " ");
+  } while (out !== previous);
+  // Ponctuation orpheline laissee par l'OCR aux deux bouts. Le jeu de fin
+  // inclut ")", "@", "=", les chevrons et "#" : observes colles derriere un
+  // code postal reel ("55000 )", "FAINS VEEL 55000 @"), ils empechaient la
+  // reconnaissance du CP et la fiche entiere finissait "a verifier".
+  out = out
+    .replace(/^[\s,;:.|>\-–_*"'°«»()@=~#]+/, "")
+    .replace(/[\s,;:|>_*"'°«»()@=~#]+$/, "")
+    .trim();
   return out;
 }
 
@@ -263,7 +281,30 @@ function lineHasStreetWord(line) {
 // ville n'occupe pas la ligne entiere -- sans ca, classifyBlockLines ne
 // reconnaitrait ni une ligne de rue propre ni une ligne CP+ville propre, et
 // la ligne entiere finirait mal classee.
-function splitEmbeddedCpVille(line) {
+const MAX_VILLE_WORDS = 5;
+
+// Detache une commune CONNUE collee a la fin d'un texte ("1 VERDUN RUE BAR LE
+// DUC" -> ["1 VERDUN RUE", "BAR LE DUC"]). Renvoie null si la fin du texte ne
+// correspond a aucune commune de la base : on ne devine jamais une ville a
+// partir de sa seule forme, seule la base BAN tranche.
+function peelKnownVille(text, knownCities) {
+  if (!knownCities || knownCities.size === 0) return null;
+  const words = text.split(/\s+/).filter(Boolean);
+  // Du plus LONG au plus court : "BAR LE DUC" doit gagner contre "DUC". Le
+  // texte ENTIER est un candidat valable (k = words.length) : le cas le plus
+  // frequent est justement une ligne qui ne contient QUE la commune et le
+  // code postal ("BAR LE DUC 55000").
+  for (let k = Math.min(MAX_VILLE_WORDS, words.length); k >= 1; k--) {
+    const candidate = words.slice(words.length - k).join(" ");
+    const normalized = looseCommune(normalizeCity(candidate));
+    if (normalized && knownCities.has(normalized)) {
+      return { rest: words.slice(0, words.length - k).join(" "), ville: candidate };
+    }
+  }
+  return null;
+}
+
+function splitEmbeddedCpVille(line, knownCities) {
   const trimmed = line.trim();
   if (!trimmed || CP_VILLE_RE.test(trimmed)) return [trimmed];
   const m = trimmed.match(CP_VILLE_TRAILING_RE);
@@ -272,7 +313,20 @@ function splitEmbeddedCpVille(line) {
   // nom de commune replie sur plusieurs lignes par le terminal) : isole le
   // CP pour qu'il soit reconnu (CP_ONLY_RE), le reste suit le circuit normal.
   const mCp = trimmed.match(/^(.*\S)\s+(\d{5})$/);
-  if (mCp && !/\d$/.test(mCp[1])) return [mCp[1].trim(), mCp[2]];
+  if (mCp && !/\d$/.test(mCp[1])) {
+    const rest = mCp[1].trim();
+    // Ordre "<rue> <VILLE> <CP>" ("1 VERDUN RUE BAR LE DUC 55000"), tres
+    // frequent quand l'OCR replie les trois lignes d'une fiche en une seule.
+    // Sans ce decoupage la commune restait DANS la rue : l'adresse ne pouvait
+    // pas etre geocodee et le colis finissait "a verifier" alors que tout
+    // etait pourtant parfaitement lisible.
+    const peeled = peelKnownVille(rest, knownCities);
+    if (peeled) {
+      const cpVille = `${mCp[2]} ${peeled.ville}`;
+      return peeled.rest ? [peeled.rest, cpVille] : [cpVille];
+    }
+    return [rest, mCp[2]];
+  }
   return [trimmed];
 }
 
@@ -367,7 +421,7 @@ function isPlausibleCp(cp, knownCps) {
 }
 
 export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps = new Set() } = {}) {
-  const lines = rawLines.flatMap(splitEmbeddedCpVille);
+  const lines = rawLines.flatMap((l) => splitEmbeddedCpVille(l, knownCities));
   const result = { names: [], streets: [], cp: null, ville: null };
   let lastCategory = null;
 
@@ -601,6 +655,20 @@ export function parseAddressList(ocrLines, { knownCities = new Set(), knownCps =
     // pour une rue et devenait un colis a verifier.
     .filter((b) => {
       const rueCredible = b.rue && /[a-z\u00e0-\u00ff]{3,}/i.test(b.rue);
-      return rueCredible || (b.cp && b.ville);
+      if (!rueCredible && !(b.cp && b.ville)) return false;
+      // Sans base de reference (tests unitaires, import pas encore fait), on
+      // s'arrete la : le filtre ci-dessous a besoin des communes/CP reels.
+      if (knownCities.size === 0 && knownCps.size === 0) return true;
+      // Une fiche doit etre LOCALISABLE : un code postal, ou une commune
+      // connue. Retour terrain "66 colis dont 52 a verifier" sur une video de
+      // 63 arrets : une bonne part des fiches retenues etaient des FRAGMENTS
+      // coupes par le bord haut de l'ecran pendant le defilement ("SSAGE RUE"
+      // pour "PASSAGE RUE", "ERATION AVE FAINSAUEEL" pour "10 LIBERATION AVE
+      // FAINS-VEEL"). Ces fragments n'ont jamais ni CP ni commune -- ce sont
+      // precisement les lignes restees hors du cadre -- alors qu'une fiche
+      // entiere en a toujours au moins un des deux. Aucun n'etait geocodable :
+      // c'etait du tri manuel en pure perte.
+      const villeConnue = b.ville && knownCities.has(looseCommune(normalizeCity(b.ville)));
+      return Boolean(b.cp) || Boolean(villeConnue);
     });
 }

@@ -90,7 +90,13 @@ function renderScanReportsSection(reports) {
     resume,
     "",
     "=== TEXTE OCR BRUT, IMAGE PAR IMAGE ===",
-    ...r.frames.flatMap((f) => [`--- image ${f.index} ---`, ...f.lignes]),
+    // Position verticale en prefixe : c'est ce qui rend le cas rejouable tel
+    // quel dans parse-address-list.test.mjs (les ecarts entre lignes decident
+    // du decoupage en fiches).
+    ...r.frames.flatMap((f) => [
+      `--- image ${f.index} ---`,
+      ...f.lignes.map((l) => (l.y0 == null ? l.texte : `[${l.y0}-${l.y1}] ${l.texte}`)),
+    ]),
     "",
     "=== ADRESSES RETENUES PAR LE PARSER ===",
     ...r.resultats.map((x, i) => `${i + 1}. nom=${JSON.stringify(x.nom)} rue=${JSON.stringify(x.rue)} cp=${JSON.stringify(x.cp)} ville=${JSON.stringify(x.ville)}`),

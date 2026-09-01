@@ -28,7 +28,9 @@ export async function saveScanReport({ source, frames, drafts, dureeMs }) {
     dureeMs,
     framesAnalysees: frames.length,
     adressesRetenues: drafts.length,
-    // Texte brut par image : la matiere premiere du diagnostic.
+    // Texte brut par image, avec la position verticale de chaque ligne : la
+    // matiere premiere du diagnostic. Les anciens comptes rendus stockaient
+    // des chaines nues -- listScanReports normalise les deux formes.
     frames: frames.map((f) => ({ index: f.index, lignes: f.lignes })),
     // Ce que le parser a retenu au final (rue/cp/ville/nom), pour comparer
     // d'un coup d'oeil avec le texte brut ci-dessus.
@@ -46,6 +48,13 @@ export async function saveScanReport({ source, frames, drafts, dureeMs }) {
 export async function listScanReports() {
   const db = await getDb();
   const tous = await getAll(db, "scanReports");
+  // Normalise les lignes en {texte, y0, y1} : les comptes rendus enregistres
+  // avant l'ajout des positions ne contiennent que des chaines.
+  for (const r of tous) {
+    for (const f of r.frames || []) {
+      f.lignes = (f.lignes || []).map((l) => (typeof l === "string" ? { texte: l, y0: null, y1: null } : l));
+    }
+  }
   return tous.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 }
 

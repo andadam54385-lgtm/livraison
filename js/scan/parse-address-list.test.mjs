@@ -395,11 +395,14 @@ console.log("\n=== Cas 16 : marqueurs de distance, chrome telephone, badges a es
   const knownCps16 = new Set(["55000", "55500"]);
   const opts16 = { knownCities: knownCities16, knownCps: knownCps16 };
 
-  // (a) FUSION a un SEUL code postal : seul le marqueur de distance peut la
-  // couper (le CP ne suffisait pas -- cas observe en conditions reelles).
+  // (a) FUSION coupee sur les marqueurs de distance. Disposition FIDELE au
+  // terminal : chaque fiche porte bien sa ligne "COMMUNE CP" (verifie sur le
+  // compte rendu OCR d'une vraie video, images 4/5/7), ce que la premiere
+  // version de ce cas omettait pour le client KULLMANN.
   const fusion = parseAddressList(
     [
       L16("10.5km Q PE 2 KULLMANN IMP 10:30 - 12:30 ®"),
+      L16("BAR LE DUC 55000"),
       L16("10.84km Q EURLGREGAUTO 8000 | 0+1 D 4 9EME RI AVE BAR-LE-DUC"),
       L16("55000 10:30-12:30 © ,, BAR LE DUC"),
     ],
@@ -410,6 +413,22 @@ console.log("\n=== Cas 16 : marqueurs de distance, chrome telephone, badges a es
     fusion.some((b) => (b.rue || "").includes("KULLMANN")),
     true,
     "(a) le premier client (KULLMANN) est isole"
+  );
+
+  // (a-bis) L'intention d'origine de (a) : le marqueur de distance coupe TOUT
+  // SEUL, sans l'aide d'un second code postal. Verifiee sans base de reference
+  // (Sets vides), ou le filtre "fiche localisable" ne s'applique pas -- c'est
+  // bien le decoupage qu'on teste ici, pas la retention.
+  const fusionSansRef = parseAddressList([
+    L16("10.5km Q PE 2 KULLMANN IMP 10:30 - 12:30 ®"),
+    L16("10.84km Q EURLGREGAUTO 8000 | 0+1 D 4 9EME RI AVE BAR-LE-DUC"),
+    L16("55000 10:30-12:30 © ,, BAR LE DUC"),
+  ]);
+  assertEqual(fusionSansRef.length >= 2, true, "(a-bis) le marqueur de distance coupe sans second CP");
+  assertEqual(
+    fusionSansRef.some((b) => (b.rue || "").includes("KULLMANN")),
+    true,
+    "(a-bis) KULLMANN isole sans base de reference"
   );
 
   // (b) chrome du telephone + de l'appli : jamais un client
@@ -432,6 +451,58 @@ console.log("\n=== Cas 16 : marqueurs de distance, chrome telephone, badges a es
   const badge = parseAddressList([L16("EDF 4000 | 140 87"), L16("2 NOTRE DAME RUE"), L16("55500")], opts16);
   assertEqual(badge.length, 1, "(d) un seul client");
   assertEqual(badge[0].nom, "EDF", "(d) nom nettoye du badge a espace");
+}
+
+console.log("\n=== Cas 17 : compte rendu OCR d'une vraie video (63 arrets, terrain 2026-09-01) ===");
+{
+  let y17 = 0;
+  const L17 = (text, gapBefore = 4) => {
+    y17 += gapBefore + 20;
+    return { text, bbox: { x0: 0, y0: y17, x1: 300, y1: y17 + 20 } };
+  };
+  const knownCities17 = new Set(
+    ["Bar-le-Duc", "Fains-Veel", "Velaines", "Ligny-en-Barrois", "Louppy-le-Chateau"].map((c) =>
+      looseCommune(normalizeCity(c))
+    )
+  );
+  const knownCps17 = new Set(["55000", "55500", "55800"]);
+  const opts17 = { knownCities: knownCities17, knownCps: knownCps17 };
+
+  // (a) Ordre "<rue> <VILLE> <CP>" sur une seule ligne, avec la ponctuation
+  // parasite que l'OCR colle derriere le code postal. Avant : la commune
+  // restait dans la rue et le CP n'etait pas vu du tout -> "a verifier".
+  const villeAvantCp = parseAddressList([L17("AUDITION HUSSON"), L17("1 VERDUN RUE BAR LE DUC 55000 )")], opts17);
+  assertEqual(villeAvantCp.length, 1, "(a) une seule fiche");
+  assertEqual(villeAvantCp[0].rue, "1 VERDUN RUE", "(a) la commune est retiree de la rue");
+  assertEqual(villeAvantCp[0].cp, "55000", "(a) le CP est lu malgre la parenthese qui le suit");
+  assertEqual(villeAvantCp[0].ville, "BAR LE DUC", "(a) la commune est extraite");
+
+  // (b) Meme chose avec un "@" parasite et une commune ecrite sans tiret.
+  const arobase = parseAddressList([L17("crea tif"), L17("50 CHATEAU RUE FAINS VEEL 55000 @")], opts17);
+  assertEqual(arobase.length, 1, "(b) une seule fiche");
+  assertEqual(arobase[0].rue, "50 CHATEAU RUE", "(b) rue propre");
+  assertEqual(arobase[0].ville, "FAINS VEEL", "(b) commune extraite malgre le @");
+
+  // (c) FRAGMENTS coupes par le bord HAUT de l'ecran pendant le defilement :
+  // ni CP ni commune (ces lignes-la sont restees hors du cadre). Ils
+  // representaient une grande part des "a verifier" d'une video reelle et
+  // n'etaient geocodables dans aucun cas.
+  for (const fragment of [
+    "ERATION AVE FAINSAUEEL DRDLU",
+    "SSAGE RUE D ILLE EN BARROIS",
+    "7ECHAL LANNES D 11ERES DEVANT",
+  ]) {
+    assertEqual(parseAddressList([L17(fragment)], opts17).length, 0, `(c) fragment ecarte : ${fragment.slice(0, 24)}`);
+  }
+
+  // (d) ... mais une fiche ENTIERE reste retenue, meme sans nom lisible.
+  const entiere = parseAddressList([L17("10 LIBERATION AVE"), L17("FAINS-VEEL 55000")], opts17);
+  assertEqual(entiere.length, 1, "(d) fiche entiere conservee");
+  assertEqual(entiere[0].cp, "55000", "(d) CP present");
+
+  // (e) Sans base de reference, aucun filtrage supplementaire : le repli
+  // d'avant l'import BAN reste identique.
+  assertEqual(parseAddressList([L17("ERATION AVE FAINSAUEEL DRDLU")]).length, 1, "(e) sans reference, rien n'est filtre");
 }
 
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");

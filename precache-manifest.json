@@ -1,6 +1,6 @@
 {
-  "version": "52b87c7b80ca",
-  "generatedAt": "2026-09-01T19:30:59.296Z",
+  "version": "ef9241feca47",
+  "generatedAt": "2026-09-01T19:56:22.400Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -52,6 +52,8 @@
     "./js/scan/colis-detail-ui.js",
     "./js/scan/colis-store.js",
     "./js/scan/colis-store.test.mjs",
+    "./js/scan/dedup-drafts.js",
+    "./js/scan/dedup-drafts.test.mjs",
     "./js/scan/ocr-corrections-store.js",
     "./js/scan/ocr-debug-ui.js",
     "./js/scan/ocr.js",
