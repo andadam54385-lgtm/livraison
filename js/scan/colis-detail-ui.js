@@ -40,7 +40,7 @@ function badgeForStatut(statut) {
 // s'enregistre en quittant le champ). Cree le favori silencieusement au 1er
 // caractere tape s'il n'existait pas encore -- "favori" ici n'est qu'une
 // adresse qui porte une note, pas une action separee a declencher a la main.
-async function saveFavoriInfo(colis, patch) {
+export async function saveFavoriInfo(colis, patch) {
   const existing = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
   if (existing) {
     await updateFavori(existing.id, patch);

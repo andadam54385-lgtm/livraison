@@ -168,7 +168,8 @@ async function render() {
     <div class="card" style="margin-top:20px;">
       <div class="card-title">Adresses favorites</div>
       <p class="muted">Conservées même après "Effacer tous les colis et tournées".</p>
-      ${favorisHtml}
+      <input type="search" id="favoris-search" placeholder="Rechercher (rue, ville, note)..." style="margin-bottom:4px;">
+      <div id="favoris-list-wrap">${favorisHtml}</div>
     </div>
     <div class="card" style="margin-top:20px;">
       <div class="card-row" style="cursor:pointer;" id="debug-ocr-toggle">
@@ -327,6 +328,19 @@ async function render() {
 
   // Enregistrement silencieux en quittant le champ (pas de bouton dedie, pas
   // de boite de dialogue) : uniquement si le texte a change.
+  // Recherche dans les favoris (retour terrain) : filtre client sur tout le
+  // texte de chaque carte (rue, ville, CP, note) -- la liste grossit vite a
+  // l'usage, la faire defiler entiere ne tient plus.
+  const favSearch = containerRef.querySelector("#favoris-search");
+  if (favSearch) {
+    favSearch.addEventListener("input", () => {
+      const q = favSearch.value.trim().toLowerCase();
+      containerRef.querySelectorAll("#favoris-list-wrap [data-favori-id]").forEach((card) => {
+        card.style.display = !q || card.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+    });
+  }
+
   containerRef.querySelectorAll("[data-favori-note]").forEach((el) => {
     const initialNote = el.value;
     el.addEventListener("blur", async () => {

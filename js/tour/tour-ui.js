@@ -7,7 +7,8 @@ import { formatDurationShort } from "../lib/geo-utils.js";
 import { runSort, runRecalculate } from "../routing/routing-ui.js";
 import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
 import { startBatchScan } from "../scan/batch-scan-ui.js";
-import { renderColisDetail } from "../scan/colis-detail-ui.js";
+import { renderColisDetail, saveFavoriInfo } from "../scan/colis-detail-ui.js";
+import { findNearbyFavori } from "../favoris/favoris-store.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
@@ -740,6 +741,8 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
         <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;">
           ${heureLabel ? `<span class="badge ${failed ? "badge-warn" : "badge-pending"}">${heureLabel}</span>` : ""}
           ${colis.avant12h ? '<span class="badge badge-urgent">12h</span>' : ""}
+          ${colis.typeClient === "pro" ? '<span class="badge badge-info">Pro</span>' : ""}
+          ${colis.operation === "ramasse" ? '<span class="badge badge-info">Ramasse</span>' : ""}
         </div>
       </div>
       <div class="muted stop-card-addr" data-open-detail data-colis-id="${escapeAttr(colis.id)}">${escapeHtml(adresse)}${colis.quantite > 1 ? ` · ${colis.quantite} colis` : ""}</div>
@@ -748,6 +751,7 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
         ${colis.tel ? `<a class="btn-link" href="tel:${escapeAttr(colis.tel)}" aria-label="Appeler">${icon("phone", { spaced: false })}</a>` : ""}
         ${navUrl ? `<a class="btn-link primary" href="${navUrl}" target="_blank" rel="noopener" aria-label="Naviguer">${icon("navigation", { spaced: false })}</a>` : ""}
         <button type="button" data-photo-colis="${escapeAttr(colis.id)}" aria-label="Photo">${icon(hasPhoto ? "check" : "camera", { spaced: false })}</button>
+        ${colis.typeClient === "pro" && colis.geocode?.lat != null ? `<button type="button" data-pro-hours="${escapeAttr(colis.id)}" aria-label="Horaires de fermeture">${icon("clock", { spaced: false })}</button>` : ""}
         ${
           done
             ? `<button type="button" disabled aria-label="${delivered ? "Livré" : "Échec"}">${delivered ? icon("check", { spaced: false }) : icon("x", { spaced: false })}</button>`
@@ -791,6 +795,45 @@ function matchesFilter(colis, filterText) {
 }
 
 function bindActionEvents(tourId) {
+  // Touche directe "horaires de fermeture" sur les cartes pro (retour
+  // terrain) : deplie un mini-editeur sous la carte, pre-rempli depuis le
+  // favori de l'adresse (cree au besoin, meme mecanique implicite que la
+  // note de la fiche colis). Enregistre en quittant un champ ; pris en
+  // compte au prochain calcul/recalcul de tournee.
+  containerRef.querySelectorAll("[data-pro-hours]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest(".stop-card");
+      const existing = card.querySelector(".pro-hours-editor");
+      if (existing) {
+        existing.remove();
+        return;
+      }
+      const entry = lastStopsWithColis.find(({ colis }) => colis && colis.id === btn.dataset.proHours);
+      if (!entry) return;
+      const colis = entry.colis;
+      const favori = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
+      const editor = document.createElement("div");
+      editor.className = "pro-hours-editor";
+      editor.style.cssText = "display:flex;gap:6px;align-items:center;margin-top:6px;";
+      editor.innerHTML = `
+        <span class="muted" style="font-size:0.78rem;">Fermé</span>
+        <input type="time" data-ferme-debut value="${escapeAttr(favori?.fermeDebut || "")}" style="min-height:34px;padding:4px 6px;">
+        <span class="muted" style="font-size:0.78rem;">à</span>
+        <input type="time" data-ferme-fin value="${escapeAttr(favori?.fermeFin || "")}" style="min-height:34px;padding:4px 6px;">
+      `;
+      card.appendChild(editor);
+      for (const [sel, field] of [["[data-ferme-debut]", "fermeDebut"], ["[data-ferme-fin]", "fermeFin"]]) {
+        const input = editor.querySelector(sel);
+        const initial = input.value;
+        input.addEventListener("blur", async () => {
+          if (input.value === initial) return;
+          await saveFavoriInfo(colis, { [field]: input.value });
+          showToast("Horaires enregistrés — pris en compte au prochain recalcul.");
+        });
+      }
+    });
+  });
+
   containerRef.querySelectorAll("[data-deliver-ordre]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const isHeroButton = btn.hasAttribute("data-hero-deliver");
