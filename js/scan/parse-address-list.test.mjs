@@ -322,6 +322,68 @@ console.log("\n=== Cas 14 : terminal 'Itineraire' (retour terrain '138 points au
   assertEqual((res14[3].rue || "").startsWith("15 RUE DU MARECHAL LANNES"), true, "client 4 : la rue commence par la vraie rue");
 }
 
+console.log("\n=== Cas 15 : video du terminal, bruit AU MILIEU des lignes (retour terrain 2026-09-01) ===");
+{
+  // Transcrit des captures reelles de l'ecran de verification : le bruit de
+  // la colonne de droite se retrouve fusionne AU MILIEU du texte utile, et
+  // plusieurs clients tombent dans un seul bloc (l'ecart vertical disparait
+  // quand l'OCR fusionne des lignes).
+  let y15 = 0;
+  const L15 = (text, gapBefore = 4) => {
+    y15 += gapBefore + 20;
+    return { text, bbox: { x0: 0, y0: y15, x1: 300, y1: y15 + 20 } };
+  };
+  const knownCities15 = new Set(
+    ["Bar-le-Duc", "Longeville-en-Barrois", "Ligny-en-Barrois", "Resson"].map((c) => looseCommune(normalizeCity(c)))
+  );
+  const knownCps15 = new Set(["55000", "55500", "55210"]);
+
+  // (a) bruit collé au nom et à la ville, un seul vrai client
+  const clientA = parseAddressList(
+    [L15("ckael Caillon 8000 | 0:"), L15("83 BOURG RUE"), L15("BAR LE DUC 15:20-17:20 ©"), L15("55000")],
+    { knownCities: knownCities15, knownCps: knownCps15 }
+  );
+  assertEqual(clientA.length, 1, "(a) un seul client");
+  assertEqual(clientA[0].nom, "ckael Caillon", "(a) nom nettoye du badge '8000 | 0:'");
+  assertEqual(clientA[0].rue, "83 BOURG RUE", "(a) rue");
+  assertEqual(clientA[0].cp, "55000", "(a) CP");
+
+  // (b) bloc FUSIONNE : deux clients, deux CP -> doit etre recoupe
+  const fusionne = parseAddressList(
+    [
+      L15("12.61km Q OPTICIENS KRYS 8000 | 0+1"),
+      L15("7 ANDRE MAGINOT 11:30-13:30 ©"),
+      L15("BAR-LE-DUC"),
+      L15("55000"),
+      L15("PIED AURE 8000 | 0+2"),
+      L15("11 ROCHELLE BLVD"),
+      L15("BAR LE DUC 11:40 - 13:40 ©"),
+      L15("55000"),
+    ],
+    { knownCities: knownCities15, knownCps: knownCps15 }
+  );
+  assertEqual(fusionne.length, 2, "(b) le bloc fusionne est recoupe en 2 clients");
+  assertEqual(fusionne[0].rue, "7 ANDRE MAGINOT", "(b) client 1 : rue sans le creneau");
+  assertEqual(fusionne[1].rue, "11 ROCHELLE BLVD", "(b) client 2 : rue");
+
+  // (c) faux codes postaux inventes par l'OCR -> aucun client fabrique
+  const fauxCp = parseAddressList(
+    [L15("11:30-13:30 ® ., 55014 é"), L15("EXELMANS RUE BARYE DUC, 55096"), L15("35 AP LOCA EST 8000 | 0+1 @ 4 BAR VOIE lo RESSON 55000 15:50 - 17:50 (©, 99999")],
+    { knownCities: knownCities15, knownCps: knownCps15 }
+  );
+  assertEqual(
+    fauxCp.every((b) => !b.cp || knownCps15.has(b.cp)),
+    true,
+    "(c) aucun CP invente (55014/55096/99999) n'est retenu"
+  );
+
+  // (d) residus purs : jamais retenus comme clients
+  for (const bruit of ["n° 1.73km Q", "8000 | 0+1 RD = -Itinéraire,", "0329783111 & * 2.24km Q,", "A9 9.73km Q"]) {
+    const r = parseAddressList([L15(bruit)], { knownCities: knownCities15, knownCps: knownCps15 });
+    assertEqual(r.length, 0, `(d) residu ecarte : ${bruit}`);
+  }
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)

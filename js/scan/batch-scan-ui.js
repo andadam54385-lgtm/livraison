@@ -292,6 +292,11 @@ function analyzeVideoFile(file, container) {
           const langs = (await getSetting("ocrLangs")) || "fra";
           const cities = await listDistinctCities();
           const knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
+          // Codes postaux REELS de la zone : sans cette reference, toute suite
+          // de 5 chiffres passait pour un CP et l'OCR d'un ecran filme en
+          // invente en permanence ("55014", "55096", "05500", "99999" vus en
+          // conditions reelles) -- chacun fabriquant un faux colis.
+          const knownCps = new Set(cities.map((c) => c.cp).filter(Boolean));
           const total = Math.max(1, Math.floor((duration - 0.2) / step) + 1);
           let index = 0;
           let framesOk = 0;
@@ -314,7 +319,7 @@ function analyzeVideoFile(file, container) {
               preprocessForOcr(ctx, captureCanvas);
               const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
               if (stopped) break;
-              ingestDrafts(collected, parseAddressList(lines, { knownCities }));
+              ingestDrafts(collected, parseAddressList(lines, { knownCities, knownCps }));
               framesOk++;
               seekFailures = 0;
             } catch (frameErr) {
@@ -496,12 +501,14 @@ export function startBatchScan(container) {
     // un autre scan a deja tourne dans la session), en parallele de
     // l'initialisation camera plus bas.
     let knownCities = new Set();
+    let knownCps = new Set();
     listDistinctCities()
       .then((cities) => {
         // looseCommune (pas juste c.cn tel quel) : voir le meme choix cote
         // parse-address-list.js, tolerance aux tirets/apostrophes absents
         // d'un affichage d'ecran par rapport a l'orthographe BAN canonique.
         knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
+        knownCps = new Set(cities.map((c) => c.cp).filter(Boolean)); // voir le meme choix cote video
       })
       .catch((err) => console.error("[batch-scan] Échec chargement des communes connues:", err));
 
@@ -563,7 +570,7 @@ export function startBatchScan(container) {
         try {
           const langs = (await getSetting("ocrLangs")) || "fra";
           const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
-          const drafts = parseAddressList(lines, { knownCities });
+          const drafts = parseAddressList(lines, { knownCities, knownCps });
 
           // isNew : ne correspond (floue, voir isSameAddress) a aucun
           // brouillon deja retenu -> vient d'etre ajoutee (cadre vert).

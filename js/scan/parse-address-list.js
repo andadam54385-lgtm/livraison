@@ -106,6 +106,38 @@ const MAX_BANNER_LINES = 6;
 const TRAILING_NOISE_RE =
   /\s*(\d+([.,]\d+)?\s?km|\d{1,2}[:.]\d{2}(\s*[-–]\s*\d{1,2}[:.]\d{2})?|c\d{1,2}|agc|transfere|en\s?cours|agence|part|pro|\d+\s*\/\s*\d+|\d{3,4}x\d{2,}|\d{9,12}|\d{3,5}\s*\|\s*\d+\+\d+)\s*$/i;
 
+// Bruit d'interface n'importe OU dans la ligne -- pas seulement en debut ou
+// en fin (bug reel, retour terrain "beaucoup de donnees parasites" sur un
+// terminal "Itineraire" : l'OCR d'un ecran filme fusionne les colonnes, et
+// le bruit se retrouve AU MILIEU du texte utile -- "12.61km Q OPTICIENS
+// KRYS 8000 jo v VANBERTEN", "us 14 ANDRE MAGINOTRUE 8000 | 0+13 ©".
+// stripTrailingNoise (ancre en fin) ne pouvait rien contre ca, et chaque
+// residu devenait un faux nom, une rue polluee ou un faux client entier.
+//
+// Tous ces motifs sont sans ambiguite : ils contiennent une unite ("km"),
+// une ponctuation d'heure, un separateur de badge, ou une longueur de
+// chiffres impossible pour un numero de voie ou un code postal.
+const NOISE_TOKEN_PATTERNS = [
+  /\b\d+[.,]?\d*\s?km\b/gi, // distance : "12.61km", "6km"
+  /\b\d{1,2}\s?[:.]\s?\d{2}\s*[-\u2013]\s*\d{1,2}\s?[:.]\s?\d{2}\b/g, // creneau "11:30-13:30"
+  // Badge de colis : "8000 | 0+1" mais aussi ses formes TRONQUEES par le
+  // bord du cadre ou par l'OCR ("8000 | 0:", "2000 |o+1", "8000|0+2") --
+  // observees collees a de vrais noms ("ckael Caillon 8000 | 0:").
+  /\b\d{3,5}\s*\|\s*[o0-9]{0,2}\s*[+:]?\s*\d{0,2}/gi, // badge "8000 | 0+1", "8000 | 0:"
+  /\b\d{3,4}[xX]\d{2,}\b/g, // reference "999X99"
+  /\b\d{9,}\b/g, // telephone/reference brute (un CP fait 5 chiffres, un numero de voie moins)
+  /[\u00a9\u00ae\u2122]/g, // pastilles d'icone (c), (R), TM laissees par l'OCR
+];
+
+function stripNoiseTokens(text) {
+  let out = text;
+  for (const re of NOISE_TOKEN_PATTERNS) out = out.replace(re, " ");
+  // Residus de separateurs isoles laisses par les suppressions ci-dessus.
+  out = out.replace(/\s{2,}/g, " ").trim();
+  out = out.replace(/^[\s,;:.|>\-\u2013_*"'\u00b0]+/, "").replace(/[\s,;:|>_*"'\u00b0]+$/, "").trim();
+  return out;
+}
+
 function stripTrailingNoise(text) {
   let s = text;
   let previous;
@@ -183,7 +215,7 @@ function stripInterfaceNoise(ocrLines) {
     // n'est plus reconnue, et la classification derive -- source directe du
     // sur-decoupage "138 points au lieu de 60". Ligne videe par le
     // nettoyage : gardee en espace reserve (bbox intact pour les ecarts).
-    const cleaned = stripTrailingNoise(text);
+    const cleaned = stripTrailingNoise(stripNoiseTokens(text));
     if (cleaned !== text) {
       kept.push({ ...l, text: cleaned });
       continue;
@@ -261,7 +293,18 @@ function countWords(text) {
   return text.split(/\s+/).filter((w) => /[a-zà-ÿ]/i.test(w)).length;
 }
 
+// Motifs qui disqualifient DEFINITIVEMENT un nom, quelle que soit sa
+// longueur (retour terrain : "n\u00b0 1.73km Q", "A9 9.73km Q", "0329783111 & *
+// 2.24km Q" etaient retenus comme noms de clients). Un vrai nom ne contient
+// jamais d'unite de distance, d'heure, ni de longue suite de chiffres.
+const NON_NAME_RE = /(\d\s?km\b|\b\d{1,2}[:.]\d{2}\b|\d{6,}|\bitin[ée]raire\b|\bliste\b|\bcarte\b|\bsynth[èe]se\b|\bcr[ée]er\b)/i;
+
 function looksLikeName(line) {
+  if (NON_NAME_RE.test(line)) return false;
+  // Au moins la moitie de caracteres alphabetiques : elimine "8000 | 0+1 RD",
+  // "4, UPS AP 999X99 D" et compagnie sans lister leurs formes une par une.
+  const lettres = (line.match(/[a-z\u00e0-\u00ff]/gi) || []).length;
+  if (lettres < 3 || lettres < line.replace(/\s/g, "").length / 2) return false;
   const clauses = line.split(/\s-\s/);
   return clauses.every((c) => {
     const n = countWords(c);
@@ -290,7 +333,19 @@ function looksLikeName(line) {
 // defaut pour un nom -- couvre le retour a la ligne d'une rue ou d'une
 // ville trop longue pour la largeur d'ecran ("RUE DU GENERAL DE" / "GAULLE"),
 // qui sinon polluait/ecrasait le nom detecte (bug reel corrige ici).
-export function classifyBlockLines(rawLines, { knownCities = new Set() } = {}) {
+// knownCps (optionnel) : codes postaux reellement presents dans la base BAN
+// locale. Sans lui, toute suite de 5 chiffres passait pour un CP -- l'OCR
+// d'un ecran filme en invente en permanence ("55096", "55014", "05500",
+// "99999" observes en conditions reelles), et un faux CP suffit a creer un
+// faux client (voir le filtre final de parseAddressList) ou a casser
+// l'adresse d'un vrai. Avec lui, un CP inconnu est traite comme du texte
+// ordinaire et ne fabrique plus rien.
+function isPlausibleCp(cp, knownCps) {
+  if (!knownCps || knownCps.size === 0) return true; // pas de reference : comportement d'avant
+  return knownCps.has(cp);
+}
+
+export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps = new Set() } = {}) {
   const lines = rawLines.flatMap(splitEmbeddedCpVille);
   const result = { names: [], streets: [], cp: null, ville: null };
   let lastCategory = null;
@@ -300,7 +355,11 @@ export function classifyBlockLines(rawLines, { knownCities = new Set() } = {}) {
     if (!line) continue;
 
     const cpVilleMatch = line.match(CP_VILLE_RE);
-    if (cpVilleMatch) {
+    if (cpVilleMatch && !isPlausibleCp(cpVilleMatch[1], knownCps)) {
+      // CP invente par l'OCR : la ligne n'est pas une ligne "CP + ville",
+      // on la laisse suivre le circuit normal (elle sera souvent rattachee
+      // a la rue ou reconnue comme commune).
+    } else if (cpVilleMatch) {
       result.cp = cpVilleMatch[1];
       result.ville = cpVilleMatch[2].trim();
       lastCategory = "cpville";
@@ -308,7 +367,7 @@ export function classifyBlockLines(rawLines, { knownCities = new Set() } = {}) {
     }
 
     const cpOnlyMatch = line.match(CP_ONLY_RE);
-    if (cpOnlyMatch) {
+    if (cpOnlyMatch && isPlausibleCp(cpOnlyMatch[1], knownCps)) {
       result.cp = cpOnlyMatch[1];
       lastCategory = "cp";
       continue;
@@ -415,19 +474,44 @@ export function groupLinesIntoBlocks(lines) {
  *   le comportement existant si omis (Set vide).
  * @returns {{nom: string|null, rue: string|null, cp: string|null, ville: string|null, bbox: object, rawLines: string[]}[]}
  */
-export function parseAddressList(ocrLines, { knownCities = new Set() } = {}) {
+// Un bloc qui contient PLUSIEURS codes postaux est forcement une fusion de
+// plusieurs clients (bug reel : l'ecart vertical entre deux fiches disparait
+// quand l'OCR fusionne des lignes, et 3-4 clients se retrouvent dans un seul
+// bloc -- "OPTICIENS KRYS ... BAR-LE-DUC 55000 ... ROCHELLE BLVD ... 55000").
+// Dans ce terminal le CP TERMINE chaque fiche : on recoupe juste apres
+// chacun. Sans CP valide en double, le bloc est rendu tel quel.
+function splitFusedBlock(blockLines, knownCps) {
+  const cuts = [];
+  blockLines.forEach((l, i) => {
+    const t = l.text.trim();
+    const m = t.match(CP_ONLY_RE) || t.match(CP_VILLE_TRAILING_RE);
+    const cp = m ? (m[1].length === 5 && /^\d{5}$/.test(m[1]) ? m[1] : m[2]) : null;
+    if (cp && /^\d{5}$/.test(cp) && (!knownCps || knownCps.size === 0 || knownCps.has(cp))) cuts.push(i);
+  });
+  if (cuts.length < 2) return [blockLines];
+  const parts = [];
+  let start = 0;
+  for (const cut of cuts) {
+    parts.push(blockLines.slice(start, cut + 1));
+    start = cut + 1;
+  }
+  if (start < blockLines.length) parts.push(blockLines.slice(start));
+  return parts.filter((p) => p.length > 0);
+}
+
+export function parseAddressList(ocrLines, { knownCities = new Set(), knownCps = new Set() } = {}) {
   // Bruit d'interface (distance/horaire/tag/statut/code/bandeau d'instruction,
   // voir stripInterfaceNoise) retire AVANT le decoupage en blocs -- sans ca,
   // ces lignes intercalees entre deux adresses peuvent casser l'ecart qui les
   // separe et les faire fusionner (ou, pire, exploser un client en plusieurs
   // faux clients quand le bandeau lui-meme cree de faux ecarts).
   const usableLines = stripInterfaceNoise(ocrLines);
-  const blocks = groupLinesIntoBlocks(usableLines);
+  const blocks = groupLinesIntoBlocks(usableLines).flatMap((b) => splitFusedBlock(b, knownCps));
   return blocks
     .map((blockLines) => {
       const classified = classifyBlockLines(
         blockLines.map((l) => l.text),
-        { knownCities }
+        { knownCities, knownCps }
       );
       const nom = classified.names.length > 0 ? classified.names[classified.names.length - 1] : null;
       const rue = classified.streets.length > 0 ? classified.streets.join(" ") : null;
@@ -440,5 +524,13 @@ export function parseAddressList(ocrLines, { knownCities = new Set() } = {}) {
         rawLines: blockLines.map((l) => l.text),
       };
     })
-    .filter((b) => b.rue || (b.cp && b.ville)); // ignore les blocs sans aucune info d'adresse exploitable (bruit OCR)
+    // Un bloc n'est retenu que s'il porte une adresse CREDIBLE : une rue avec
+    // au moins un mot alphabetique de 3 lettres (elimine "8000 | 0+1 RD",
+    // "0 GONDRECOURT (DE) RTE," et les residus du meme genre), ou un couple
+    // CP + ville. Avant, n'importe quel residu contenant un chiffre passait
+    // pour une rue et devenait un colis a verifier.
+    .filter((b) => {
+      const rueCredible = b.rue && /[a-z\u00e0-\u00ff]{3,}/i.test(b.rue);
+      return rueCredible || (b.cp && b.ville);
+    });
 }
