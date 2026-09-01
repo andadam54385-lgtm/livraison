@@ -94,17 +94,21 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   la tournée") / État B (tournée active → carte "hero" pour l'arrêt courant + liste des
   suivants). Plus d'onglet Scan séparé — bouton caméra flottant (`#scan-fab`, HTML statique
   de `#tour-view`) visible dans les 2 états.
-  **Fusion Carte + Tournée (2026-08-31)** : plus AUCUNE nav du bas, un seul écran.
-  `#tour-map-slot` (frère statique de `#tour-sheet`/`#tour-content` dans `index.html`,
-  jamais réécrit par les renders) héberge une instance MapLibre **persistante** —
-  `map-ui.js` n'exporte plus `mount()` mais `ensureMap(slot, variant, {onClose})`
-  (idempotent, setData+resize en réutilisation), `refreshMapData()` et `isMapMounted()`.
-  Deux variantes : "backdrop" (État B, carte en fond + feuille coulissante `#tour-sheet`
-  à 3 crans gérée par tour-ui, liste interne `.stop-panel` de la carte masquée en CSS)
-  et "overlay" (État A, plein écran à la demande via le bouton carte du header, X pour
-  fermer — c'est là que vit le lasso de zones). Réglages : engrenage du header + lien du
-  menu carte. L'ancien hash `#map` retombe sur `#tour` (redirection déjà dans
-  `onHashChange`).
+  **Fusion Carte + Tournée (2026-08-31, simplifiée le 2026-09-01)** : plus AUCUNE nav
+  du bas, un seul écran, et la carte est le **fond permanent dans les DEUX états**
+  (retour terrain explicite). `#tour-map-slot` (frère statique de
+  `#tour-sheet`/`#tour-content` dans `index.html`, jamais réécrit par les renders)
+  héberge une instance MapLibre **persistante** — `map-ui.js` n'exporte plus `mount()`
+  mais `ensureMap(slot, variant)` (idempotent, setData+resize en réutilisation),
+  `refreshMapData()` et `isMapMounted()`. La feuille `#tour-sheet` (3 crans
+  collapsed/half/full, gérée par tour-ui) porte la préparation OU la tournée ; les flux
+  de saisie (scan, saisie manuelle, rafale, fiche colis) la déplient d'office. Le lasso
+  de zones vit sur la carte de fond. **L'ancien mode "overlay" (X pour fermer) a existé
+  un build (94) et a été supprimé** : il a coincé l'utilisateur réel. **Geste de la
+  poignée** : un tap (mouvement < 12px — l'ancien seuil de 4px rendait le tap mort au
+  doigt, bug terrain) DÉPLIE d'un cran ; un glissement franc (≥ 24px) va toujours au
+  cran suivant dans le sens du geste, jamais de retour élastique. Réglages : engrenage
+  du header + lien du menu carte. L'ancien hash `#map` retombe sur `#tour`.
 - **`js/scan/colis-detail-ui.js`** = fiche colis consolidée (seul endroit avec
   Corriger/Favori/Supprimer — jamais sur les cartes de liste).
 - **`js/scan/scan-ui.js`** = fonctions de flux (pas de vue auto-montée), paramétrées par

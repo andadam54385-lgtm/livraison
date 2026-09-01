@@ -360,13 +360,6 @@ a { color: var(--accent-strong); }
   min-height: 0;
   position: relative;
 }
-.map-overlay #tour-map-slot {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: var(--bg);
-  padding-top: var(--safe-top);
-}
 #tour-sheet { display: contents; }
 .map-backdrop #tour-sheet {
   display: flex;
@@ -381,6 +374,9 @@ a { color: var(--accent-strong); }
   border-radius: var(--radius-card) var(--radius-card) 0 0;
   box-shadow: var(--shadow-elevated);
   height: 48vh;
+  /* Jamais moins que la poignee + le libelle : quoi qu'il arrive a la
+     hauteur inline, la feuille reste attrapable. */
+  min-height: 76px;
 }
 .map-backdrop #tour-content { flex: 1; min-height: 0; }
 /* MapLibre (WebGL) a besoin d'un parent a hauteur concrete : le slot/canvas
@@ -447,17 +443,8 @@ a { color: var(--accent-strong); }
    besoin de desactiver dragPan separement), bandeau d'aide + panneau de
    confirmation flottants. Voir setupZoneMode() dans map-ui.js. */
 .zone-mode-btn { left: 64px; }
-/* Bouton de fermeture de la carte : uniquement en overlay (en backdrop c'est
-   la feuille qui gouverne, en onglet il n'existait pas). En haut a droite,
-   SOUS les controles MapLibre zoom/geoloc deplaces par la marge standard --
-   place le X au meme niveau que le menu, cote oppose. */
-.map-close-btn { display: none; left: auto; right: 12px; }
-[data-map-variant="overlay"] .map-close-btn { display: flex; }
-/* MapLibre pose zoom/geoloc en haut a droite : en overlay le X y est aussi,
-   decale leur pile sous lui. */
-[data-map-variant="overlay"] .maplibregl-ctrl-top-right { margin-top: 56px; }
-/* En fond de tournee, la liste d'arrets interne de la carte doublonnerait la
-   feuille de tour-ui juste au-dessus. */
+/* La liste d'arrets interne de la carte doublonnerait la feuille de
+   tour-ui juste au-dessus -- masquee (la carte est toujours en fond). */
 [data-map-variant="backdrop"] .stop-panel { display: none; }
 .zone-mode-btn.active { background: var(--accent); color: var(--accent-ink); }
 /* Un <div> (pas un <svg>) : hit-testable sur toute sa boite meme transparent,
