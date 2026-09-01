@@ -62,6 +62,14 @@ const NOISE_LINE_PATTERNS = [
   /^agc$/i, // code "agence" (retour en agence)
   /^\d+\s*\/\s*\d+$/, // compteur enveloppe/colis : "0 / 1"
   /^\d{1,2}[:.]\d{2}$/, // heure seule (pas une plage) : "11:45"
+  // Terminal "Itineraire" (retour terrain 2026-09-01, "138 points au lieu de
+  // 60") : reference de tournee "999X99", telephone brut sur sa propre ligne
+  // ("33630369559", "0821233877" -- 9 a 12 chiffres, jamais un CP qui en fait
+  // 5 ni un numero de voie), residu d'icone ("#9", "9" seul sous le
+  // pictogramme maison).
+  /^\d{3,4}x\d{2,}$/i, // reference type "999X99"
+  /^\d{9,12}$/, // telephone/reference numerique brute
+  /^#?\d{1,2}$/, // residu d'icone : un ou deux chiffres seuls
 ];
 
 function isNoiseLine(text) {
@@ -95,7 +103,8 @@ const MAX_BANNER_LINES = 6;
 // ligne detectee : "14 GENERAL LECLERC AVE 42 km Attention consigne...").
 // Applique en boucle (plusieurs tokens de bruit peuvent s'empiler en fin de
 // ligne) jusqu'a stabilisation.
-const TRAILING_NOISE_RE = /\s*(\d+([.,]\d+)?\s?km|\d{1,2}[:.]\d{2}(\s*[-–]\s*\d{1,2}[:.]\d{2})?|c\d{1,2}|agc|transfere|en\s?cours|agence|part|pro|\d+\s*\/\s*\d+)\s*$/i;
+const TRAILING_NOISE_RE =
+  /\s*(\d+([.,]\d+)?\s?km|\d{1,2}[:.]\d{2}(\s*[-–]\s*\d{1,2}[:.]\d{2})?|c\d{1,2}|agc|transfere|en\s?cours|agence|part|pro|\d+\s*\/\s*\d+|\d{3,4}x\d{2,}|\d{9,12}|\d{3,5}\s*\|\s*\d+\+\d+)\s*$/i;
 
 function stripTrailingNoise(text) {
   let s = text;
@@ -165,6 +174,20 @@ function stripInterfaceNoise(ocrLines) {
     }
 
     if (isNoiseLine(text) || TRACKING_CODE_RE.test(text)) continue; // bruit isole (hors bandeau) : retire entierement, voir Cas 9
+
+    // Bruit COLLE en fin de ligne reelle (terminal "Itineraire" : la colonne
+    // de droite -- badge "8000 | 0+1", creneau "15:10 - 17:10", "999X99",
+    // telephone -- fusionne souvent avec la ligne de gauche a l'OCR :
+    // "THOMAS ANTHONY 8000 | 0+1", "LONGEVILLE EN BARROIS 15:10 - 17:10").
+    // Sans ce nettoyage, le nom/la ville emportent le bruit, la commune
+    // n'est plus reconnue, et la classification derive -- source directe du
+    // sur-decoupage "138 points au lieu de 60". Ligne videe par le
+    // nettoyage : gardee en espace reserve (bbox intact pour les ecarts).
+    const cleaned = stripTrailingNoise(text);
+    if (cleaned !== text) {
+      kept.push({ ...l, text: cleaned });
+      continue;
+    }
     kept.push(l);
   }
 
@@ -197,6 +220,11 @@ function splitEmbeddedCpVille(line) {
   if (!trimmed || CP_VILLE_RE.test(trimmed)) return [trimmed];
   const m = trimmed.match(CP_VILLE_TRAILING_RE);
   if (m) return [m[1].trim(), `${m[2]} ${m[3]}`.trim()];
+  // CP en fin de ligne SANS ville derriere ("DEVANT BAR 55000" -- fin d'un
+  // nom de commune replie sur plusieurs lignes par le terminal) : isole le
+  // CP pour qu'il soit reconnu (CP_ONLY_RE), le reste suit le circuit normal.
+  const mCp = trimmed.match(/^(.*\S)\s+(\d{5})$/);
+  if (mCp && !/\d$/.test(mCp[1])) return [mCp[1].trim(), mCp[2]];
   return [trimmed];
 }
 

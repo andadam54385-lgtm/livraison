@@ -1,4 +1,6 @@
 import { parseAddressList, classifyBlockLines, groupLinesIntoBlocks } from "./parse-address-list.js";
+import { looseCommune } from "../geocode/match-address.js";
+import { normalizeCity } from "../geocode/normalize-address.js";
 
 let failures = 0;
 function assertEqual(actual, expected, label) {
@@ -264,6 +266,60 @@ console.log("\n=== Cas 13 : texte parasite a plusieurs mots (trop long pour un n
   ];
   const result = parseAddressList(ocrLines, { knownCities: new Set() });
   assertEqual(result[0].nom, null, "texte long de part et d'autre du tiret toujours rejete");
+}
+
+console.log("\n=== Cas 14 : terminal 'Itineraire' (retour terrain '138 points au lieu de 60') ===");
+{
+  // Transcrit d'une vraie video du terminal (2026-09-01) : colonne de droite
+  // (badge "8000 | 0+1", creneaux, "999X99", telephones, distances) fusionnee
+  // par l'OCR avec les lignes de gauche, ville et CP sur des lignes SEPAREES,
+  // commune repliee sur plusieurs lignes avec duplication OCR, pied d'ecran.
+  let y14 = 0;
+  const L14 = (text, gapBefore = 4) => {
+    y14 += gapBefore + 20;
+    return { text, bbox: { x0: 0, y0: y14, x1: 300, y1: y14 + 20 } };
+  };
+  const lines14 = [
+    L14("PRESSE"),
+    L14("1 RUE DES ALLIES"),
+    L14("LONGEVILLE-EN-BARROIS 14:30 - 18:30"),
+    L14("LONGEVILLE-EN-BARROIS 33630369559"),
+    L14("55000"),
+    L14("BM TABAC PRESSE"),
+    L14("THOMAS ANTHONY 8000 | 0+1", 40),
+    L14("1 ALLIES RUE"),
+    L14("LONGEVILLE EN BARROIS 15:10 - 17:10"),
+    L14("55000"),
+    L14("74.43km"),
+    L14("Mickael Caillon 8000 | 0+1", 40),
+    L14("83 BOURG RUE"),
+    L14("BAR LE DUC 55000 15:20 - 17:20"),
+    L14("79.01km"),
+    L14("UPS AP LOCA EST 999X99", 40),
+    L14("15 RUE DU MARECHAL"),
+    L14("LANNES 14:30 - 17:30"),
+    L14("SAVONNIERES DEVANT"),
+    L14("BAR SAVONNIERES 0821233877"),
+    L14("DEVANT BAR 55000"),
+    L14("LOCA EST 77.02km"),
+    L14("Eteindre le Diad", 40),
+  ];
+  const knownCities14 = new Set(
+    ["Longeville-en-Barrois", "Bar-le-Duc", "Savonnières-devant-Bar", "Resson", "Culey"].map((c) => looseCommune(normalizeCity(c)))
+  );
+  const res14 = parseAddressList(lines14, { knownCities: knownCities14 });
+  assertEqual(res14.length, 4, "4 clients exactement (pas 8+ par sur-decoupage, pied d'ecran ignore)");
+  assertEqual(res14[0].rue, "1 RUE DES ALLIES", "relai : rue");
+  assertEqual(res14[0].cp, "55000", "relai : CP seul sur sa ligne capture");
+  assertEqual(res14[0].ville, "LONGEVILLE-EN-BARROIS", "relai : commune reconnue malgre creneau/telephone fusionnes");
+  assertEqual(res14[1].nom, "THOMAS ANTHONY", "client 2 : nom sans le badge '8000 | 0+1'");
+  assertEqual(res14[1].rue, "1 ALLIES RUE", "client 2 : rue");
+  assertEqual(res14[1].ville, "LONGEVILLE EN BARROIS", "client 2 : ville sans le creneau fusionne");
+  assertEqual(res14[1].cp, "55000", "client 2 : CP");
+  assertEqual(res14[2].nom, "Mickael Caillon", "client 3 : nom sans badge");
+  assertEqual(res14[2].cp, "55000", "client 3 : cp extrait de 'BAR LE DUC 55000 15:20 - 17:20'");
+  assertEqual(res14[3].cp, "55000", "client 4 : UN seul bloc malgre commune repliee + telephone + 999X99");
+  assertEqual((res14[3].rue || "").startsWith("15 RUE DU MARECHAL LANNES"), true, "client 4 : la rue commence par la vraie rue");
 }
 
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");

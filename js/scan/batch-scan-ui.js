@@ -104,6 +104,15 @@ export function isSameAddress(a, b) {
   const streetA = normalizeStreet(a.rue || "");
   const streetB = normalizeStreet(b.rue || "");
   if (!streetA || !streetB) return Boolean(villeA) && villeA === villeB;
+  // Fiche COUPEE au bord du cadre de capture (retour terrain "138 points au
+  // lieu de 60" sur un ecran qui defile) : une image attrape "15 RUE DU
+  // MARECHAL", la suivante la fiche entiere avec la commune repliee dans la
+  // rue -- la similarite Levenshtein/trigrammes s'effondre alors que c'est le
+  // MEME client. Une rue strictement contenue dans l'autre (des le debut,
+  // normalisees toutes les deux) suffit a les identifier.
+  const shorter = streetA.length <= streetB.length ? streetA : streetB;
+  const longer = streetA.length <= streetB.length ? streetB : streetA;
+  if (shorter.length >= 8 && longer.startsWith(shorter)) return true;
   return streetSimilarity(streetA, streetB) >= FUZZY_DEDUP_THRESHOLD;
 }
 
