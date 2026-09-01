@@ -120,14 +120,6 @@ async function render() {
         <input type="time" id="s-limite-avant12h" value="${escapeHtml(settings.heureLimiteAvant12h)}">
       </div>
       <p class="muted" style="margin:-6px 0 12px;">Un colis marqué doit être servi avant cette heure. Tant qu'il y arrive, l'ordre du reste de la tournée reste libre — les autres arrêts peuvent tomber avant ou après.</p>
-      <div class="field">
-        <label>Fermeture de midi des pros</label>
-        <div class="button-row" style="margin-top:0;">
-          <input type="time" id="s-pro-debut" value="${escapeHtml(settings.proFermetureDebut)}">
-          <input type="time" id="s-pro-fin" value="${escapeHtml(settings.proFermetureFin)}">
-        </div>
-      </div>
-      <p class="muted" style="margin:-6px 0 12px;">L'optimiseur évite de placer un client pro sur ce créneau. Mettre les deux heures identiques pour désactiver.</p>
       <div class="field" style="margin-bottom:0;">
         <label>Durée moyenne par arrêt (minutes)</label>
         <input type="number" min="0" step="1" id="s-duree-arret" value="${settings.dureeArretMinutes}">
@@ -253,8 +245,6 @@ async function render() {
     // hhmmToSec traduirait en "contrainte absente" sans rien dire.
     const heure = (sel, fallback) => containerRef.querySelector(sel).value || fallback;
     await setSetting("heureLimiteAvant12h", heure("#s-limite-avant12h", DEFAULTS.heureLimiteAvant12h));
-    await setSetting("proFermetureDebut", heure("#s-pro-debut", DEFAULTS.proFermetureDebut));
-    await setSetting("proFermetureFin", heure("#s-pro-fin", DEFAULTS.proFermetureFin));
     await setSetting("dureeArretMinutes", parseFloat(containerRef.querySelector("#s-duree-arret").value));
     // Capture le modele affiche au moment d'enregistrer (input deja tenu a
     // jour pour les autres, celui-ci peut avoir le focus sans avoir declenche

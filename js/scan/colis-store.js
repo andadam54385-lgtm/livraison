@@ -79,10 +79,11 @@ export function formatAdresseForNav(colis) {
 // ET la fiche colis proposent les memes choix, et le rendu des cartes lit les
 // memes valeurs.
 //
-// typeClient a un effet sur le tri de tournee ("pro" = ferme sur la pause de
-// midi, voir tourCost dans routing/tsp.js) ; operation ne change que le
-// vocabulaire affiche et le modele de SMS propose -- une ramasse suit
-// exactement le meme calcul d'itineraire qu'une livraison.
+// typeClient et operation sont INFORMATIFS (badges, vocabulaire, modele de
+// SMS) : la "fermeture de midi des pros" qui pesait sur le tri de tournee a
+// ete debranchee sur demande apres le retour terrain "des allers-retours"
+// (le moteur closedWindows de routing/tsp.js reste teste et rebranchable,
+// voir computeOptimizedStops dans routing-ui.js).
 export const TYPE_CLIENT_OPTIONS = [
   { value: "particulier", label: "Particulier", icon: "home" },
   { value: "pro", label: "Pro", icon: "clipboard-list" },

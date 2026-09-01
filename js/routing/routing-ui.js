@@ -106,15 +106,15 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   // libres de tomber avant ou apres, l'optimiseur n'est contraint que sur ce
   // qui l'est reellement.
   const limiteSec = hhmmToSec(settings.heureLimiteAvant12h);
-  const proDebut = hhmmToSec(settings.proFermetureDebut);
-  const proFin = hhmmToSec(settings.proFermetureFin);
-  const proFerme = proDebut != null && proFin != null && proFin > proDebut;
   const deadlines = {};
+  // Fermeture de midi des pros DEBRANCHEE (demande explicite apres le retour
+  // terrain "des allers-retours" : meme corrigee en penalite forfaitaire, la
+  // contrainte n'a pas regagne la confiance -- le marquage "pro" redevient
+  // purement informatif). Le moteur (closedWindows dans tourCost, teste par
+  // tsp.test.mjs) reste en place : rebrancher = reconstruire la map ici.
   const closedWindows = {};
   eligibles.forEach((c, i) => {
-    const idx = i + 1;
-    if (c.avant12h && limiteSec != null) deadlines[idx] = limiteSec;
-    if (c.typeClient === "pro" && proFerme) closedWindows[idx] = [proDebut, proFin];
+    if (c.avant12h && limiteSec != null) deadlines[i + 1] = limiteSec;
   });
   const dwellSec = (settings.dureeArretMinutes || 0) * 60;
   const departureSec = secondsSinceMidnight(new Date());

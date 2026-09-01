@@ -16,10 +16,6 @@ export const DEFAULTS = {
   // position et non une heure : un colis marque finissait toujours en tete de
   // tournee, meme quand il restait des heures avant l'echeance.
   heureLimiteAvant12h: "12:00",
-  // Un client "pro" est generalement ferme sur la pause de midi : l'optimiseur
-  // evite d'y passer pendant ce creneau. Mettre debut == fin pour desactiver.
-  proFermetureDebut: "12:00",
-  proFermetureFin: "14:00",
   dureeArretMinutes: 3, // temps moyen passe a chaque arret (sonnette, remise en main propre...), utilise pour l'heure d'arrivee estimee
   autoNavAfterDeliver: false, // ouvre automatiquement le GPS vers l'arret suivant juste apres "Livre" (chantier B, enchainement sans tap)
   storagePersisted: false,
