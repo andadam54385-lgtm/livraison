@@ -268,3 +268,107 @@ export async function purgeOldTours(moisRetention) {
     }
   }
 }
+
+// ============================ Chantier F ============================
+// Cloture de journee (retour terrain : "le bouton de fin sert a mettre tout
+// a zero pour le lendemain tout en le gardant en memoire -- sinon je dois
+// tout supprimer tous les jours, pas utile surtout si je veux remettre des
+// colis au lendemain").
+//
+// Trois choses en un geste :
+//  1. la tournee active est archivee, horodatee et etiquetee d'un SECTEUR
+//     libre ("Bar-le-Duc") -- de quoi retrouver et comparer les journees
+//     plus tard (l'historique groupe par jour, voir getToursGroupedByDay) ;
+//  2. les colis NON traites (en_tournee jamais livre, echec) repassent en
+//     "pret" : ils sont automatiquement dans la preparation du lendemain,
+//     plus rien a rattraper a la main ;
+//  3. les colis livres restent livres et sortent de la preparation -- ils
+//     appartiennent desormais a l'historique de la journee archivee.
+//
+// Rien n'est supprime : les colis livres restent en base (rattaches a leur
+// tournee archivee), la purge de retention (purgeOldTours) reste le seul
+// mecanisme d'effacement, et elle ne touche que l'historique ancien.
+
+// Date LOCALE au format YYYY-MM-DD (pas toISOString, qui bascule en UTC et
+// rangerait une tournee de 23h dans la journee du lendemain).
+export function dateJourneeLocale(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export async function finDeJournee({ secteur = "" } = {}) {
+  const db = await getDb();
+  const tour = await getActiveTour();
+  const resume = { secteur: secteur.trim(), livres: 0, reportes: 0, tourArchivee: false };
+
+  if (tour) {
+    for (const stop of tour.stops) {
+      if (stop.statutLivraison === "livre") resume.livres++;
+    }
+    await updateTourAtomic(db, tour.id, (t) => {
+      t.statut = "archivee";
+      t.secteur = resume.secteur;
+      t.dateJournee = dateJourneeLocale();
+      t.dateFin = new Date().toISOString();
+    });
+    resume.tourArchivee = true;
+  }
+
+  // Report : tout ce qui n'a pas ete livre revient en preparation, qu'il ait
+  // fait partie de la tournee (en_tournee/echec) ou qu'il soit reste en
+  // souffrance sans jamais y entrer. "a_verifier" est laisse tel quel : son
+  // probleme est une adresse douteuse, pas une livraison ratee -- il doit
+  // rester signale tant qu'il n'est pas corrige.
+  const aReporter = [
+    ...(await getAllFromIndex(db, "colis", "by_statut", "en_tournee")),
+    ...(await getAllFromIndex(db, "colis", "by_statut", "echec")),
+  ];
+  for (const colis of aReporter) {
+    colis.statut = "pret";
+    delete colis.zone; // les zones manuelles valaient pour la tournee d'hier
+    await put(db, "colis", colis);
+    resume.reportes++;
+  }
+  return resume;
+}
+
+// Historique groupe par journee, du plus recent au plus ancien -- base de
+// l'ecran Historique (Reglages) et du futur comparatif par secteur.
+// dateJournee n'existe que depuis le chantier F : repli sur dateCreation
+// pour les tournees archivees avant.
+export async function getToursGroupedByDay() {
+  const tours = await getAllTours();
+  const parJour = new Map();
+  for (const tour of tours) {
+    const jour = tour.dateJournee || dateJourneeLocale(new Date(tour.dateCreation));
+    if (!parJour.has(jour)) parJour.set(jour, []);
+    const stops = tour.stops || [];
+    parJour.get(jour).push({
+      id: tour.id,
+      secteur: tour.secteur || "",
+      statut: tour.statut,
+      total: stops.length,
+      livres: stops.filter((s) => s.statutLivraison === "livre").length,
+      echecs: stops.filter((s) => s.statutLivraison === "echec").length,
+      dureeSec: tour.totalDureeSec,
+    });
+  }
+  return [...parJour.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([jour, tournees]) => ({ jour, tournees }));
+}
+
+// Secteurs deja utilises (pour proposer une saisie rapide a la cloture
+// suivante plutot que de retaper "Bar-le-Duc" chaque soir).
+export async function listSecteursConnus() {
+  const tours = await getAllTours();
+  const vus = new Map();
+  for (const t of tours) {
+    const s = (t.secteur || "").trim();
+    if (!s) continue;
+    vus.set(s.toLowerCase(), s);
+  }
+  return [...vus.values()].sort((a, b) => a.localeCompare(b, "fr"));
+}

@@ -1,4 +1,4 @@
-import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec } from "../routing/tour-store.js";
+import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec, finDeJournee, listSecteursConnus } from "../routing/tour-store.js";
 import { getColis, saveColis, listAllColis, formatAdresseAffichage, formatAdresseForNav, verbeAction } from "../scan/colis-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
@@ -942,6 +942,54 @@ function renderStopsList(filterText) {
   bindActionEvents(lastTour.id);
 }
 
+// Cloture de journee (chantier F) : un seul geste pour archiver la tournee
+// du jour sous un nom de SECTEUR et renvoyer les colis non livres dans la
+// preparation du lendemain (voir finDeJournee dans tour-store.js). Panneau
+// dedie plutot qu'un confirm() : il faut saisir le secteur ET annoncer
+// clairement ce qui va etre reporte, avant de valider.
+async function openFinDeJournee() {
+  const [stats, secteurs] = await Promise.all([getTodayStats(), listSecteursConnus()]);
+  const aReporter = (lastStopsWithColis || []).filter(({ stop }) => isPending(stop)).length;
+  sheetControl?.applyState("full");
+  view = "list";
+  containerRef.innerHTML = `
+    <div class="card">
+      <div class="card-title">${icon("flag")}Fin de journée</div>
+      <p class="muted">La tournée du jour part dans l'historique. ${
+        aReporter > 0
+          ? `<strong>${aReporter} arrêt${aReporter > 1 ? "s" : ""} non livré${aReporter > 1 ? "s" : ""}</strong> ${aReporter > 1 ? "reviennent" : "revient"} automatiquement dans la préparation de demain.`
+          : "Tous les arrêts ont été traités."
+      }</p>
+      <div class="stats-row" style="flex-wrap:wrap;margin-bottom:10px;">
+        <span class="stat-pill">${stats.livres} livré${stats.livres > 1 ? "s" : ""}</span>
+        ${stats.echecs > 0 ? `<span class="stat-pill stat-pill-check">${stats.echecs} échec${stats.echecs > 1 ? "s" : ""}</span>` : ""}
+      </div>
+      <div class="field">
+        <label for="fin-secteur">Secteur du jour (facultatif)</label>
+        <input type="text" id="fin-secteur" list="fin-secteurs-connus" placeholder="Bar-le-Duc, Toul..." autocomplete="off">
+        <datalist id="fin-secteurs-connus">${secteurs.map((s) => `<option value="${escapeAttr(s)}"></option>`).join("")}</datalist>
+      </div>
+      <p class="muted" style="margin-top:-6px;">Sert à retrouver et comparer les journées plus tard (Réglages → Historique).</p>
+      <div class="button-row">
+        <button type="button" id="fin-cancel">Annuler</button>
+        <button type="button" class="primary" id="fin-confirm">${icon("check")}Clôturer</button>
+      </div>
+    </div>
+  `;
+  containerRef.querySelector("#fin-cancel").addEventListener("click", () => render());
+  containerRef.querySelector("#fin-confirm").addEventListener("click", async () => {
+    const secteur = containerRef.querySelector("#fin-secteur").value;
+    const resume = await finDeJournee({ secteur });
+    reorderMode = false;
+    showToast(
+      resume.reportes > 0
+        ? `Journée clôturée — ${resume.reportes} colis reporté${resume.reportes > 1 ? "s" : ""} à demain.`
+        : "Journée clôturée."
+    );
+    await render();
+  });
+}
+
 async function renderEtatB(tour) {
   const [settings, todayStats] = await Promise.all([getAllSettings(), getTodayStats()]);
   const navApp = settings.navApp;
@@ -1018,7 +1066,7 @@ async function renderEtatB(tour) {
     <div id="stops-container" data-hero-colis-id="${heroEntry ? escapeAttr(heroEntry.colis.id) : ""}"></div>
     ${renderDepotReturnCard(tour, navApp, lastDepotEta)}
     <div class="button-row">
-      <button type="button" class="danger" id="end-tour-btn">Terminer la tournée</button>
+      <button type="button" id="end-tour-btn">${icon("flag")}Fin de journée</button>
     </div>
   `;
 
@@ -1048,10 +1096,5 @@ async function renderEtatB(tour) {
 
 
 
-  containerRef.querySelector("#end-tour-btn").addEventListener("click", async () => {
-    if (!confirm("Terminer cette tournée ? Les arrêts restants (non livrés) resteront dans l'historique tels quels — utilise plutôt \"Recalculer\" s'il reste des arrêts à faire.")) return;
-    await archiveTour(tour.id);
-    reorderMode = false;
-    render();
-  });
+  containerRef.querySelector("#end-tour-btn").addEventListener("click", () => openFinDeJournee());
 }

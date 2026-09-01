@@ -167,9 +167,17 @@ section dédiée ci-dessous. D. Scan code-barres (zxing-wasm) — **fait** (2026
 parallèle de E : zéro recouvrement de fichiers entre les deux, jugé sûr à combiner —
 contrairement à F/G qui touchent tous deux le stockage local et restent séquentiels).
 E. Templates SMS personnalisables — **fait** (2026-07-20). F. Report des non-livrés au
-lendemain (historique de tournées) — à faire, prochain chantier. G. Notes persistantes
-par adresse (fusion avec favoris) — après F, pas en parallèle (les deux touchent le
-stockage local).
+lendemain (historique de tournées) — **fait** (2026-09-01) : bouton « Fin de journée »
+(`finDeJournee` dans `tour-store.js`) qui archive la tournée du jour sous un **secteur**
+libre (`secteur` + `dateJournee` locale sur le tour) et remet automatiquement en `pret`
+tout ce qui n'a pas été livré (`en_tournee`/`echec`, zones manuelles effacées) — `a_verifier`
+est laissé tel quel (problème d'adresse, pas de livraison). Historique groupé par jour dans
+Réglages (`getToursGroupedByDay`), secteurs déjà utilisés proposés à la clôture suivante
+(`listSecteursConnus`). Rien n'est supprimé : `purgeOldTours` reste le seul effacement.
+G. Notes persistantes par adresse (fusion avec favoris) — **entamé par l'usage** : les
+favoris portent déjà note + horaires de fermeture (`fermeDebut`/`fermeFin`, pris en compte
+par l'optimiseur), éditables depuis la fiche colis, la carte d'arrêt (touche horloge sur
+les pros) et les Réglages (avec recherche).
 
 ## Chantier D — scan code-barres (fait le 2026-07-20)
 

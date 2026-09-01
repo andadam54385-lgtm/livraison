@@ -2,6 +2,7 @@ import { getAllSettings, setSetting, DEFAULTS } from "./settings-store.js";
 import { getDb } from "../db/schema.js";
 import { clear, get } from "../lib/idb.js";
 import { listFavoris, updateFavori, deleteFavori } from "../favoris/favoris-store.js";
+import { getToursGroupedByDay } from "../routing/tour-store.js";
 import { saveColis } from "../scan/colis-store.js";
 import { showToast } from "../lib/toast.js";
 import { renderOcrDebug } from "../scan/ocr-debug-ui.js";
@@ -12,6 +13,7 @@ import { getActiveTour } from "../routing/tour-store.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
 import { icon } from "../ui/icons.js";
 import { escapeHtml } from "../lib/escape.js";
+import { inlineLoadingHtml } from "../lib/loading.js";
 import { APP_BUILD } from "../version.js";
 
 let containerRef = null;
@@ -188,6 +190,13 @@ async function render() {
       <div id="bug-reports-content" ${showBugReports ? "" : "hidden"} style="margin-top:10px;"></div>
     </div>
     <div class="card" style="margin-top:20px;">
+      <div class="card-row" style="cursor:pointer;" id="historique-toggle">
+        <div class="card-title" style="margin-bottom:0;">${icon("clock")}Historique des journées</div>
+        ${icon("chevron-down", { spaced: false })}
+      </div>
+      <div id="historique-content" hidden></div>
+    </div>
+    <div class="card" style="margin-top:20px;">
       <div class="card-title">Export</div>
       <p class="muted">Liste de toutes les tournées (en cours et archivées), un arrêt par ligne : nom, adresse, statut, heure — pour un suivi d'activité ou une preuve de livraison.</p>
       <button type="button" id="s-export-csv">${icon("clipboard-list")}Exporter les tournées (CSV)</button>
@@ -331,6 +340,44 @@ async function render() {
   // Recherche dans les favoris (retour terrain) : filtre client sur tout le
   // texte de chaque carte (rue, ville, CP, note) -- la liste grossit vite a
   // l'usage, la faire defiler entiere ne tient plus.
+  // Historique des journees (chantier F) : groupe par jour, secteur affiche
+  // quand il a ete saisi a la cloture. Rendu paresseux au premier depli --
+  // getToursGroupedByDay parcourt tout l'historique, inutile de le payer a
+  // chaque ouverture des Reglages.
+  const histoToggle = containerRef.querySelector("#historique-toggle");
+  const histoContent = containerRef.querySelector("#historique-content");
+  if (histoToggle && histoContent) {
+    histoToggle.addEventListener("click", async () => {
+      const wasHidden = histoContent.hidden;
+      histoContent.hidden = !wasHidden;
+      if (!wasHidden || histoContent.dataset.loaded === "1") return;
+      histoContent.innerHTML = inlineLoadingHtml("Lecture de l'historique…");
+      const jours = await getToursGroupedByDay();
+      histoContent.dataset.loaded = "1";
+      if (jours.length === 0) {
+        histoContent.innerHTML = `<p class="muted">Aucune journée archivée pour l'instant. Le bouton « Fin de journée » de l'écran Tournée range la journée ici.</p>`;
+        return;
+      }
+      histoContent.innerHTML = jours
+        .map(({ jour, tournees }) => {
+          const total = tournees.reduce((n, t) => n + t.total, 0);
+          const livres = tournees.reduce((n, t) => n + t.livres, 0);
+          const echecs = tournees.reduce((n, t) => n + t.echecs, 0);
+          const secteurs = [...new Set(tournees.map((t) => t.secteur).filter(Boolean))];
+          const [y, m, d] = jour.split("-");
+          return `
+            <div style="padding:8px 0;border-top:1px solid var(--border-soft);">
+              <div class="card-row">
+                <strong>${d}/${m}/${y}</strong>
+                <span class="muted" style="font-size:0.8rem;">${livres}/${total} livré${livres > 1 ? "s" : ""}${echecs > 0 ? ` · ${echecs} échec${echecs > 1 ? "s" : ""}` : ""}</span>
+              </div>
+              ${secteurs.length > 0 ? `<div class="stats-row" style="flex-wrap:wrap;margin-top:4px;">${secteurs.map((sec) => `<span class="badge badge-info">${escapeHtml(sec)}</span>`).join("")}</div>` : ""}
+            </div>`;
+        })
+        .join("");
+    });
+  }
+
   const favSearch = containerRef.querySelector("#favoris-search");
   if (favSearch) {
     favSearch.addEventListener("input", () => {
