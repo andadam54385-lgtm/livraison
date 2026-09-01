@@ -11,6 +11,7 @@ import { uuid } from "../lib/id.js";
 import { icon } from "../ui/icons.js";
 import { escapeHtml } from "../lib/escape.js";
 import { loadingHtml, inlineLoadingHtml } from "../lib/loading.js";
+import { emit } from "../lib/event-bus.js";
 
 // Scan en rafale : filme un ECRAN affichant plusieurs adresses a la fois
 // (ex: appli/portail du transporteur listant une tournee), par opposition au
@@ -128,6 +129,152 @@ export function mergeDraftInto(existing, incoming) {
   if (incoming.rue && (!existing.rue || incoming.rue.length > existing.rue.length + 3)) existing.rue = incoming.rue;
 }
 
+// Absorbe les brouillons d'une passe OCR dans la collecte (deduplication
+// floue + complement des champs manquants) -- partage entre le mode camera
+// live et l'analyse d'une video importee, qui produisent exactement les
+// memes brouillons par des chemins differents.
+function ingestDrafts(collected, drafts) {
+  const boxResults = [];
+  for (const draft of drafts) {
+    const matchIdx = collected.findIndex((existing) => isSameAddress(existing, draft));
+    const isNew = matchIdx === -1;
+    if (isNew) {
+      collected.push(draft);
+    } else {
+      mergeDraftInto(collected[matchIdx], draft);
+    }
+    boxResults.push({ bbox: draft.bbox, isNew });
+  }
+  return boxResults;
+}
+
+// Analyse d'une VIDEO enregistree avec la camera native puis importee --
+// retour terrain : "si je mettais la video directement sur l'app, ce serait
+// pas plus simple ?". Si : c'est meme un retour au principe fondateur de
+// l'app (jamais de flux camera en direct, la camera native est plus fiable
+// -- voir CLAUDE.md sur capture.js), dont le mode live etait l'exception, et
+// precisement celle qui plantait (memoire iOS : carte WebGL + getUserMedia).
+// Ici : aucun flux, on decode le fichier image par image, sans course contre
+// le direct -- l'OCR peut prendre son temps.
+function analyzeVideoFile(file, container) {
+  return new Promise((resolve, reject) => {
+    // Meme signal que les flux camera : la carte se suspend pour laisser la
+    // memoire au decodage video + Tesseract (voir suspendMap dans map-ui.js).
+    emit("camera:open");
+
+    container.innerHTML = `
+      <video id="batch-file-video" playsinline muted style="width:100%;max-height:38vh;border-radius:var(--radius-card);background:#000;"></video>
+      <p class="muted" id="batch-file-status" style="text-align:center;margin-top:10px;">${inlineLoadingHtml("Lecture de la vidéo…")}</p>
+      <div class="button-row">
+        <button type="button" id="batch-file-cancel">Annuler</button>
+        <button type="button" class="primary" id="batch-file-finish" hidden>${icon("check")}Terminer (<span id="batch-file-count">0</span>)</button>
+      </div>
+    `;
+    const video = container.querySelector("#batch-file-video");
+    const statusEl = container.querySelector("#batch-file-status");
+    const finishBtn = container.querySelector("#batch-file-finish");
+    const countEl = container.querySelector("#batch-file-count");
+    const url = URL.createObjectURL(file);
+    const collected = [];
+    let stopped = false;
+    let done = false;
+
+    function cleanup() {
+      stopped = true;
+      URL.revokeObjectURL(url);
+    }
+    container.querySelector("#batch-file-cancel").addEventListener("click", () => {
+      cleanup();
+      reject(new Error("Scan annulé."));
+    });
+    // "Terminer" disponible pendant l'analyse aussi : si tout est deja
+    // detecte au bout de la moitie de la video, inutile d'attendre la fin.
+    finishBtn.addEventListener("click", () => {
+      cleanup();
+      resolve(collected.slice());
+    });
+
+    const captureCanvas = document.createElement("canvas");
+    const ctx = captureCanvas.getContext("2d", { willReadFrequently: true });
+
+    function seekTo(t) {
+      return new Promise((res, rej) => {
+        const timer = setTimeout(() => rej(new Error("seek timeout")), 5000);
+        video.addEventListener(
+          "seeked",
+          () => {
+            clearTimeout(timer);
+            res();
+          },
+          { once: true }
+        );
+        video.currentTime = t;
+      });
+    }
+
+    video.addEventListener("error", () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      statusEl.textContent = "Format vidéo illisible sur cet appareil — réessaie en filmant avec la caméra native.";
+      container.querySelector("#batch-file-cancel").textContent = "Retour";
+    });
+
+    video.addEventListener(
+      "loadedmetadata",
+      async () => {
+        try {
+          const duration = video.duration;
+          if (!Number.isFinite(duration) || duration <= 0) throw new Error("durée vidéo inconnue");
+          // ~45 images maxi : sur une video de 20s c'est une image toutes les
+          // ~0,45s -- l'ecran defile lentement pendant qu'on filme, chaque
+          // fiche apparait donc sur plusieurs images de toute facon.
+          const step = Math.max(0.4, duration / 45);
+          const langs = (await getSetting("ocrLangs")) || "fra";
+          const cities = await listDistinctCities();
+          const knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
+          const total = Math.max(1, Math.floor((duration - 0.2) / step) + 1);
+          let index = 0;
+
+          for (let t = 0.2; t < duration && !stopped; t += step) {
+            index++;
+            await seekTo(Math.min(t, Math.max(0, duration - 0.05)));
+            if (stopped) break;
+            const scale = Math.min(1, MAX_CAPTURE_DIMENSION / Math.max(video.videoWidth, video.videoHeight));
+            captureCanvas.width = Math.round(video.videoWidth * scale);
+            captureCanvas.height = Math.round(video.videoHeight * scale);
+            ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+            preprocessForOcr(ctx, captureCanvas);
+            const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
+            if (stopped) break;
+            ingestDrafts(collected, parseAddressList(lines, { knownCities }));
+            countEl.textContent = String(collected.length);
+            finishBtn.hidden = false;
+            statusEl.innerHTML = inlineLoadingHtml(
+              `Analyse ${index}/${total} — ${collected.length} adresse${collected.length > 1 ? "s" : ""} détectée${collected.length > 1 ? "s" : ""}`
+            );
+          }
+          if (!stopped) {
+            done = true;
+            cleanup();
+            resolve(collected.slice());
+          }
+        } catch (err) {
+          if (stopped || done) return;
+          done = true;
+          cleanup();
+          console.error("[batch-scan] Analyse vidéo échouée:", err);
+          statusEl.textContent = `Analyse impossible (${escapeHtml(err?.message || String(err))}).`;
+          container.querySelector("#batch-file-cancel").textContent = "Retour";
+        }
+      },
+      { once: true }
+    );
+
+    video.src = url;
+  });
+}
+
 // Verification BAN EN AMONT de l'ecran de revision (pas seulement au moment
 // d'"Enregistrer") : retour terrain "pourquoi ne pas verifier qu'une adresse
 // existe avant de la valider, pour ne pas perdre de temps ?" -- on ne peut
@@ -206,6 +353,37 @@ async function bulkGeocodeAndSave(colis) {
 // d'avoir rien detecte.
 export function startBatchScan(container) {
   return new Promise((resolve, reject) => {
+    // Ecran de choix : l'import d'une video filmee avec la camera NATIVE est
+    // le chemin principal (fiable, refaisable, pas de flux getUserMedia en
+    // memoire a cote de la carte) ; le direct reste disponible en secours.
+    // L'input SANS attribut capture laisse iOS proposer son menu natif
+    // ("Prendre une video" / "Phototheque") -- les deux usages en un bouton.
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-title">${icon("camera")}Scanner une liste</div>
+        <p class="muted">Filme l'écran du terminal avec la caméra (en balayant lentement la liste), puis importe la vidéo — ou choisis une vidéo déjà prise.</p>
+        <input type="file" id="batch-video-input" accept="video/*" hidden>
+        <button type="button" class="primary btn-lg" id="batch-choose-video" style="width:100%;">${icon("camera")}Filmer ou choisir une vidéo</button>
+        <button type="button" id="batch-choose-live" style="width:100%;margin-top:8px;">Scanner en direct (ancien mode)</button>
+      </div>
+      <div class="button-row"><button type="button" id="batch-choose-cancel">Annuler</button></div>
+    `;
+    const fileInput = container.querySelector("#batch-video-input");
+    container.querySelector("#batch-choose-video").addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      analyzeVideoFile(file, container).then(resolve, reject);
+    });
+    container.querySelector("#batch-choose-live").addEventListener("click", () => startLive());
+    container.querySelector("#batch-choose-cancel").addEventListener("click", () => reject(new Error("Scan annulé.")));
+
+    function startLive() {
+    // La carte se suspend pendant le flux camera live (meme signal que les
+    // autres usages camera -- voir suspendMap dans map-ui.js) : ce mode
+    // n'emettait pas l'evenement et gardait la carte WebGL residente a cote
+    // du flux getUserMedia, exactement le cocktail qui plante sur iOS.
+    emit("camera:open");
     container.innerHTML = `
       <div class="batch-viewfinder-wrap">
         <video id="batch-video" autoplay playsinline muted></video>
@@ -314,17 +492,7 @@ export function startBatchScan(container) {
           // seulement complete si elle apporte des champs manquants
           // (mergeDraftInto) -- une meme adresse physique redonne
           // generalement un texte OCR legerement different a chaque passage.
-          const boxResults = [];
-          for (const draft of drafts) {
-            const matchIdx = collected.findIndex((existing) => isSameAddress(existing, draft));
-            const isNew = matchIdx === -1;
-            if (isNew) {
-              collected.push(draft);
-            } else {
-              mergeDraftInto(collected[matchIdx], draft);
-            }
-            boxResults.push({ bbox: draft.bbox, isNew });
-          }
+          const boxResults = ingestDrafts(collected, drafts);
           if (!stopped) {
             drawBoxes(boxResults);
             updateCount();
@@ -386,6 +554,7 @@ export function startBatchScan(container) {
       cleanup();
       resolve(collected.slice());
     });
+    } // fin de startLive()
   }).then(
     async (drafts) => {
       if (drafts.length === 0) return [];
