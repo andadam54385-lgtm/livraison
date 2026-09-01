@@ -197,18 +197,75 @@ function analyzeVideoFile(file, container) {
     const captureCanvas = document.createElement("canvas");
     const ctx = captureCanvas.getContext("2d", { willReadFrequently: true });
 
+    // Bug reel iOS ("Analyse impossible (seek timeout)", video noire) :
+    // Safari iOS ne decode quasiment RIEN d'une video tant que la lecture
+    // n'a pas ete amorcee -- poser currentTime sur un element a peine charge
+    // peut ne JAMAIS declencher "seeked". Deux parades combinees :
+    // - l'evenement "seeked" quand il vient, PLUS un sondage regulier de
+    //   currentTime/readyState en repli (certains iOS n'emettent pas
+    //   l'evenement pour certains sauts) ;
+    // - fastSeek() quand disponible (saute a l'image-cle la plus proche,
+    //   largement suffisant ici et bien plus fiable sur iOS).
     function seekTo(t) {
       return new Promise((res, rej) => {
-        const timer = setTimeout(() => rej(new Error("seek timeout")), 5000);
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          clearInterval(poller);
+          res();
+        };
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          clearInterval(poller);
+          rej(new Error("seek timeout"));
+        }, 8000);
+        const poller = setInterval(() => {
+          if (video.readyState >= 2 && Math.abs(video.currentTime - t) < 0.35) finish();
+        }, 150);
+        video.addEventListener("seeked", finish, { once: true });
+        if (typeof video.fastSeek === "function") {
+          try {
+            video.fastSeek(t);
+          } catch {
+            video.currentTime = t;
+          }
+        } else {
+          video.currentTime = t;
+        }
+      });
+    }
+
+    // Amorce le pipeline de decodage iOS : load() explicite, attendre que la
+    // PREMIERE image soit reellement decodee (loadeddata, pas juste les
+    // metadonnees), puis un play/pause muet -- sans ce reveil, les seeks
+    // partent dans le vide et l'element reste noir.
+    function warmup() {
+      return new Promise((res) => {
+        const onReady = async () => {
+          try {
+            await video.play();
+            video.pause();
+          } catch {
+            // lecture refusee : les seeks marchent souvent quand meme
+          }
+          res();
+        };
+        if (video.readyState >= 2) {
+          onReady();
+          return;
+        }
+        const timer = setTimeout(res, 10000); // repli : on tente l'analyse quand meme
         video.addEventListener(
-          "seeked",
+          "loadeddata",
           () => {
             clearTimeout(timer);
-            res();
+            onReady();
           },
           { once: true }
         );
-        video.currentTime = t;
       });
     }
 
@@ -229,25 +286,45 @@ function analyzeVideoFile(file, container) {
           // ~45 images maxi : sur une video de 20s c'est une image toutes les
           // ~0,45s -- l'ecran defile lentement pendant qu'on filme, chaque
           // fiche apparait donc sur plusieurs images de toute facon.
+          await warmup();
+          if (stopped) return;
           const step = Math.max(0.4, duration / 45);
           const langs = (await getSetting("ocrLangs")) || "fra";
           const cities = await listDistinctCities();
           const knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
           const total = Math.max(1, Math.floor((duration - 0.2) / step) + 1);
           let index = 0;
+          let framesOk = 0;
+          let seekFailures = 0;
 
           for (let t = 0.2; t < duration && !stopped; t += step) {
             index++;
-            await seekTo(Math.min(t, Math.max(0, duration - 0.05)));
-            if (stopped) break;
-            const scale = Math.min(1, MAX_CAPTURE_DIMENSION / Math.max(video.videoWidth, video.videoHeight));
-            captureCanvas.width = Math.round(video.videoWidth * scale);
-            captureCanvas.height = Math.round(video.videoHeight * scale);
-            ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-            preprocessForOcr(ctx, captureCanvas);
-            const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
-            if (stopped) break;
-            ingestDrafts(collected, parseAddressList(lines, { knownCities }));
+            // Une image qui rate (seek perdu, dimensions nulles) est SAUTEE,
+            // jamais fatale : l'ecran defile lentement pendant la prise, les
+            // images voisines couvrent le meme contenu. On n'abandonne que si
+            // RIEN n'a pu etre lu apres plusieurs echecs d'affilee.
+            try {
+              await seekTo(Math.min(t, Math.max(0, duration - 0.05)));
+              if (stopped) break;
+              if (!video.videoWidth) throw new Error("image vide");
+              const scale = Math.min(1, MAX_CAPTURE_DIMENSION / Math.max(video.videoWidth, video.videoHeight));
+              captureCanvas.width = Math.round(video.videoWidth * scale);
+              captureCanvas.height = Math.round(video.videoHeight * scale);
+              ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+              preprocessForOcr(ctx, captureCanvas);
+              const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
+              if (stopped) break;
+              ingestDrafts(collected, parseAddressList(lines, { knownCities }));
+              framesOk++;
+              seekFailures = 0;
+            } catch (frameErr) {
+              seekFailures++;
+              console.warn(`[batch-scan] image ${index}/${total} sautee:`, frameErr?.message || frameErr);
+              if (framesOk === 0 && seekFailures >= 3) {
+                throw new Error("la vidéo ne se laisse pas lire image par image");
+              }
+              continue;
+            }
             countEl.textContent = String(collected.length);
             finishBtn.hidden = false;
             statusEl.innerHTML = inlineLoadingHtml(
@@ -271,7 +348,9 @@ function analyzeVideoFile(file, container) {
       { once: true }
     );
 
+    video.preload = "auto";
     video.src = url;
+    video.load();
   });
 }
 
