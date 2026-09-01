@@ -203,8 +203,11 @@ async function render() {
     </div>
     <div class="card" style="margin-top:20px;">
       <div class="card-title">Zone dangereuse</div>
-      <p class="muted">Efface tous les colis et tournées (le graphe routier, les adresses et les favoris restent, pas besoin de réimporter).</p>
-      <button type="button" class="danger" id="s-reset">Effacer tous les colis et tournées</button>
+      <p class="muted">Le graphe routier, les adresses et les favoris ne sont jamais touchés ici — pas besoin de réimporter.</p>
+      <button type="button" class="danger" id="s-reset-colis" style="width:100%;">${icon("trash-2")}Effacer les colis</button>
+      <p class="muted" style="margin:6px 0 12px;">Uniquement les colis (préparation et tournée en cours). L'historique des journées archivées est conservé.</p>
+      <button type="button" class="danger" id="s-reset-tours" style="width:100%;">${icon("clock")}Effacer l'historique des tournées</button>
+      <p class="muted" style="margin:6px 0 0;">Uniquement les tournées archivées (et celle en cours). Les colis restent dans la préparation.</p>
     </div>
     <p class="muted" style="text-align:center;margin-top:16px;">Version : build ${APP_BUILD}</p>
   `;
@@ -293,12 +296,22 @@ async function render() {
     await exportToursCsv();
   });
 
-  containerRef.querySelector("#s-reset").addEventListener("click", async () => {
-    if (!confirm("Effacer tous les colis et tournées ? Cette action est irréversible.")) return;
+  // Deux effacements SEPARES (retour terrain) : supprimer les colis du jour
+  // ne doit pas emporter l'historique des journees, et faire le menage dans
+  // l'historique ne doit pas jeter les colis en preparation.
+  containerRef.querySelector("#s-reset-colis").addEventListener("click", async () => {
+    if (!confirm("Effacer tous les colis (préparation et tournée en cours) ? L'historique des journées est conservé. Action irréversible.")) return;
     const db = await getDb();
     await clear(db, "colis");
+    showToast("Colis effacés.");
+    render();
+  });
+
+  containerRef.querySelector("#s-reset-tours").addEventListener("click", async () => {
+    if (!confirm("Effacer l'historique des tournées ? Les colis ne sont pas touchés. Action irréversible.")) return;
+    const db = await getDb();
     await clear(db, "tours");
-    alert("Données effacées.");
+    showToast("Historique des tournées effacé.");
     render();
   });
 
