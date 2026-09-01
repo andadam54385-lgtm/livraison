@@ -81,6 +81,13 @@ async function render() {
           <div class="field" style="margin-top:8px;margin-bottom:0;">
             <textarea data-favori-note class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(f.note)}</textarea>
           </div>
+          <div class="field" style="margin-top:8px;margin-bottom:0;">
+            <label>Fermé de / à (la tournée évitera ce créneau)</label>
+            <div class="button-row" style="margin-top:0;">
+              <input type="time" data-favori-ferme-debut value="${escapeHtml(f.fermeDebut || "")}">
+              <input type="time" data-favori-ferme-fin value="${escapeHtml(f.fermeFin || "")}">
+            </div>
+          </div>
           <div class="button-row" style="margin-top:8px;">
             <button type="button" data-favori-addtour>${icon("plus")}Ajouter à la tournée</button>
             <button type="button" class="danger" data-favori-delete>${icon("trash-2")}Supprimer</button>
@@ -329,6 +336,17 @@ async function render() {
       showToast("Note enregistrée.");
     });
   });
+  for (const pair of [["[data-favori-ferme-debut]", "fermeDebut"], ["[data-favori-ferme-fin]", "fermeFin"]]) {
+    containerRef.querySelectorAll(pair[0]).forEach((el) => {
+      const initial = el.value;
+      el.addEventListener("blur", async () => {
+        if (el.value === initial) return;
+        const id = el.closest("[data-favori-id]").dataset.favoriId;
+        await updateFavori(id, { [pair[1]]: el.value });
+        showToast("Horaires enregistrés.");
+      });
+    });
+  }
 
   containerRef.querySelectorAll("[data-favori-delete]").forEach((el) => {
     el.addEventListener("click", async () => {

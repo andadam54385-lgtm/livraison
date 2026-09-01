@@ -6,6 +6,7 @@ import { optimizeTourOrder } from "./tsp.js";
 import { listColisByStatut, saveColis, getColis } from "../scan/colis-store.js";
 import { createTour, saveTour } from "./tour-store.js";
 import { getAllSettings, setSetting } from "../settings/settings-store.js";
+import { findNearbyFavori } from "../favoris/favoris-store.js";
 import { formatDurationShort, hhmmToSec, secondsSinceMidnight } from "../lib/geo-utils.js";
 import { emit } from "../lib/event-bus.js";
 import { setInlineLoading } from "../lib/loading.js";
@@ -107,15 +108,22 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   // qui l'est reellement.
   const limiteSec = hhmmToSec(settings.heureLimiteAvant12h);
   const deadlines = {};
-  // Fermeture de midi des pros DEBRANCHEE (demande explicite apres le retour
-  // terrain "des allers-retours" : meme corrigee en penalite forfaitaire, la
-  // contrainte n'a pas regagne la confiance -- le marquage "pro" redevient
-  // purement informatif). Le moteur (closedWindows dans tourCost, teste par
-  // tsp.test.mjs) reste en place : rebrancher = reconstruire la map ici.
+  // Fenetres de fermeture PAR ADRESSE, via les favoris ("sauf si je rentre
+  // les horaires pour le mettre en favoris", retour terrain) -- la regle
+  // GLOBALE "tous les pros fermes 12h-14h" a ete debranchee le meme jour
+  // ("des allers-retours") : trop brutale. Seule une adresse dont le favori
+  // porte des horaires explicites est evitee sur son creneau, avec la
+  // penalite forfaitaire raisonnable de tourCost (voir tsp.js).
   const closedWindows = {};
-  eligibles.forEach((c, i) => {
-    if (c.avant12h && limiteSec != null) deadlines[i + 1] = limiteSec;
-  });
+  await Promise.all(
+    eligibles.map(async (c, i) => {
+      if (c.avant12h && limiteSec != null) deadlines[i + 1] = limiteSec;
+      const favori = await findNearbyFavori(c.geocode.lat, c.geocode.lon);
+      const debut = hhmmToSec(favori?.fermeDebut);
+      const fin = hhmmToSec(favori?.fermeFin);
+      if (debut != null && fin != null && fin > debut) closedWindows[i + 1] = [debut, fin];
+    })
+  );
   const dwellSec = (settings.dureeArretMinutes || 0) * 60;
   const departureSec = secondsSinceMidnight(new Date());
 

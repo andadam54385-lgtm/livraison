@@ -40,18 +40,19 @@ function badgeForStatut(statut) {
 // s'enregistre en quittant le champ). Cree le favori silencieusement au 1er
 // caractere tape s'il n'existait pas encore -- "favori" ici n'est qu'une
 // adresse qui porte une note, pas une action separee a declencher a la main.
-async function saveNote(colis, note) {
+async function saveFavoriInfo(colis, patch) {
   const existing = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
   if (existing) {
-    await updateFavori(existing.id, { note });
-  } else if (note.trim()) {
+    await updateFavori(existing.id, patch);
+  } else if ((patch.note || "").trim() || patch.fermeDebut || patch.fermeFin) {
     await addFavori({
       rue: colis.adresseRaw.rue,
       cp: colis.adresseRaw.cp,
       ville: colis.adresseRaw.ville,
       lat: colis.geocode.lat,
       lon: colis.geocode.lon,
-      note,
+      note: patch.note || "",
+      ...patch,
     });
   }
 }
@@ -116,6 +117,13 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
         <label>${icon("star")}Note pour cette adresse</label>
         <textarea id="detail-note" class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(existingFavori?.note || "")}</textarea>
       </div>
+      <div class="field">
+        <label>${icon("clock")}Fermé de / à (optionnel — la tournée évitera ce créneau)</label>
+        <div class="button-row" style="margin-top:0;">
+          <input type="time" id="detail-ferme-debut" value="${escapeHtml(existingFavori?.fermeDebut || "")}">
+          <input type="time" id="detail-ferme-fin" value="${escapeHtml(existingFavori?.fermeFin || "")}">
+        </div>
+      </div>
     `
         : ""
     }
@@ -170,8 +178,22 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
     const initialNote = noteEl.value;
     noteEl.addEventListener("blur", async () => {
       if (noteEl.value === initialNote) return;
-      await saveNote(colis, noteEl.value);
+      await saveFavoriInfo(colis, { note: noteEl.value });
       showToast("Note enregistrée.");
+    });
+  }
+  // Horaires de fermeture : meme enregistrement silencieux que la note --
+  // c'est en les renseignant ICI qu'une adresse obtient sa fenetre evitee
+  // par l'optimiseur (la regle globale pros a ete debranchee, voir
+  // routing-ui.js).
+  for (const suffix of ["debut", "fin"]) {
+    const el = container.querySelector("#detail-ferme-" + suffix);
+    if (!el) continue;
+    const initial = el.value;
+    el.addEventListener("blur", async () => {
+      if (el.value === initial) return;
+      await saveFavoriInfo(colis, { [suffix === "debut" ? "fermeDebut" : "fermeFin"]: el.value });
+      showToast("Horaires enregistrés — pris en compte au prochain calcul de tournée.");
     });
   }
 
