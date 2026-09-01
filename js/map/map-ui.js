@@ -653,6 +653,7 @@ export async function refreshMapData() {
       const btn = detailEl.querySelector("[data-map-deliver]");
       btn?.addEventListener("click", async () => {
         await markColisDeliveredDirect(btn.dataset.mapDeliver);
+        detailEl.innerHTML = ""; // meme regle : valide = fiche fermee
         await refreshMapData();
       });
     }
@@ -958,6 +959,9 @@ async function render() {
     if (!btn) return;
     btn.addEventListener("click", async () => {
       await markColisDeliveredDirect(btn.dataset.mapDeliver);
+      // Valide = fiche fermee (retour terrain) : le point passe au vert sur
+      // la carte, c'est le retour visuel suffisant -- re-taper le pin rouvre.
+      detailEl.innerHTML = "";
       await refreshMapData();
     });
   }
