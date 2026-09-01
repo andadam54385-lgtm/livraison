@@ -1,5 +1,5 @@
 import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec, finDeJournee, listSecteursConnus } from "../routing/tour-store.js";
-import { getColis, saveColis, listAllColis, formatAdresseAffichage, formatAdresseForNav, verbeAction } from "../scan/colis-store.js";
+import { getColis, saveColis, listAllColis, deleteColis, formatAdresseAffichage, formatAdresseForNav, verbeAction } from "../scan/colis-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
 import { buildSmsOptions } from "./sms-template.js";
@@ -34,6 +34,14 @@ let view = "list"; // "list" | "detail"
 let currentDetailColisId = null;
 let reorderMode = false;
 let filterIssuesOnly = false;
+// Mode selection de l'Etat A (retour terrain : "des fois on en enleve juste
+// avant de partir") : cases a cocher sur les cartes de preparation +
+// recherche pour retrouver vite un colis dans une longue liste. L'ensemble
+// vit ici (pas dans le DOM) pour survivre aux re-rendus declenches par la
+// frappe dans le champ de recherche.
+let selectionMode = false;
+let selectedIds = new Set();
+let prepFilterText = "";
 let selectedStart = "depot"; // "depot" | "gps", choix Etat A
 
 // Etat du dernier rendu Etat B, reutilise par renderStopsList() pour
@@ -391,6 +399,24 @@ function renderPrepCard(c) {
     c.typeClient === "pro" ? `<span class="badge badge-info">Pro</span>` : "",
     c.quantite > 1 ? `<span class="badge badge-pending">${c.quantite} colis</span>` : "",
   ].join("");
+  // En mode selection, la carte NE s'ouvre plus au tap (data-open-detail
+  // retire) : le tap coche/decoche, sinon impossible de cocher sans partir
+  // dans la fiche a chaque fois.
+  if (selectionMode) {
+    const checked = selectedIds.has(c.id);
+    return `
+      <div class="card prep-card${checked ? " prep-card-selected" : ""}" data-select-colis="${escapeAttr(c.id)}">
+        <div class="card-row">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <span class="prep-check">${checked ? icon("check", { spaced: false, size: 14 }) : ""}</span>
+            ${titreHtml}
+          </div>
+          ${badgeForStatut(c.statut)}
+        </div>
+        <div class="muted prep-card-addr" style="padding-left:26px;">${escapeHtml(adresse)}</div>
+      </div>
+    `;
+  }
   return `
     <div class="card prep-card" data-colis-id="${escapeAttr(c.id)}" data-open-detail>
       <div class="card-row">
@@ -444,12 +470,18 @@ async function renderEtatA() {
   const sheetLabelA = document.getElementById("tour-sheet-label");
   if (sheetLabelA) sheetLabelA.textContent = totalQty > 0 ? `${totalQty} colis à préparer` : "Préparation";
 
-  const visible = filterIssuesOnly ? prepColis.filter((c) => c.statut === "a_verifier") : prepColis;
+  const visible = (filterIssuesOnly ? prepColis.filter((c) => c.statut === "a_verifier") : prepColis).filter((c) =>
+    matchesFilter(c, prepFilterText)
+  );
+  // Purge les ids disparus (colis supprimes/livres entre deux rendus) pour
+  // que le compteur de selection ne mente jamais.
+  const visibleIds = new Set(prepColis.map((c) => c.id));
+  selectedIds = new Set([...selectedIds].filter((id) => visibleIds.has(id)));
   const listHtml =
     prepColis.length === 0
       ? `<div class="empty-state">Aucun colis pour l'instant. Scanne une étiquette ou ajoute une adresse à la main.</div>`
       : visible.length === 0
-        ? `<div class="empty-state">Aucun colis "à vérifier".</div>`
+        ? `<div class="empty-state">${prepFilterText ? `Aucun colis ne correspond à "${escapeHtml(prepFilterText)}".` : 'Aucun colis "à vérifier".'}</div>`
         : visible
             .slice()
             .reverse()
@@ -483,8 +515,92 @@ async function renderEtatA() {
       <p id="routing-status" class="muted" style="margin-top:10px;"></p>
       <div class="progress-bar"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
     </div>
+    <div class="button-row" style="margin:0 0 8px;">
+      <input type="search" id="etatA-search" placeholder="Rechercher un colis..." value="${escapeAttr(prepFilterText)}" style="flex:1;min-height:38px;">
+      <button type="button" class="btn-compact" id="etatA-select-toggle" style="flex:0 0 auto;">${icon(selectionMode ? "x" : "check")}${selectionMode ? "Annuler" : "Sélectionner"}</button>
+    </div>
+    ${
+      selectionMode
+        ? `
+      <div class="card" style="margin-bottom:8px;">
+        <div class="card-row">
+          <span class="muted">${selectedIds.size} sélectionné${selectedIds.size > 1 ? "s" : ""}</span>
+          <button type="button" class="btn-compact" id="etatA-select-all" style="flex:0 0 auto;">${selectedIds.size === visible.length && visible.length > 0 ? "Tout décocher" : "Tout cocher"}</button>
+        </div>
+        <div class="button-row" style="margin-top:8px;">
+          <button type="button" class="danger" id="etatA-delete-selected" ${selectedIds.size === 0 ? "disabled" : ""}>${icon("trash-2")}Supprimer (${selectedIds.size})</button>
+        </div>
+        <button type="button" class="hero-fail-btn" id="etatA-delete-all" style="margin-top:2px;">Supprimer TOUS les colis en préparation (${prepColis.length})</button>
+      </div>`
+        : ""
+    }
     <div id="etatA-list">${listHtml}</div>
   `;
+
+  // --- Recherche : re-rend la liste sans perdre le focus ni le curseur
+  const searchEl = containerRef.querySelector("#etatA-search");
+  if (searchEl) {
+    searchEl.addEventListener("input", async () => {
+      const pos = searchEl.selectionStart;
+      prepFilterText = searchEl.value;
+      await renderEtatA();
+      const next = containerRef.querySelector("#etatA-search");
+      if (next) {
+        next.focus();
+        next.setSelectionRange(pos, pos);
+      }
+    });
+  }
+
+  containerRef.querySelector("#etatA-select-toggle")?.addEventListener("click", async () => {
+    selectionMode = !selectionMode;
+    selectedIds = new Set();
+    await renderEtatA();
+  });
+
+  containerRef.querySelectorAll("[data-select-colis]").forEach((card) => {
+    card.addEventListener("click", async () => {
+      const id = card.dataset.selectColis;
+      if (selectedIds.has(id)) selectedIds.delete(id);
+      else selectedIds.add(id);
+      await renderEtatA();
+    });
+  });
+
+  containerRef.querySelector("#etatA-select-all")?.addEventListener("click", async () => {
+    const ids = [...containerRef.querySelectorAll("[data-select-colis]")].map((el) => el.dataset.selectColis);
+    const toutCoche = ids.length > 0 && ids.every((id) => selectedIds.has(id));
+    if (toutCoche) ids.forEach((id) => selectedIds.delete(id));
+    else ids.forEach((id) => selectedIds.add(id));
+    await renderEtatA();
+  });
+
+  // Tout supprimer, depuis le mode selection (retour terrain "un bouton
+  // supprimer tous les colis au cas ou") : ne touche QUE la preparation --
+  // les tournees archivees, l'historique et les favoris restent intacts,
+  // contrairement au "Effacer tous les colis et tournees" des Reglages.
+  containerRef.querySelector("#etatA-delete-all")?.addEventListener("click", async () => {
+    const n = prepColis.length;
+    if (n === 0) return;
+    if (!confirm(`Supprimer les ${n} colis en préparation ? L'historique des journées et les favoris ne sont pas touchés.`)) return;
+    for (const c of prepColis) await deleteColis(c.id);
+    selectedIds = new Set();
+    selectionMode = false;
+    prepFilterText = "";
+    showToast(`${n} colis supprimé${n > 1 ? "s" : ""}.`);
+    await render();
+  });
+
+  containerRef.querySelector("#etatA-delete-selected")?.addEventListener("click", async () => {
+    const n = selectedIds.size;
+    if (n === 0) return;
+    if (!confirm(`Supprimer ${n} colis ? Cette action est irréversible.`)) return;
+    for (const id of selectedIds) await deleteColis(id);
+    selectedIds = new Set();
+    selectionMode = false;
+    showToast(`${n} colis supprimé${n > 1 ? "s" : ""}.`);
+    await render();
+  });
 
   containerRef.querySelector("#etatA-manual").addEventListener("click", () => openManualEntry());
   containerRef.querySelector("#etatA-batch-scan").addEventListener("click", () => openBatchScan());
