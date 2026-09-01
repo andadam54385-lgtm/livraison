@@ -132,8 +132,21 @@ input, select, textarea {
   padding: 10px 12px;
   min-height: 44px;
   width: 100%;
+  max-width: 100%;
   transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
+/* iOS centre la valeur d'un input[type=time] des que le champ est bien plus
+   large que son contenu : sur un champ pleine largeur, l'heure flottait au
+   milieu et le champ paraissait deborder de sa carte (retour terrain). On lui
+   donne une largeur a sa mesure, alignee a gauche comme les autres champs. */
+input[type="time"] {
+  width: auto;
+  min-width: 7.5em;
+  text-align: left;
+}
+/* Deux champs horaires cote a cote (fermeture d'un favori) : ils se partagent
+   la ligne au lieu de la deborder. */
+.button-row input[type="time"] { flex: 1 1 0; min-width: 0; }
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent-strong);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
