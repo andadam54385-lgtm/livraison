@@ -9,6 +9,7 @@ import { loadCsrFromDb } from "../routing/graph-loader.js";
 import { buildSpatialGrid, findNearestNode } from "../routing/spatial-index.js";
 import { dijkstraSingleTargetPath, createDijkstraScratch } from "../routing/dijkstra.js";
 import { icon, iconToImage } from "../ui/icons.js";
+import { on } from "../lib/event-bus.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { loadingHtml } from "../lib/loading.js";
@@ -35,6 +36,50 @@ let mapInstance = null;
 // (retour terrain). La liste d'arrets interne (.stop-panel) est masquee en
 // CSS -- la feuille de tour-ui la remplace.
 let currentVariant = null;
+// iOS tue le contexte WebGL des que la PWA passe en arriere-plan -- y
+// compris pendant la prise de photo d'un scan (la camera EST un passage en
+// arriere-plan). Au retour, l'instance MapLibre est morte : canvas noir, et
+// tout setData/resize dessus peut lever. On note la perte via l'evenement
+// webglcontextlost, et on RECONSTRUIT l'instance au prochain retour visible
+// (visibilitychange) ou au prochain ensureMap. La camera (centre/zoom) est
+// memorisee a chaque mouvement pour que la reconstruction soit invisible --
+// retour terrain : "elle devrait se mettre la ou je suis, pas en grand a
+// chaque fois".
+let contextLost = false;
+let lastCamera = null;
+let geolocateControl = null;
+let visibilityBound = false;
+
+// Libere completement l'instance MapLibre (GPU + tas JS). Depuis la fusion,
+// la carte est residente en PERMANENCE -- et carte WebGL + flux camera du
+// viseur + photo native, c'est trop pour la memoire d'iOS, qui tue le
+// contexte voire la page ("la camera plante" en scannant un colis, retour
+// terrain). Tout flux camera emet "camera:open" (voir capture.js et
+// viewfinder-ui.js) : on suspend ici, et le prochain render() de tour-ui
+// reconstruit via ensureMap avec la camera memorisee (lastCamera) -- meme
+// mecanique, deja testee, que la perte de contexte WebGL.
+export function suspendMap() {
+  if (!mapInstance) return;
+  try {
+    mapInstance.remove();
+  } catch {
+    // instance deja morte (contexte perdu) : rien a liberer de plus
+  }
+  mapInstance = null;
+  layersReady = false;
+  contextLost = false;
+}
+on("camera:open", suspendMap);
+
+function bindVisibilityRebuild() {
+  if (visibilityBound) return;
+  visibilityBound = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && contextLost && containerRef?.isConnected) {
+      render().catch((err) => console.error("[map] reconstruction apres perte de contexte:", err));
+    }
+  });
+}
 let themeMediaCleanup = null;
 // Mode "selection par zones" (lasso) : etat local a l'ecran Carte, reinitialise
 // a chaque mount() -- voir setupZoneMode().
@@ -922,13 +967,33 @@ async function render() {
   // effaçait TOUT #map-content -- y compris la légende et la liste des
   // arrêts déjà rendues juste au-dessus, qui n'ont pourtant aucun rapport
   // avec WebGL et restent parfaitement utilisables sans fond de carte.
+  if (mapInstance) {
+    try {
+      mapInstance.remove();
+    } catch {
+      // une instance au contexte deja perdu peut refuser de mourir proprement
+    }
+    mapInstance = null;
+    layersReady = false;
+  }
+  contextLost = false;
+
+  // Cadrage initial : la camera memorisee d'abord (reconstruction apres
+  // perte de contexte = l'utilisateur ne doit rien remarquer), sinon
+  // l'arret en cours de la tournee active a un zoom rue, sinon le depot --
+  // le fitToPoints "vue d'ensemble" ne sert plus que faute de mieux, au
+  // tout premier affichage sans tournee (voir map.on("load")).
+  const heroStop = ordered.find(({ stop }) => stop.statutLivraison !== "livre" && stop.statutLivraison !== "echec");
+  const initialCenter = lastCamera?.center ?? (heroStop ? [heroStop.colis.geocode.lon, heroStop.colis.geocode.lat] : [depot.lon, depot.lat]);
+  const initialZoom = lastCamera?.zoom ?? (heroStop ? 14.5 : 12);
+
   let map;
   try {
     map = new window.maplibregl.Map({
       container: "maplibre-map",
       style,
-      center: [depot.lon, depot.lat],
-      zoom: 12,
+      center: initialCenter,
+      zoom: initialZoom,
       // Le bouton d'attribution "i" par defaut est en bas a droite -- pile
       // sous la feuille des arrets (.stop-panel, position:absolute sur toute
       // la largeur en bas de la carte), d'ou le chevauchement constate.
@@ -953,10 +1018,26 @@ async function render() {
   setupZoneMode(map, geocoded, ordreParColisId);
   map.addControl(new window.maplibregl.AttributionControl({ compact: true }), "top-left");
   map.addControl(new window.maplibregl.NavigationControl({ showCompass: false }), "top-right");
-  map.addControl(
-    new window.maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }),
-    "top-right"
+  geolocateControl = new window.maplibregl.GeolocateControl({
+    positionOptions: { enableHighAccuracy: true },
+    trackUserLocation: true,
+  });
+  map.addControl(geolocateControl, "top-right");
+
+  // Memorise la camera a chaque mouvement (pan/zoom utilisateur ou
+  // recentrage geoloc) pour les reconstructions.
+  map.on("moveend", () => {
+    const c = map.getCenter();
+    lastCamera = { center: [c.lng, c.lat], zoom: map.getZoom() };
+  });
+  map.getCanvas().addEventListener(
+    "webglcontextlost",
+    () => {
+      contextLost = true;
+    },
+    { passive: true }
   );
+  bindVisibilityRebuild();
 
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
   const onThemeChange = () => loadBasemapStyle(currentFlavor()).then((s) => map.setStyle(s));
@@ -983,13 +1064,25 @@ async function render() {
     addMapLayers(map, { routeGeoJson, stopsGeoJson, favorisGeoJson, waypointsGeoJson });
     layersReady = true;
 
-    const allPoints = [
-      depot,
-      ...geocoded.map((c) => ({ lat: c.geocode.lat, lon: c.geocode.lon })),
-      ...favGeoco.map((f) => ({ lat: f.lat, lon: f.lon })),
-      ...(returnPoint ? [returnPoint] : []),
-    ];
-    fitToPoints(map, allPoints);
+    if (!lastCamera && !heroStop) {
+      const allPoints = [
+        depot,
+        ...geocoded.map((c) => ({ lat: c.geocode.lat, lon: c.geocode.lon })),
+        ...favGeoco.map((f) => ({ lat: f.lat, lon: f.lon })),
+        ...(returnPoint ? [returnPoint] : []),
+      ];
+      fitToPoints(map, allPoints);
+    }
+    // Tournee active et pas de camera a restaurer : suivre la position
+    // reelle du livreur ("se mettre la ou je suis") -- trigger() active le
+    // suivi du GeolocateControl comme un tap sur son bouton.
+    if (!lastCamera && heroStop && geolocateControl) {
+      try {
+        geolocateControl.trigger();
+      } catch {
+        // geoloc refusee/indisponible : on reste sur l'arret en cours
+      }
+    }
 
     map.on("click", "stops-circle", (e) => {
       const props = e.features[0].properties;
@@ -1013,7 +1106,7 @@ async function render() {
 // (obligatoire apres tout changement de taille/visibilite du conteneur,
 // MapLibre ne l'observe pas lui-meme).
 export async function ensureMap(slotEl, variant) {
-  const reuse = mapInstance && containerRef === slotEl;
+  const reuse = mapInstance && containerRef === slotEl && !contextLost;
   containerRef = slotEl;
   slotEl.dataset.mapVariant = variant;
   currentVariant = variant;

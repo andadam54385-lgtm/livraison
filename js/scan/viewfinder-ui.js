@@ -1,3 +1,4 @@
+import { emit } from "../lib/event-bus.js";
 import { loadZxingLib, decodeCode128 } from "./barcode.js";
 import { icon } from "../ui/icons.js";
 import { escapeHtml } from "../lib/escape.js";
@@ -31,6 +32,7 @@ const MAX_DECODE_DIMENSION = 900;
 // l'ecran (texte exact de l'erreur) plutot que silencieusement avalee --
 // necessaire pour diagnostiquer a distance sans acces a la console.
 export function startBarcodeViewfinder(container) {
+  emit("camera:open"); // meme raison que dans capture.js : la carte se suspend
   return new Promise((resolve, reject) => {
     container.innerHTML = `
       <div class="viewfinder-wrap">
