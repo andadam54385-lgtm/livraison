@@ -308,35 +308,43 @@ a { color: var(--accent-strong); }
 }
 
 /* Arret courant (ecran Tournee) : seul element mis en avant, tout le reste
-   (liste "a venir") reste volontairement discret en dessous. Retour terrain
-   "trop gros" : gabarit densifie (padding, tailles de police, hauteur des
-   boutons d'action) tout en restant le plus visible de l'ecran. */
+   (liste "a venir") reste volontairement discret en dessous. Deux passes de
+   densification successives sur retour terrain ("trop gros", puis "diminue
+   legerement") : padding, tailles de police et hauteur des boutons d'action
+   resserres, en gardant Naviguer/Livre comme cibles confortables a une main
+   (>=46px) -- c'est le geste le plus repete de la journee. */
 .hero-card {
   background: var(--bg-card);
   border: 1.5px solid var(--border);
-  border-radius: 16px;
-  padding: 10px 12px 10px;
-  margin-bottom: 12px;
+  border-radius: 14px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
   box-shadow: var(--shadow-card);
 }
-.hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; gap: 8px; }
-.hero-eyebrow { font-size: 0.68rem; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
-.hero-addr { font-size: 1.2rem; font-weight: 750; letter-spacing: -0.015em; line-height: 1.15; margin: 1px 0 2px; }
-.hero-city { font-size: 0.85rem; color: var(--text-muted); margin: 0 0 6px; }
-.hero-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; border-top: 1px solid var(--border-soft); margin-bottom: 8px; }
-.hero-name { font-size: 0.92rem; font-weight: 650; }
-.hero-sub { font-size: 0.76rem; color: var(--text-muted); margin-top: 1px; }
-.hero-actions { display: flex; flex-direction: column; gap: 6px; }
+.hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; gap: 8px; }
+.hero-eyebrow { font-size: 0.64rem; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
+.hero-addr { font-size: 1.05rem; font-weight: 750; letter-spacing: -0.015em; line-height: 1.15; margin: 0 0 1px; }
+.hero-city { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 4px; }
+.hero-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 4px; border-top: 1px solid var(--border-soft); margin-bottom: 6px; }
+.hero-name { font-size: 0.85rem; font-weight: 650; }
+.hero-sub { font-size: 0.72rem; color: var(--text-muted); margin-top: 1px; }
+.hero-actions { display: flex; flex-direction: column; gap: 5px; }
 .hero-actions .button-row { margin-top: 0; }
+/* Actions principales : les boutons generiques (44px) et .btn-lg (56px)
+   etaient surdimensionnes dans une carte densifiee -- ramenes a 46px, au
+   dessus du minimum tactile puisque c est le geste le plus repete. */
+.hero-actions .btn-link,
+.hero-actions button,
+.hero-actions .btn-lg { min-height: 46px; font-size: 0.95rem; border-radius: 12px; }
 .hero-fail-btn {
   width: 100%;
   text-align: center;
   background: transparent;
   border: none;
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 650;
-  padding: 8px;
+  padding: 5px;
   min-height: 0;
 }
 .hero-fail-btn:active { color: var(--warn); }
