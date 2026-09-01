@@ -137,6 +137,26 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   classé, un format de rue non géré) et corriger `classifyShipToBlock`/les regex de
   `parse-ups-label.js` en conséquence — c'est exactement l'usage prévu de ce journal, pas
   juste un historique passif.**
+- **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
+  `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
+  vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE
+  étiquette ; quand une vidéo sort un mauvais résultat il n'existait aucune trace
+  exploitable. Chaque analyse vidéo enregistre le **texte OCR brut image par image, avec la
+  position verticale de chaque ligne** (indispensable : le découpage en fiches dépend des
+  écarts entre lignes — sans les positions un cas réel n'est pas rejouable dans
+  `parse-address-list.test.mjs`), plus ce que le parser en a tiré. Export copiable dans le
+  debug OCR des Réglages, 3 comptes rendus conservés. **Si l'utilisateur colle un export :
+  l'analyser comme le journal de corrections** — c'est l'usage prévu.
+  Le premier export réel (2026-09-01, 63 arrêts / 45 images) a révélé trois causes
+  distinctes, toutes corrigées au build 121 : fragments de bord d'écran (une fiche coupée
+  par le HAUT perd son DÉBUT — `isSameAddress` ne testait que les préfixes), commune collée
+  dans la rue en ordre `<rue> <VILLE> <CP>`, et ponctuation parasite (`55000 )`,
+  `55000 ,, BAR LE DUC`) bloquant la lecture du code postal. **Et un défaut bien plus
+  grave, trouvé en écrivant les tests : deux numéros différents de la même rue fusionnaient
+  en un seul arrêt** (un colis disparaissait silencieusement de la tournée) — d'où
+  `js/scan/dedup-drafts.js`, sorti de `batch-scan-ui.js` précisément pour être testable
+  hors navigateur, avec sa suite `dedup-drafts.test.mjs`. Ne jamais remettre cette logique
+  dans un module d'interface.
 - **`js/routing/insert-stop.js`** : insertion au moindre détour d'un colis scanné pendant
   une tournée en cours (pas de re-optimisation globale).
 - **Statuts colis** : `a_verifier` → `pret` → `en_tournee` → `livre` **ou** `echec`
