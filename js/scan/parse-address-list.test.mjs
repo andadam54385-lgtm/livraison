@@ -384,6 +384,56 @@ console.log("\n=== Cas 15 : video du terminal, bruit AU MILIEU des lignes (retou
   }
 }
 
+console.log("\n=== Cas 16 : marqueurs de distance, chrome telephone, badges a espace (terrain 2026-09-01 soir) ===");
+{
+  let y16 = 0;
+  const L16 = (text, gapBefore = 4) => {
+    y16 += gapBefore + 20;
+    return { text, bbox: { x0: 0, y0: y16, x1: 300, y1: y16 + 20 } };
+  };
+  const knownCities16 = new Set(["Bar-le-Duc", "Velaines"].map((c) => looseCommune(normalizeCity(c))));
+  const knownCps16 = new Set(["55000", "55500"]);
+  const opts16 = { knownCities: knownCities16, knownCps: knownCps16 };
+
+  // (a) FUSION a un SEUL code postal : seul le marqueur de distance peut la
+  // couper (le CP ne suffisait pas -- cas observe en conditions reelles).
+  const fusion = parseAddressList(
+    [
+      L16("10.5km Q PE 2 KULLMANN IMP 10:30 - 12:30 ®"),
+      L16("10.84km Q EURLGREGAUTO 8000 | 0+1 D 4 9EME RI AVE BAR-LE-DUC"),
+      L16("55000 10:30-12:30 © ,, BAR LE DUC"),
+    ],
+    opts16
+  );
+  assertEqual(fusion.length >= 2, true, "(a) la fusion est coupee sur les marqueurs de distance");
+  assertEqual(
+    fusion.some((b) => (b.rue || "").includes("KULLMANN")),
+    true,
+    "(a) le premier client (KULLMANN) est isole"
+  );
+
+  // (b) chrome du telephone + de l'appli : jamais un client
+  for (const chrome of [
+    "19 F-Bouyques Telecom (2) 9 © 4 80% M = itineraire 2 @ : LISTE(63) | CARTE SYNTHESE | CREER",
+    "LISTE(58) — CARTE -— SYNTHÈSE — CRÉER",
+  ]) {
+    assertEqual(parseAddressList([L16(chrome)], opts16).length, 0, `(b) chrome ecarte : ${chrome.slice(0, 28)}...`);
+  }
+
+  // (c) distance en METRES (pas seulement km)
+  const metres = parseAddressList([L16("717.01m Q 3 ANTOINE LAVOISIERALL 4000 | 1140"), L16("55500")], opts16);
+  assertEqual(
+    metres.every((b) => !/717/.test(b.rue || "")),
+    true,
+    "(c) la distance en metres est retiree de la rue"
+  );
+
+  // (d) badge a ESPACE ("4000 | 140 87") nettoye du nom
+  const badge = parseAddressList([L16("EDF 4000 | 140 87"), L16("2 NOTRE DAME RUE"), L16("55500")], opts16);
+  assertEqual(badge.length, 1, "(d) un seul client");
+  assertEqual(badge[0].nom, "EDF", "(d) nom nettoye du badge a espace");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)

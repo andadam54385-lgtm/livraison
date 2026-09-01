@@ -117,13 +117,21 @@ const TRAILING_NOISE_RE =
 // Tous ces motifs sont sans ambiguite : ils contiennent une unite ("km"),
 // une ponctuation d'heure, un separateur de badge, ou une longueur de
 // chiffres impossible pour un numero de voie ou un code postal.
+// Chrome de l'application transporteur et barre d'etat du TELEPHONE filme :
+// capturees en haut de chaque image, elles fabriquaient des clients entiers
+// ("19 F-Bouyques Telecom (2) 9 (c) 4 80% M = Itineraire 2 @ : LISTE(63) |
+// CARTE SYNTHESE | CREER" retenu comme adresse). Elles ne peuvent JAMAIS
+// faire partie d'une adresse : la ligne entiere est jetee.
+const UI_CHROME_RE =
+  /(liste\s*\(\s*\d|\bsynth[èe]se\b|\bcr[ée]er\b|\bitin[ée]raire\b|bouygues|telecom|\d{1,3}\s?%|\borange\b|\bsfr\b|\bfree\b)/i;
+
 const NOISE_TOKEN_PATTERNS = [
-  /\b\d+[.,]?\d*\s?km\b/gi, // distance : "12.61km", "6km"
+  /\b\d+[.,]?\d*\s?(km|m)\b\s*Q?/gi, // distance + l'icone "Q" qui la suit : "12.61km Q"
   /\b\d{1,2}\s?[:.]\s?\d{2}\s*[-\u2013]\s*\d{1,2}\s?[:.]\s?\d{2}\b/g, // creneau "11:30-13:30"
   // Badge de colis : "8000 | 0+1" mais aussi ses formes TRONQUEES par le
   // bord du cadre ou par l'OCR ("8000 | 0:", "2000 |o+1", "8000|0+2") --
   // observees collees a de vrais noms ("ckael Caillon 8000 | 0:").
-  /\b\d{3,5}\s*\|\s*[o0-9]{0,2}\s*[+:]?\s*\d{0,2}/gi, // badge "8000 | 0+1", "8000 | 0:"
+  /\b\d{3,5}\s*\|\s*[o0-9]{0,3}\s*[+: ]?\s*\d{0,3}/gi, // badge "8000 | 0+1", "8000 | 0:", "4000 | 140 87"
   /\b\d{3,4}[xX]\d{2,}\b/g, // reference "999X99"
   /\b\d{9,}\b/g, // telephone/reference brute (un CP fait 5 chiffres, un numero de voie moins)
   /[\u00a9\u00ae\u2122]/g, // pastilles d'icone (c), (R), TM laissees par l'OCR
@@ -206,6 +214,7 @@ function stripInterfaceNoise(ocrLines) {
     }
 
     if (isNoiseLine(text) || TRACKING_CODE_RE.test(text)) continue; // bruit isole (hors bandeau) : retire entierement, voir Cas 9
+    if (UI_CHROME_RE.test(text)) continue; // en-tete d'appli / barre d'etat du telephone
 
     // Bruit COLLE en fin de ligne reelle (terminal "Itineraire" : la colonne
     // de droite -- badge "8000 | 0+1", creneau "15:10 - 17:10", "999X99",
@@ -215,12 +224,13 @@ function stripInterfaceNoise(ocrLines) {
     // n'est plus reconnue, et la classification derive -- source directe du
     // sur-decoupage "138 points au lieu de 60". Ligne videe par le
     // nettoyage : gardee en espace reserve (bbox intact pour les ecarts).
+    // isClientStart est pose AVANT le nettoyage : dans ce terminal chaque
+    // fiche s'ouvre sur sa distance ("12.61km Q"), qui est justement du
+    // bruit -- elle serait effacee avant d'avoir pu servir de separateur
+    // (bug reel du premier jet : la fusion n'etait pas coupee).
+    const isClientStart = DISTANCE_MARKER_RE.test(text);
     const cleaned = stripTrailingNoise(stripNoiseTokens(text));
-    if (cleaned !== text) {
-      kept.push({ ...l, text: cleaned });
-      continue;
-    }
-    kept.push(l);
+    kept.push({ ...l, text: cleaned, isClientStart });
   }
 
   return kept;
@@ -231,6 +241,12 @@ const STREET_KEYWORDS = [
   "ALLEE", "ALLÉE", "ZONE", "ZI", "ZAC", "LIEU-DIT", "LIEU DIT", "HAMEAU",
   "LOTISSEMENT", "RESIDENCE", "RÉSIDENCE", "PLACE", "COURS", "QUAI", "VOIE",
   "TER", "BIS", "FAUBOURG",
+  // Abreviations du terminal transporteur (retour terrain : elles manquaient
+  // toutes, donc "2 KULLMANN IMP", "26 LIBERATION AVE", "9 POPEY CHMN",
+  // "12 REGGIO PL"... n'etaient PAS reconnus comme des rues -- la fiche
+  // entiere passait alors a la trappe faute d'adresse exploitable). Le
+  // terminal ecrit le type de voie APRES le nom, en abrege.
+  "IMP", "ALL", "AVE", "BLVD", "BLV", "CHMN", "RTE", "PL", "SQ", "CRS", "QU",
 ];
 
 // Mot entier, jamais une sous-chaine (meme raison que parse-ups-label.js :
@@ -274,6 +290,11 @@ function splitEmbeddedCpVille(line) {
 function looksLikeUiChrome(line) {
   if (/\s/.test(line)) return false;
   if (line.length > 10) return false;
+  // Doit contenir un CHIFFRE : bug reel, "EDF" (vrai client) etait rejete
+  // comme badge. Le vocabulaire de chrome purement alphabetique deja connu
+  // ("AGC", "TRANSFERE"...) est traite par NOISE_LINE_PATTERNS ; ce repli
+  // generique ne vise que les codes du type "C18", "999X99", "8000".
+  if (!/\d/.test(line)) return false;
   return /^[A-ZÀ-Ü0-9\-]+$/.test(line);
 }
 
@@ -480,6 +501,26 @@ export function groupLinesIntoBlocks(lines) {
 // bloc -- "OPTICIENS KRYS ... BAR-LE-DUC 55000 ... ROCHELLE BLVD ... 55000").
 // Dans ce terminal le CP TERMINE chaque fiche : on recoupe juste apres
 // chacun. Sans CP valide en double, le bloc est rendu tel quel.
+// Dans ce terminal, CHAQUE fiche client est precedee de sa distance
+// ("12.61km Q", "717.01m Q") -- c'est le separateur le plus fiable, bien
+// meilleur que le code postal : il est present meme quand le CP a ete mal lu,
+// et il marque le DEBUT d'une fiche. Detecte sur le texte BRUT, avant que
+// stripNoiseTokens ne l'efface (d'ou l'ordre dans parseAddressList).
+const DISTANCE_MARKER_RE = /(^|\s)\d+[.,]?\d*\s?(km|m)\b/i;
+
+function splitOnDistanceMarkers(blockLines) {
+  const starts = blockLines.map((l, i) => (l.isClientStart ? i : -1)).filter((i) => i >= 0);
+  if (starts.length < 2) return [blockLines];
+  const parts = [];
+  // Ce qui precede le premier marqueur appartient au client precedent.
+  if (starts[0] > 0) parts.push(blockLines.slice(0, starts[0]));
+  starts.forEach((start, k) => {
+    const end = k + 1 < starts.length ? starts[k + 1] : blockLines.length;
+    parts.push(blockLines.slice(start, end));
+  });
+  return parts.filter((p) => p.length > 0);
+}
+
 function splitFusedBlock(blockLines, knownCps) {
   const cuts = [];
   blockLines.forEach((l, i) => {
@@ -499,14 +540,43 @@ function splitFusedBlock(blockLines, knownCps) {
   return parts.filter((p) => p.length > 0);
 }
 
+// Une SEULE ligne OCR peut contenir plusieurs fiches quand l'image a tout
+// fusionne ("12.61km Q OPTICIENS KRYS ... BAR-LE-DUC 55000 : A 12.6km Q vu,
+// PIED AURE ... 55000"). Le decoupage par index de ligne ne peut rien : on
+// recoupe donc le TEXTE lui-meme a chaque marqueur de distance, en pseudo-
+// lignes qui partagent la bbox d'origine (l'ecart vertical reste correct,
+// et isClientStart les separera ensuite).
+const DISTANCE_SPLIT_RE = /(?=(?:^|\s)\d+[.,]?\d*\s?(?:km|m)\b)/i;
+
+function explodeFusedLines(ocrLines) {
+  const out = [];
+  for (const l of ocrLines) {
+    const parts = String(l.text || "")
+      .split(DISTANCE_SPLIT_RE)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    if (parts.length < 2) {
+      out.push(l);
+      continue;
+    }
+    for (const part of parts) out.push({ ...l, text: part });
+  }
+  return out;
+}
+
 export function parseAddressList(ocrLines, { knownCities = new Set(), knownCps = new Set() } = {}) {
   // Bruit d'interface (distance/horaire/tag/statut/code/bandeau d'instruction,
   // voir stripInterfaceNoise) retire AVANT le decoupage en blocs -- sans ca,
   // ces lignes intercalees entre deux adresses peuvent casser l'ecart qui les
   // separe et les faire fusionner (ou, pire, exploser un client en plusieurs
   // faux clients quand le bandeau lui-meme cree de faux ecarts).
-  const usableLines = stripInterfaceNoise(ocrLines);
-  const blocks = groupLinesIntoBlocks(usableLines).flatMap((b) => splitFusedBlock(b, knownCps));
+  const usableLines = stripInterfaceNoise(explodeFusedLines(ocrLines));
+  // Deux decoupages complementaires : par marqueur de distance (debut de
+  // fiche) puis par code postal (fin de fiche). L'un rattrape ce que l'autre
+  // rate quand l'OCR a mal lu l'un des deux.
+  const blocks = groupLinesIntoBlocks(usableLines)
+    .flatMap(splitOnDistanceMarkers)
+    .flatMap((b) => splitFusedBlock(b, knownCps));
   return blocks
     .map((blockLines) => {
       const classified = classifyBlockLines(
