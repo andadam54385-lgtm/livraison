@@ -210,6 +210,25 @@ G. Notes persistantes par adresse (fusion avec favoris) — **entamé par l'usag
 favoris portent déjà note + horaires de fermeture (`fermeDebut`/`fermeFin`, pris en compte
 par l'optimiseur), éditables depuis la fiche colis, la carte d'arrêt (touche horloge sur
 les pros) et les Réglages (avec recherche).
+  **Horaires JOUR PAR JOUR (build 126, 2026-09-02)** : `js/favoris/horaires.js` (module pur,
+  testé par `horaires.test.mjs`) — un favori porte `horaires = {lun..dim: {ferme, ouverture,
+  fermeture, pauseDebut, pauseFin}}` ; `closedWindowsForJour` le traduit en fenêtres fermées
+  (avant l'ouverture / pause / après la fermeture / journée entière) que `tourCost` pénalise
+  (plusieurs fenêtres par arrêt, l'ancienne paire `[debut, fin]` reste acceptée). L'ancien
+  couple `fermeDebut`/`fermeFin` est lu tel quel par `horairesOf` (une pause, tous les jours)
+  et mis à `""` dès qu'on enregistre des horaires. Éditeur unique `horaires-ui.js`
+  (onglets Lun..Dim, un jour à la fois, « Copier sur lun–ven / tous les jours ») partagé par
+  la fiche colis, la carte d'arrêt (touche horloge des pros) et les Réglages. **Cœur** dans
+  l'en-tête de la fiche colis = mise en favori explicite (`saveFavoriInfo(..., {creer:true})`),
+  retrait avec confirmation si note/horaires existent.
+  **Position GPS en continu** (`js/map/live-position.js`, même build) : un seul
+  `watchPosition` pour l'appli, démarré à la première carte, jamais coupé ; couche `me`
+  (halo + point, au-dessus des arrêts) rebâtie avec les autres après un changement de
+  style. Ne déplace JAMAIS la caméra — le bouton du `GeolocateControl` reste le recentrage.
+  En PWA Safari la mesure ne continue qu'au premier plan (limite iOS).
+  **Recherche d'entreprise** : le nom retenu est le texte tapé dans la recherche en ligne
+  s'il diffère de l'adresse brute proposée par défaut (« mets le dernier nom mis pour la
+  recherche, pas celui que l'app a noté »).
 
 ## Chantier D — scan code-barres (fait le 2026-07-20)
 

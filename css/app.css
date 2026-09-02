@@ -712,6 +712,49 @@ a { color: var(--accent-strong); }
   box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
+/* Coeur "mettre en favori" (fiche colis) : contour au repos, plein une fois
+   l'adresse favorite. */
+.fav-btn { flex-shrink: 0; }
+.fav-btn.active { color: var(--warn); border-color: var(--warn); }
+.fav-btn.active svg { fill: currentColor; }
+
+/* Editeur d'horaires jour par jour (favoris/horaires-ui.js) : onglets
+   Lun..Dim en tete, un seul jour edite a la fois. Le point sous un jour
+   signale qu'il porte des horaires (rouge : ferme toute la journee). */
+.hours-editor { display: flex; flex-direction: column; gap: 8px; }
+.hours-days { display: flex; gap: 4px; }
+.hours-day {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px 0 2px;
+  font-size: 0.78rem;
+  font-weight: 550;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.hours-day.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 650;
+}
+.hours-dot { display: block; width: 6px; height: 6px; border-radius: 50%; margin-top: 3px; background: transparent; }
+.hours-day.set .hours-dot { background: currentColor; }
+.hours-day.closed .hours-dot { background: var(--warn); }
+.hours-day.active.closed .hours-dot { background: var(--accent-ink); }
+.hours-ferme { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+.hours-ferme input { width: 22px; height: 22px; margin: 0; }
+.hours-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.hours-grid label { display: flex; flex-direction: column; gap: 2px; font-size: 0.78rem; color: var(--text-muted); }
+.hours-grid input[type="time"] { width: 100%; min-height: 38px; }
+.hours-resume { margin: 0; font-size: 0.82rem; }
+.hours-copy { display: flex; gap: 6px; }
+.hours-copy button { flex: 1 1 0; min-width: 0; font-size: 0.8rem; padding: 8px 4px; }
+
 /* Badges purement informatifs (pro, ramasse) : ils qualifient le client ou
    l'operation, jamais le statut de livraison -- d'ou un contour neutre plutot
    qu'une des 4 couleurs semantiques, deja toutes prises. */

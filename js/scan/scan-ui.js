@@ -713,6 +713,14 @@ function renderGeocodePicker(container, colis, { onSaved }) {
     onlineResults.querySelectorAll(".candidate-item").forEach((btn) => {
       btn.addEventListener("click", () => {
         const picked = places[Number(btn.dataset.idx)];
+        // Le nom retenu est ce que le livreur vient de TAPER pour trouver le
+        // lieu (retour terrain : "mets le dernier nom mis pour la recherche,
+        // pas celui que l'app a note") -- ce que l'OCR ou la saisie d'origine
+        // avaient produit etait justement ce qui ne permettait pas de trouver
+        // l'adresse. Seulement s'il a change le texte : la valeur par defaut
+        // du champ est l'adresse brute, pas un nom.
+        const saisi = container.querySelector("#geocode-online-query").value.trim();
+        if (saisi && saisi !== rawQuery) colis.nom = saisi;
         acceptManualCoords(picked.lat, picked.lon);
       });
     });

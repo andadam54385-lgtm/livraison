@@ -2,6 +2,7 @@ import { listAllColis, saveColis, formatAdresseAffichage, formatAdresseForNav } 
 import { getActiveTour, markColisDeliveredDirect } from "../routing/tour-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { listFavoris } from "../favoris/favoris-store.js";
+import { startLivePosition, onLivePosition, getLastPosition } from "./live-position.js";
 import { buildNavUrl } from "../tour/deep-links.js";
 import { getMapFile } from "./pmtiles-store.js";
 import { getDb } from "../db/schema.js";
@@ -350,6 +351,48 @@ async function ensureMapIcons(map) {
     })
   );
 }
+
+// Position du livreur en continu (voir live-position.js, retour terrain :
+// "mettre le livreur la ou il est en permanence") : une source "me" a part,
+// jamais touchee par les setData des colis, rebatie avec les autres couches
+// apres un changement de style. Halo translucide + point, ajoutes APRES les
+// arrets pour rester visibles dessus. La camera n'est jamais deplacee ici :
+// c'est le bouton du GeolocateControl qui recentre.
+const ME_COLOR = "#2563eb";
+
+function meGeoJson(pos) {
+  if (!pos) return { type: "FeatureCollection", features: [] };
+  return {
+    type: "FeatureCollection",
+    features: [{ type: "Feature", geometry: { type: "Point", coordinates: [pos.lon, pos.lat] }, properties: {} }],
+  };
+}
+
+function addLivePositionLayer(map) {
+  if (map.getSource("me")) return;
+  map.addSource("me", { type: "geojson", data: meGeoJson(getLastPosition()) });
+  map.addLayer({
+    id: "me-halo",
+    type: "circle",
+    source: "me",
+    paint: { "circle-radius": 18, "circle-color": ME_COLOR, "circle-opacity": 0.18 },
+  });
+  map.addLayer({
+    id: "me-dot",
+    type: "circle",
+    source: "me",
+    paint: { "circle-radius": 7, "circle-color": ME_COLOR, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2.5 },
+  });
+}
+
+onLivePosition((pos) => {
+  if (!mapInstance || !layersReady) return;
+  try {
+    mapInstance.getSource("me")?.setData(meGeoJson(pos));
+  } catch {
+    // instance en cours de destruction : le prochain rendu repartira de getLastPosition()
+  }
+});
 
 function addMapLayers(map, data) {
   const { routeGeoJson, stopsGeoJson, favorisGeoJson, waypointsGeoJson } = data;
@@ -1021,6 +1064,7 @@ async function render() {
     return;
   }
   mapInstance = map;
+  startLivePosition();
   setupZoneMode(map, geocoded, ordreParColisId);
   map.addControl(new window.maplibregl.AttributionControl({ compact: true }), "top-left");
   map.addControl(new window.maplibregl.NavigationControl({ showCompass: false }), "top-right");
@@ -1071,6 +1115,7 @@ async function render() {
             favorisGeoJson: buildFavorisGeoJson(data.favGeoco),
             waypointsGeoJson: buildWaypointsGeoJson(data.depot, data.returnPoint),
           });
+          addLivePositionLayer(map);
           layersReady = true;
         } catch (err) {
           console.error("[map] reconstruction des couches apres changement de theme:", err);
@@ -1098,6 +1143,7 @@ async function render() {
     const favorisGeoJson = buildFavorisGeoJson(favGeoco);
     const waypointsGeoJson = buildWaypointsGeoJson(depot, returnPoint);
     addMapLayers(map, { routeGeoJson, stopsGeoJson, favorisGeoJson, waypointsGeoJson });
+    addLivePositionLayer(map);
     layersReady = true;
 
     if (!lastCamera && !heroStop) {

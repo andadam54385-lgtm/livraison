@@ -2,6 +2,8 @@ import { getAllSettings, setSetting, DEFAULTS } from "./settings-store.js";
 import { getDb } from "../db/schema.js";
 import { clear, get } from "../lib/idb.js";
 import { listFavoris, updateFavori, deleteFavori } from "../favoris/favoris-store.js";
+import { horairesOf } from "../favoris/horaires.js";
+import { renderHorairesEditor } from "../favoris/horaires-ui.js";
 import { getToursGroupedByDay } from "../routing/tour-store.js";
 import { saveColis } from "../scan/colis-store.js";
 import { showToast } from "../lib/toast.js";
@@ -84,11 +86,8 @@ async function render() {
             <textarea data-favori-note class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(f.note)}</textarea>
           </div>
           <div class="field" style="margin-top:8px;margin-bottom:0;">
-            <label>Fermé de / à (la tournée évitera ce créneau)</label>
-            <div class="button-row" style="margin-top:0;">
-              <input type="time" data-favori-ferme-debut value="${escapeHtml(f.fermeDebut || "")}">
-              <input type="time" data-favori-ferme-fin value="${escapeHtml(f.fermeFin || "")}">
-            </div>
+            <label>Horaires d'ouverture (la tournée évitera les heures fermées)</label>
+            <div data-favori-horaires></div>
           </div>
           <div class="button-row" style="margin-top:8px;">
             <button type="button" data-favori-addtour>${icon("plus")}Ajouter à la tournée</button>
@@ -461,17 +460,20 @@ async function render() {
       showToast("Note enregistrée.");
     });
   });
-  for (const pair of [["[data-favori-ferme-debut]", "fermeDebut"], ["[data-favori-ferme-fin]", "fermeFin"]]) {
-    containerRef.querySelectorAll(pair[0]).forEach((el) => {
-      const initial = el.value;
-      el.addEventListener("blur", async () => {
-        if (el.value === initial) return;
-        const id = el.closest("[data-favori-id]").dataset.favoriId;
-        await updateFavori(id, { [pair[1]]: el.value });
+  // Horaires jour par jour : meme editeur que la fiche colis (voir
+  // favoris/horaires-ui.js), un par adresse favorite.
+  containerRef.querySelectorAll("[data-favori-id]").forEach((card) => {
+    const host = card.querySelector("[data-favori-horaires]");
+    if (!host) return;
+    const id = card.dataset.favoriId;
+    const favori = favoris.find((f) => f.id === id);
+    renderHorairesEditor(host, horairesOf(favori), {
+      onChange: async (horaires) => {
+        await updateFavori(id, { horaires, fermeDebut: "", fermeFin: "" });
         showToast("Horaires enregistrés.");
-      });
+      },
     });
-  }
+  });
 
   containerRef.querySelectorAll("[data-favori-delete]").forEach((el) => {
     el.addEventListener("click", async () => {

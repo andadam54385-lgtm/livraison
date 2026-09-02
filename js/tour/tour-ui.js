@@ -9,6 +9,8 @@ import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
 import { startBatchScan } from "../scan/batch-scan-ui.js";
 import { renderColisDetail, saveFavoriInfo } from "../scan/colis-detail-ui.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
+import { horairesOf } from "../favoris/horaires.js";
+import { renderHorairesEditor } from "../favoris/horaires-ui.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
@@ -949,23 +951,16 @@ function bindActionEvents(tourId) {
       const favori = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
       const editor = document.createElement("div");
       editor.className = "pro-hours-editor";
-      editor.style.cssText = "display:flex;gap:6px;align-items:center;margin-top:6px;";
-      editor.innerHTML = `
-        <span class="muted" style="font-size:0.78rem;">Fermé</span>
-        <input type="time" data-ferme-debut value="${escapeAttr(favori?.fermeDebut || "")}" style="min-height:34px;padding:4px 6px;">
-        <span class="muted" style="font-size:0.78rem;">à</span>
-        <input type="time" data-ferme-fin value="${escapeAttr(favori?.fermeFin || "")}" style="min-height:34px;padding:4px 6px;">
-      `;
+      editor.style.cssText = "margin-top:8px;";
       card.appendChild(editor);
-      for (const [sel, field] of [["[data-ferme-debut]", "fermeDebut"], ["[data-ferme-fin]", "fermeFin"]]) {
-        const input = editor.querySelector(sel);
-        const initial = input.value;
-        input.addEventListener("blur", async () => {
-          if (input.value === initial) return;
-          await saveFavoriInfo(colis, { [field]: input.value });
+      // Meme editeur jour par jour que la fiche colis et les Reglages (voir
+      // favoris/horaires-ui.js).
+      renderHorairesEditor(editor, horairesOf(favori), {
+        onChange: async (horaires) => {
+          await saveFavoriInfo(colis, { horaires, fermeDebut: "", fermeFin: "" });
           showToast("Horaires enregistrés — pris en compte au prochain recalcul.");
-        });
-      }
+        },
+      });
     });
   });
 

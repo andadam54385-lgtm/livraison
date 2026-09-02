@@ -122,6 +122,28 @@ console.log("\n=== Fermeture de midi d un pro : creneau evite, pas un rang impos
   check("aucune penalite en dehors du creneau de fermeture", tardif - tardifSansFermeture, 0);
 }
 
+console.log("\n=== Plusieurs fenetres fermees par arret (horaires jour par jour) ===");
+{
+  const matrix = buildLineMatrix(3, 3600);
+  const timing = { departureSec: H(8), dwellSec: 0, deadlines: {}, lateWeight: 1 };
+  // Ouvre a 10h30, pause 12h-14h, ferme a 17h : trois fenetres fermees.
+  const fenetres = { 2: [[0, H(10, 30)], [H(12), H(14)], [H(17), H(24)]] };
+  // Point 2 atteint a 10h (depart 8h + 2 x 1h) : avant l ouverture.
+  const avantOuverture = tourCost([1, 2], matrix, 0, { ...timing, closedWindows: fenetres });
+  const libre = tourCost([1, 2], matrix, 0, { ...timing, closedWindows: {} });
+  check("arrivee avant l ouverture : penalisee", avantOuverture - libre, 30 * 60);
+  // Depart 9h : point 2 a 11h, entre l ouverture et la pause.
+  const ouvert = tourCost([1, 2], matrix, 0, { ...timing, departureSec: H(9), closedWindows: fenetres });
+  const ouvertLibre = tourCost([1, 2], matrix, 0, { ...timing, departureSec: H(9), closedWindows: {} });
+  check("arrivee entre ouverture et pause : rien", ouvert - ouvertLibre, 0);
+  // Depart 16h : point 2 a 18h, apres la fermeture.
+  const apresFermeture = tourCost([1, 2], matrix, 0, { ...timing, departureSec: H(16), closedWindows: fenetres });
+  const apresLibre = tourCost([1, 2], matrix, 0, { ...timing, departureSec: H(16), closedWindows: {} });
+  check("arrivee apres la fermeture : penalisee", apresFermeture - apresLibre, 30 * 60);
+  const jourFerme = tourCost([1, 2], matrix, 0, { ...timing, departureSec: H(9), closedWindows: { 2: [[0, H(24)]] } });
+  check("jour ferme : penalise a toute heure", jourFerme - ouvertLibre, 30 * 60);
+}
+
 console.log("\n=== Contrainte souple : jamais d echec, meme si tout est intenable ===");
 {
   const matrix = buildLineMatrix(4, 7200); // 2h entre voisins

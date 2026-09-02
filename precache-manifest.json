@@ -1,6 +1,6 @@
 {
-  "version": "4111d853f943",
-  "generatedAt": "2026-09-02T10:41:04.145Z",
+  "version": "8e191e6d281f",
+  "generatedAt": "2026-09-02T10:51:20.359Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -18,6 +18,9 @@
     "./js/debug/bug-reports-ui.js",
     "./js/export/export-tours.js",
     "./js/favoris/favoris-store.js",
+    "./js/favoris/horaires-ui.js",
+    "./js/favoris/horaires.js",
+    "./js/favoris/horaires.test.mjs",
     "./js/geocode/ban-index.js",
     "./js/geocode/ban-index.test.mjs",
     "./js/geocode/geocode-ui.js",
@@ -34,6 +37,7 @@
     "./js/lib/idb.js",
     "./js/lib/loading.js",
     "./js/lib/toast.js",
+    "./js/map/live-position.js",
     "./js/map/map-ui.js",
     "./js/map/pmtiles-store.js",
     "./js/routing/dijkstra.js",

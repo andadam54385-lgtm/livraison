@@ -7,6 +7,7 @@ import { listColisByStatut, saveColis, getColis } from "../scan/colis-store.js";
 import { createTour, saveTour } from "./tour-store.js";
 import { getAllSettings, setSetting } from "../settings/settings-store.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
+import { horairesOf, closedWindowsForJour, jourKeyForDate } from "../favoris/horaires.js";
 import { formatDurationShort, hhmmToSec, secondsSinceMidnight } from "../lib/geo-utils.js";
 import { emit } from "../lib/event-bus.js";
 import { setInlineLoading } from "../lib/loading.js";
@@ -115,13 +116,17 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   // porte des horaires explicites est evitee sur son creneau, avec la
   // penalite forfaitaire raisonnable de tourCost (voir tsp.js).
   const closedWindows = {};
+  // Horaires JOUR PAR JOUR du favori (voir favoris/horaires.js) : les
+  // fenetres fermees du jour courant -- avant l'ouverture, la pause, apres la
+  // fermeture, ou la journee entiere. Les favoris d'avant (fermeDebut/
+  // fermeFin) sont lus tels quels par horairesOf.
+  const jourKey = jourKeyForDate(new Date());
   await Promise.all(
     eligibles.map(async (c, i) => {
       if (c.avant12h && limiteSec != null) deadlines[i + 1] = limiteSec;
       const favori = await findNearbyFavori(c.geocode.lat, c.geocode.lon);
-      const debut = hhmmToSec(favori?.fermeDebut);
-      const fin = hhmmToSec(favori?.fermeFin);
-      if (debut != null && fin != null && fin > debut) closedWindows[i + 1] = [debut, fin];
+      const fenetres = favori ? closedWindowsForJour(horairesOf(favori), jourKey) : [];
+      if (fenetres.length > 0) closedWindows[i + 1] = fenetres;
     })
   );
   const dwellSec = (settings.dureeArretMinutes || 0) * 60;

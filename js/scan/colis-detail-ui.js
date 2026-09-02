@@ -10,7 +10,9 @@ import {
   verbeAction,
 } from "./colis-store.js";
 import { segmentedHtml, bindSegmented, readSegmented } from "../ui/segmented.js";
-import { addFavori, updateFavori, findNearbyFavori } from "../favoris/favoris-store.js";
+import { addFavori, updateFavori, deleteFavori, findNearbyFavori } from "../favoris/favoris-store.js";
+import { horairesOf, horairesSontVides } from "../favoris/horaires.js";
+import { renderHorairesEditor } from "../favoris/horaires-ui.js";
 import { getActiveTour, markStopDelivered, markStopFailed } from "../routing/tour-store.js";
 import { getSetting } from "../settings/settings-store.js";
 import { buildNavUrl } from "../tour/deep-links.js";
@@ -40,21 +42,25 @@ function badgeForStatut(statut) {
 // s'enregistre en quittant le champ). Cree le favori silencieusement au 1er
 // caractere tape s'il n'existait pas encore -- "favori" ici n'est qu'une
 // adresse qui porte une note, pas une action separee a declencher a la main.
-export async function saveFavoriInfo(colis, patch) {
+// creer: true force la creation meme sans contenu (le coeur de la fiche).
+export async function saveFavoriInfo(colis, patch, { creer = false } = {}) {
   const existing = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
   if (existing) {
-    await updateFavori(existing.id, patch);
-  } else if ((patch.note || "").trim() || patch.fermeDebut || patch.fermeFin) {
-    await addFavori({
-      rue: colis.adresseRaw.rue,
-      cp: colis.adresseRaw.cp,
-      ville: colis.adresseRaw.ville,
-      lat: colis.geocode.lat,
-      lon: colis.geocode.lon,
-      note: patch.note || "",
-      ...patch,
-    });
+    return updateFavori(existing.id, patch);
   }
+  const utile = creer || (patch.note || "").trim() || patch.fermeDebut || patch.fermeFin || patch.horaires;
+  if (!utile) return null;
+  const created = await addFavori({
+    rue: colis.adresseRaw.rue,
+    cp: colis.adresseRaw.cp,
+    ville: colis.adresseRaw.ville,
+    lat: colis.geocode.lat,
+    lon: colis.geocode.lon,
+    note: patch.note || "",
+  });
+  // addFavori ne connait que les champs de base : le reste du patch (horaires
+  // jour par jour...) est pose juste apres, sinon il etait perdu a la creation.
+  return updateFavori(created.id, patch);
 }
 
 export async function renderColisDetail(container, colisId, { onBack, onChange } = {}) {
@@ -87,7 +93,10 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       ${badgeForStatut(colis.statut)}
     </div>
     <div class="card">
-      <div class="card-title" style="font-size:1.2rem;">${escapeHtml(titre)}</div>
+      <div class="card-row">
+        <div class="card-title" style="font-size:1.2rem;">${escapeHtml(titre)}</div>
+        ${canFavori ? `<button type="button" id="detail-fav" class="fav-btn ${existingFavori ? "active" : ""}" aria-pressed="${existingFavori ? "true" : "false"}" aria-label="${existingFavori ? "Retirer des favoris" : "Mettre en favori"}">${icon("heart", { spaced: false })}</button>` : ""}
+      </div>
       ${colis.nom ? `<div class="muted">${escapeHtml(adresse)}</div>` : ""}
       ${colis.tel ? `<a class="btn-link" style="margin-top:10px;" href="tel:${escapeAttr(colis.tel)}">${icon("phone")}${escapeHtml(colis.tel)}</a>` : ""}
       ${smsOptions.length > 0 ? `<button type="button" class="btn-link" style="margin-top:8px;" id="detail-sms-toggle">${icon("message-circle")}SMS</button>` : ""}
@@ -118,11 +127,8 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
         <textarea id="detail-note" class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(existingFavori?.note || "")}</textarea>
       </div>
       <div class="field">
-        <label>${icon("clock")}Fermé de / à (optionnel — la tournée évitera ce créneau)</label>
-        <div class="button-row" style="margin-top:0;">
-          <input type="time" id="detail-ferme-debut" value="${escapeHtml(existingFavori?.fermeDebut || "")}">
-          <input type="time" id="detail-ferme-fin" value="${escapeHtml(existingFavori?.fermeFin || "")}">
-        </div>
+        <label>${icon("clock")}Horaires d'ouverture (la tournée évitera les heures fermées)</label>
+        <div id="detail-horaires"></div>
       </div>
     `
         : ""
@@ -182,18 +188,38 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       showToast("Note enregistrée.");
     });
   }
-  // Horaires de fermeture : meme enregistrement silencieux que la note --
-  // c'est en les renseignant ICI qu'une adresse obtient sa fenetre evitee
-  // par l'optimiseur (la regle globale pros a ete debranchee, voir
-  // routing-ui.js).
-  for (const suffix of ["debut", "fin"]) {
-    const el = container.querySelector("#detail-ferme-" + suffix);
-    if (!el) continue;
-    const initial = el.value;
-    el.addEventListener("blur", async () => {
-      if (el.value === initial) return;
-      await saveFavoriInfo(colis, { [suffix === "debut" ? "fermeDebut" : "fermeFin"]: el.value });
-      showToast("Horaires enregistrés — pris en compte au prochain calcul de tournée.");
+  // Horaires jour par jour (voir favoris/horaires.js) : meme enregistrement
+  // silencieux que la note -- c'est en les renseignant ICI qu'une adresse
+  // obtient ses fenetres evitees par l'optimiseur (la regle globale pros a
+  // ete debranchee, voir routing-ui.js). fermeDebut/fermeFin vides : l'ancien
+  // couple ne doit plus jamais etre relu a la place des horaires.
+  const horairesHost = container.querySelector("#detail-horaires");
+  if (horairesHost) {
+    renderHorairesEditor(horairesHost, horairesOf(existingFavori), {
+      onChange: async (horaires) => {
+        await saveFavoriInfo(colis, { horaires, fermeDebut: "", fermeFin: "" });
+        showToast("Horaires enregistrés — pris en compte au prochain calcul de tournée.");
+      },
+    });
+  }
+  // Coeur : mise en favori EXPLICITE (retour terrain "il manque la mise en
+  // favori, genre un coeur"). Jusqu'ici une adresse ne devenait favorite
+  // qu'en tapant une note ou des horaires ; le coeur la garde telle quelle
+  // (sur la carte, et proposable depuis les Reglages).
+  const favBtn = container.querySelector("#detail-fav");
+  if (favBtn) {
+    favBtn.addEventListener("click", async () => {
+      const existing = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
+      if (existing) {
+        const aDuContenu = (existing.note || "").trim() || !horairesSontVides(horairesOf(existing));
+        if (aDuContenu && !confirm("Retirer cette adresse des favoris ? Sa note et ses horaires seront perdus.")) return;
+        await deleteFavori(existing.id);
+        showToast("Retirée des favoris.");
+      } else {
+        await saveFavoriInfo(colis, {}, { creer: true });
+        showToast("Adresse mise en favori.");
+      }
+      await renderColisDetail(container, colisId, { onBack, onChange });
     });
   }
 

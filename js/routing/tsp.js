@@ -63,8 +63,15 @@ export function tourCost(order, matrix, startIdx, timing = {}) {
     // forfait (~cout reel d'un repassage) borne mecaniquement les detours
     // acceptes : l'optimiseur ne deplace un pro que si ca coute moins que
     // WINDOW_MISS_SECONDS de trajet en plus, sinon il n'y touche pas.
-    const win = closedWindows[idx];
-    if (win && clock >= win[0] && clock < win[1]) penalty += WINDOW_MISS_SECONDS;
+    // Plusieurs fenetres par arret (horaires jour par jour, voir
+    // favoris/horaires.js : avant l'ouverture, la pause, apres la fermeture,
+    // ou la journee entiere) ; l'ancienne forme a une seule paire [debut,
+    // fin] reste acceptee.
+    const wins = closedWindows[idx];
+    if (wins) {
+      const liste = Array.isArray(wins[0]) ? wins : [wins];
+      if (liste.some(([a, b]) => clock >= a && clock < b)) penalty += WINDOW_MISS_SECONDS;
+    }
 
     clock += dwellSec;
     current = idx;
