@@ -169,6 +169,14 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   `js/scan/dedup-drafts.js`, sorti de `batch-scan-ui.js` précisément pour être testable
   hors navigateur, avec sa suite `dedup-drafts.test.mjs`. Ne jamais remettre cette logique
   dans un module d'interface.
+- **`js/tour/deep-links.js`** : la destination envoyée à Waze/Google/Plans est **toujours le
+  point GPS** (`lat,lon`), jamais le texte de l'adresse. Bug réel (build 128) : on passait
+  l'adresse canonique BAN et l'appli de navigation la regéocodait — « Grande Rue » existe
+  dans des dizaines de communes du secteur, Waze en choisissait une autre et emmenait dans
+  un mauvais village (le code postal dans la chaîne n'y suffit pas). L'adresse texte n'est
+  plus qu'un repli quand il n'y a pas de point, et une étiquette (`dname` côté Apple).
+  Ne jamais remettre `q=<adresse>` côté Waze, ni combiner `q` et `ll` (avec les deux, Waze
+  *cherche* le texte autour du point). Testé par `deep-links.test.mjs`.
 - **`js/routing/insert-stop.js`** : insertion au moindre détour d'un colis scanné pendant
   une tournée en cours (pas de re-optimisation globale).
 - **Statuts colis** : `a_verifier` → `pret` → `en_tournee` → `livre` **ou** `echec`

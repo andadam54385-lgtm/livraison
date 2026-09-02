@@ -1,6 +1,6 @@
 {
-  "version": "6b3a70720480",
-  "generatedAt": "2026-09-02T11:11:50.820Z",
+  "version": "0a4460fa4da3",
+  "generatedAt": "2026-09-02T11:37:35.063Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -71,6 +71,7 @@
     "./js/settings/settings-store.js",
     "./js/settings/settings-ui.js",
     "./js/tour/deep-links.js",
+    "./js/tour/deep-links.test.mjs",
     "./js/tour/sms-template.js",
     "./js/tour/tour-ui.js",
     "./js/ui/icons.js",
