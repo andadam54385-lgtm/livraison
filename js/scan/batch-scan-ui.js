@@ -84,6 +84,29 @@ function preprocessForOcr(ctx, canvas) {
 }
 
 
+// References geographiques passees au parser, construites une fois par scan
+// depuis la base BAN locale (listDistinctCities) :
+// - knownCities : communes de la zone (looseCommune, tolerance aux tirets
+//   absents d'un affichage d'ecran) ;
+// - knownCps : codes postaux REELS de la zone -- sans cette reference, toute
+//   suite de 5 chiffres passait pour un CP et l'OCR d'un ecran filme en
+//   invente en permanence ("55014", "55096", "05500", "99999" vus en
+//   conditions reelles), chacun fabriquant un faux colis ;
+// - cityCps : commune -> ses CP, pour corriger un CP dont un chiffre a ete
+//   mal lu mais qui reste un CP valide de la zone (voir cpParCommune).
+function buildKnownGeo(cities) {
+  const knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
+  const knownCps = new Set(cities.map((c) => c.cp).filter(Boolean));
+  const cityCps = new Map();
+  for (const c of cities) {
+    if (!c.cp) continue;
+    const key = looseCommune(c.cn);
+    if (!cityCps.has(key)) cityCps.set(key, new Set());
+    cityCps.get(key).add(c.cp);
+  }
+  return { knownCities, knownCps, cityCps };
+}
+
 // Analyse d'une VIDEO enregistree avec la camera native puis importee --
 // retour terrain : "si je mettais la video directement sur l'app, ce serait
 // pas plus simple ?". Si : c'est meme un retour au principe fondateur de
@@ -243,13 +266,7 @@ function analyzeVideoFile(file, container) {
           if (stopped) return;
           const step = Math.max(0.4, duration / 45);
           const langs = (await getSetting("ocrLangs")) || "fra";
-          const cities = await listDistinctCities();
-          const knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
-          // Codes postaux REELS de la zone : sans cette reference, toute suite
-          // de 5 chiffres passait pour un CP et l'OCR d'un ecran filme en
-          // invente en permanence ("55014", "55096", "05500", "99999" vus en
-          // conditions reelles) -- chacun fabriquant un faux colis.
-          const knownCps = new Set(cities.map((c) => c.cp).filter(Boolean));
+          const geo = buildKnownGeo(await listDistinctCities());
           const total = Math.max(1, Math.floor((duration - 0.2) / step) + 1);
           let index = 0;
           let framesOk = 0;
@@ -280,7 +297,7 @@ function analyzeVideoFile(file, container) {
                 index,
                 lignes: lines.map((l) => ({ texte: l.text, y0: Math.round(l.bbox?.y0 ?? 0), y1: Math.round(l.bbox?.y1 ?? 0) })),
               });
-              ingestDrafts(collected, parseAddressList(lines, { knownCities, knownCps }));
+              ingestDrafts(collected, parseAddressList(lines, geo));
               framesOk++;
               seekFailures = 0;
             } catch (frameErr) {
@@ -391,9 +408,7 @@ function analyzePhotoFiles(files, container) {
     (async () => {
       try {
         const langs = (await getSetting("ocrLangs")) || "fra";
-        const cities = await listDistinctCities();
-        const knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
-        const knownCps = new Set(cities.map((c) => c.cp).filter(Boolean)); // voir le meme choix cote video
+        const geo = buildKnownGeo(await listDistinctCities());
         const total = files.length;
         let lisibles = 0;
 
@@ -419,7 +434,7 @@ function analyzePhotoFiles(files, container) {
               index,
               lignes: lines.map((l) => ({ texte: l.text, y0: Math.round(l.bbox?.y0 ?? 0), y1: Math.round(l.bbox?.y1 ?? 0) })),
             });
-            ingestDrafts(collected, parseAddressList(lines, { knownCities, knownCps }));
+            ingestDrafts(collected, parseAddressList(lines, geo));
             lisibles++;
           } catch (photoErr) {
             console.warn(`[batch-scan] photo ${index}/${total} sautee:`, photoErr?.message || photoErr);
@@ -598,15 +613,10 @@ export function startBatchScan(container) {
     // est deja mis en cache par listDistinctCities() lui-meme -- gratuit si
     // un autre scan a deja tourne dans la session), en parallele de
     // l'initialisation camera plus bas.
-    let knownCities = new Set();
-    let knownCps = new Set();
+    let geo = { knownCities: new Set(), knownCps: new Set(), cityCps: new Map() };
     listDistinctCities()
       .then((cities) => {
-        // looseCommune (pas juste c.cn tel quel) : voir le meme choix cote
-        // parse-address-list.js, tolerance aux tirets/apostrophes absents
-        // d'un affichage d'ecran par rapport a l'orthographe BAN canonique.
-        knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
-        knownCps = new Set(cities.map((c) => c.cp).filter(Boolean)); // voir le meme choix cote video
+        geo = buildKnownGeo(cities);
       })
       .catch((err) => console.error("[batch-scan] Échec chargement des communes connues:", err));
 
@@ -668,7 +678,7 @@ export function startBatchScan(container) {
         try {
           const langs = (await getSetting("ocrLangs")) || "fra";
           const { lines } = await recognizeCanvasWithLines(captureCanvas, { langs });
-          const drafts = parseAddressList(lines, { knownCities, knownCps });
+          const drafts = parseAddressList(lines, geo);
 
           // isNew : ne correspond (floue, voir isSameAddress) a aucun
           // brouillon deja retenu -> vient d'etre ajoutee (cadre vert).

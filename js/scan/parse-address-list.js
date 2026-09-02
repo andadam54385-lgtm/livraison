@@ -135,11 +135,22 @@ const NOISE_TOKEN_PATTERNS = [
   // "km", "kr", "ki" ou "k" selon l'image ; l'epingle "Q" parfois "9".
   /\b\d+[.,]?\d*\s?(km|kr|ki|k|m)\b\s*[Q9]?(?=\s|$)/gi,
   /\b\d{1,2}\s?[:.]\s?\d{2}\s*[-\u2013]\s*\d{1,2}\s?[:.]\s?\d{2}\b/g, // creneau "11:30-13:30"
+  // Creneau dont la FIN est mal lue ("12:10-1410", "09:00 - 18:0C") ou dont
+  // les deux heures ont perdu leur ":" ("1220-1420") : la forme reste sans
+  // ambiguite, et le residu polluait la rue ou masquait le code postal.
+  /\b\d{1,2}[:.]\d{2}\s*[-\u2013]\s*\d{1,2}[:.]?\d{1,2}[a-z0-9]?(?=\s|$)/gi,
+  /\b\d{4}\s*[-\u2013]\s*\d{4}\b/g,
   // Badge de colis : "8000 | 0+1" mais aussi ses formes TRONQUEES par le
   // bord du cadre ou par l'OCR ("8000 | 0:", "2000 |o+1", "8000|0+2") --
-  // observees collees a de vrais noms ("ckael Caillon 8000 | 0:").
-  /\b\d{3,5}\s*\|\s*[o0-9]{0,3}\s*[+: ]?\s*\d{0,3}/gi, // badge "8000 | 0+1", "8000 | 0:", "4000 | 140 87"
+  // observees collees a de vrais noms ("ckael Caillon 8000 | 0:"). 3 ou 4
+  // chiffres SEULEMENT : avec 5, "55140 |" (un vrai code postal suivi d'une
+  // barre parasite) passait pour un badge et le CP disparaissait.
+  // La barre du badge est parfois lue "}" ou "]" ("8000} 041").
+  /\b\d{3,4}\s*[|}\]]\s*[o0-9]{0,3}\s*[+: ]?\s*\d{0,3}/gi, // badge "8000 | 0+1", "8000 | 0:", "4000 | 140 87"
   /\b\d{3,4}[xX]\d{2,}\b/g, // reference "999X99"
+  // Code de colis/ramasse : 6-7 caracteres melant lettres et chiffres
+  // ("A1912WF", "05R03E", "1V34Y3", "437W43"), colle au nom du client.
+  /\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{6,7}\b/gi,
   /\b\d{9,}\b/g, // telephone/reference brute (un CP fait 5 chiffres, un numero de voie moins)
   /[\u00a9\u00ae\u2122]/g, // pastilles d'icone (c), (R), TM laissees par l'OCR
 ];
@@ -165,20 +176,31 @@ function stripNoiseTokens(text) {
   // code postal reel ("55000 )", "FAINS VEEL 55000 @"), ils empechaient la
   // reconnaissance du CP et la fiche entiere finissait "a verifier".
   out = out
-    .replace(/^[\s,;:.|>\-–—_*"'°«»“”‘’…()@=~#!]+/, "")
+    .replace(/^[\s,;:.|>\-–—_*"'°«»“”‘’…()@=~#!+\/\\?$%&]+/, "")
     .replace(/[\s,;:|>_*"'°«»“”‘’…()@=~#!{}\[\]]+$/, "")
     .trim();
-  // Residu d'icone d'UN caractere colle au texte : en tete une minuscule
-  // isolee ("s ERICFRASIAK", "y 52 ANDRE THEURIET RUE", "n Doganay"), en fin
-  // une minuscule ou un chiffre ("Thieriot Kevin v", "2 MOULIN CHMN 3",
-  // "COMMERCY 55200 q" -- ce dernier faisait passer "q" pour la commune).
-  // Jamais une MAJUSCULE en fin : "BAT B", "ALLEE A" sont des adresses
-  // reelles. Jamais un chiffre en tete : c'est le numero de voie.
-  out = out.replace(/^[a-zà-ÿ]\s+(?=\S)/, "");
+  // Residus d'icones colles au texte, aux deux bouts :
+  // - en tete, un jeton court commencant par une minuscule devant un mot en
+  //   capitales ou un nombre ("s ERICFRASIAK", "eus FARGE FREDERIC", "nG
+  //   CHEMIN DES VERPILLERES", "y 52 ANDRE THEURIET RUE") -- jamais "Mme
+  //   regnier" (majuscule en tete) ni un chiffre (numero de voie) ;
+  // - en tete, un chiffre SEUL devant un vrai nombre ("4 7 ROSIERE RUE" :
+  //   l'icone de ramasse lue "4") -- mais pas "4 9EME RI AVE", ou "9EME"
+  //   n'est pas un nombre ;
+  // - en fin, une minuscule ou un chiffre isole ("Thieriot Kevin v", "2 MOULIN
+  //   CHMN 3", "COMMERCY 55200 q" -- ce "q" passait pour la commune), un jeton
+  //   de 3 caracteres au plus contenant un symbole ("@p", "9#)"), ou un
+  //   fragment de badge en milliers ronds ("19 BOIS RUE 3000").
+  // Jamais une MAJUSCULE isolee en fin : "BAT B", "ALLEE A" sont des adresses.
+  out = out.replace(/^[a-zà-ÿ][a-zà-ÿA-ZÀ-Ü]{0,2}\s+(?=[A-ZÀ-Ü0-9])/, "");
+  out = out.replace(/^\d\s+(?=\d+\s)/, "");
   let avant;
   do {
     avant = out;
-    out = out.replace(/\s+[a-zà-ÿ0-9]$/, "");
+    out = out
+      .replace(/\s+[a-zà-ÿ0-9]$/, "")
+      .replace(/\s+(?=\S{1,3}$)(?=\S*[^a-zA-Z0-9À-ÿ])\S{1,3}$/, "")
+      .replace(/^(\S+\s+\S+.*?)\s+(?:[1-9]000|800)$/, "$1");
   } while (out !== avant);
   return out;
 }
@@ -275,7 +297,11 @@ function stripInterfaceNoise(ocrLines) {
     // presque toutes les fiches d'une video reelle. Elle vaut separateur, et
     // n'est jamais un contenu (elle devenait un faux nom : "ar 1.16kr Q").
     const isClientStart = DISTANCE_MARKER_RE.test(text) || ICON_ROW_RE.test(text);
-    const cleaned = ICON_ROW_RE.test(text) ? "" : stripTrailingNoise(stripNoiseTokens(text));
+    let cleaned = ICON_ROW_RE.test(text) ? "" : stripTrailingNoise(stripNoiseTokens(text));
+    // Ce qui reste d'un badge apres nettoyage ("8000 | 0+2 3" -> "3") n'est
+    // jamais un contenu : un chiffre isole devenait le debut de la rue
+    // suivante ("3 5 SAINT MANSUY RUE").
+    if (/^\d{1,4}$/.test(cleaned)) cleaned = "";
     kept.push({ ...l, text: cleaned, isClientStart });
   }
 
@@ -442,6 +468,11 @@ function looksLikeUiChrome(line) {
 // CORCERET", 2 noms accoles par un tiret) qu'un plafond global aurait
 // injustement rejete.
 const MAX_NOM_WORDS = 3;
+// Une raison sociale reelle depasse souvent 3 mots ("SYND MIXTE DES EAUX DU
+// TOULOIS", "SAFRAN AERO COMPOSITE") : tolere jusqu'ici quand la ligne n'est
+// faite QUE de lettres -- le texte parasite que MAX_NOM_WORDS vise porte
+// presque toujours un chiffre ou un symbole.
+const MAX_NOM_WORDS_LETTRES = 6;
 
 function countWords(text) {
   return text.split(/\s+/).filter((w) => /[a-zà-ÿ]/i.test(w)).length;
@@ -462,7 +493,11 @@ function looksLikeName(line) {
   const clauses = line.split(/\s-\s/);
   return clauses.every((c) => {
     const n = countWords(c);
-    return n > 0 && n <= MAX_NOM_WORDS;
+    // CAPITALES uniquement : une raison sociale est ecrite ainsi sur le
+    // terminal, alors qu'une phrase parasite ("Message affiche pour
+    // information seulement", cas 13) est en minuscules.
+    const capitalesSeules = /^[A-ZÀ-Ü'\-.&\s]+$/.test(c);
+    return n > 0 && n <= (capitalesSeules ? MAX_NOM_WORDS_LETTRES : MAX_NOM_WORDS);
   });
 }
 
@@ -540,13 +575,26 @@ export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps
     // knownCities (base BAN) la stocke AVEC ("dommartin-les-toul") -- voir
     // looseCommune dans match-address.js, meme probleme deja resolu pour le
     // geocodage.
-    const normalizedVille = looseCommune(normalizeCity(line));
+    const normalizedVille = looseCommune(normalizeCity(expandSaint(line)));
     if (normalizedVille && knownCities.has(normalizedVille)) {
-      // Dernier match l'emporte (meme logique que "nom" plus bas) : un
-      // terminal peut afficher une ville en double (ex: un libelle de zone
-      // au-dessus du bloc ET la ville propre de l'adresse) -- la derniere
-      // occurrence est la plus fiable, jamais une concatenation des deux.
+      // Dernier match l'emporte : un terminal peut afficher une ville en
+      // double (ex: un libelle de zone au-dessus du bloc ET la ville propre
+      // de l'adresse) -- la derniere occurrence est la plus fiable, jamais
+      // une concatenation des deux.
       result.ville = line;
+      lastCategory = "ville";
+      continue;
+    }
+    // Commune connue en FIN de ligne, precedee d'un ou deux mots parasites ou
+    // d'elle-meme ("COMMERCY COMMERCY" sur une fiche de ramasse) : c'est la
+    // ligne de commune, pas une continuation de la rue -- avant, elle
+    // s'ajoutait a la rue et la fiche restait sans ville. Seulement APRES la
+    // rue : en tete de fiche, "CHAUSSEA COMMERCY" ou "SAC COMMERCY" est une
+    // raison sociale qui contient le nom de la ville, pas la commune.
+    const apresLaRue = lastCategory === "street" || lastCategory === "ville" || lastCategory === "cp";
+    const villeEnFin = apresLaRue ? peelKnownVille(line, knownCities) : null;
+    if (villeEnFin && countWords(villeEnFin.rest) <= 2 && !lineHasStreetWord(villeEnFin.rest)) {
+      result.ville = villeEnFin.ville;
       lastCategory = "ville";
       continue;
     }
@@ -573,7 +621,23 @@ export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps
       continue;
     }
 
-    result.names.push(line);
+    // Residu d'icone en fin de nom : une majuscule isolee ("maison
+    // individuelle V", "BIJOUTERIE CENTRALE D"). Toleree sur une rue ("BAT
+    // B"), jamais dans un nom.
+    const nomPropre = line.replace(/\s+[A-ZÀ-Ü]$/, "");
+    // Nom sur DEUX lignes ("SYND MIXTE DES EAUX DU" / "TOULOIS", "Mme regnier
+    // massera" / "valerie", "DOMAINE CLAUDE" / "VOSGIEN") : deux lignes de nom
+    // consecutives sont un seul nom replie par le terminal, pas deux candidats
+    // dont le dernier l'emporterait.
+    // ... sauf si la ligne precedente est un mot SEUL : c'est la forme d'un
+    // badge de transporteur inconnu ("XPRESSDEP" au-dessus de "Julie
+    // Renard", cas 12), et la le dernier l'emporte, comme avant.
+    const precedent = result.names.length > 0 ? result.names[result.names.length - 1] : null;
+    if (lastCategory === "name" && precedent && countWords(precedent) >= 2) {
+      result.names[result.names.length - 1] = `${precedent} ${nomPropre}`.trim();
+    } else {
+      result.names.push(nomPropre);
+    }
     lastCategory = "name";
   }
 
@@ -703,7 +767,24 @@ function explodeFusedLines(ocrLines) {
   return out;
 }
 
-export function parseAddressList(ocrLines, { knownCities = new Set(), knownCps = new Set() } = {}) {
+// Le CP corrige ou complete par la COMMUNE quand la base ne lui connait qu'un
+// seul code postal. Un chiffre mal lu dans le CP donne souvent un AUTRE CP
+// valide de la zone ("55700" -- Stenay -- lu pour COMMERCY 55200, photo
+// reelle) que la plausibilite seule ne peut pas rejeter ; la commune, elle,
+// est un mot long que l'OCR lit bien. Meme mecanisme quand le CP manque
+// ("3 BASSE RUE / BROUSSEY EN BLOIS", ligne du CP hors cadre). Une commune a
+// plusieurs CP (grande ville) est laissee telle quelle : on ne devine pas.
+function cpParCommune(cp, ville, cityCps) {
+  if (!ville || !cityCps || cityCps.size === 0) return cp;
+  const cps = cityCps.get(looseCommune(normalizeCity(expandSaint(ville))));
+  if (!cps || cps.size !== 1) return cp;
+  const [cpCommune] = cps;
+  return cpCommune;
+}
+
+// cityCps (optionnel) : Map commune normalisee (looseCommune) -> Set de ses
+// codes postaux dans la base BAN locale, voir cpParCommune.
+export function parseAddressList(ocrLines, { knownCities = new Set(), knownCps = new Set(), cityCps = new Map() } = {}) {
   // Bruit d'interface (distance/horaire/tag/statut/code/bandeau d'instruction,
   // voir stripInterfaceNoise) retire AVANT le decoupage en blocs -- sans ca,
   // ces lignes intercalees entre deux adresses peuvent casser l'ecart qui les
@@ -727,7 +808,7 @@ export function parseAddressList(ocrLines, { knownCities = new Set(), knownCps =
       return {
         nom,
         rue,
-        cp: classified.cp,
+        cp: cpParCommune(classified.cp, classified.ville, cityCps),
         ville: classified.ville,
         bbox: bboxUnion(blockLines.map((l) => l.bbox)),
         rawLines: blockLines.map((l) => l.text),
@@ -753,7 +834,7 @@ export function parseAddressList(ocrLines, { knownCities = new Set(), knownCps =
       // precisement les lignes restees hors du cadre -- alors qu'une fiche
       // entiere en a toujours au moins un des deux. Aucun n'etait geocodable :
       // c'etait du tri manuel en pure perte.
-      const villeConnue = b.ville && knownCities.has(looseCommune(normalizeCity(b.ville)));
+      const villeConnue = b.ville && knownCities.has(looseCommune(normalizeCity(expandSaint(b.ville))));
       return Boolean(b.cp) || Boolean(villeConnue);
     });
 }

@@ -583,6 +583,87 @@ console.log("\n=== Cas 18 : video reelle de 66 arrets (terrain 2026-09-02) -- po
   assertEqual(img30[0] && img30[0].nom, "Alan morisot", "(e) nom propre");
 }
 
+console.log("\n=== Cas 19 : scan par PHOTOS d'une vraie tournee (44 arrets, terrain 2026-09-02) ===");
+{
+  // Lignes REELLES du compte rendu OCR du premier scan par photos. L'OCR est
+  // bien plus propre qu'en video ; les erreurs restantes sont d'autres
+  // familles : un chiffre du CP mal lu (mais formant un AUTRE CP valide),
+  // des residus d'icones, des noms sur deux lignes.
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const villes19 = [
+    ["Commercy", "55200"], ["Vaucouleurs", "55140"], ["Sauvigny", "55140"], ["Rigny-la-Salle", "55140"],
+    ["Broussey-en-Blois", "55190"], ["Domgermain", "54119"], ["Mont-le-Vignoble", "54113"], ["Uruffe", "54112"],
+    ["Gye", "54113"], ["Blenod-les-Toul", "54113"], ["Stenay", "55700"],
+  ];
+  const knownCities19 = new Set(villes19.map(([c]) => looseCommune(normalizeCity(c))));
+  const knownCps19 = new Set(villes19.map(([, cp]) => cp));
+  const cityCps19 = new Map();
+  for (const [c, cp] of villes19) {
+    const k = looseCommune(normalizeCity(c));
+    if (!cityCps19.has(k)) cityCps19.set(k, new Set());
+    cityCps19.get(k).add(cp);
+  }
+  const opts19 = { knownCities: knownCities19, knownCps: knownCps19, cityCps: cityCps19 };
+
+  // (a) "COMMERCY 55700" : 55700 (Stenay) est un vrai CP de la zone, seule
+  // la commune permet de le corriger.
+  const img2 = parseAddressList([
+    R(663, 694, "CDM COMMERCY UTML"), R(718, 749, "22 CHARLES DE GAULLE"), R(772, 803, "PL"), R(827, 855, "COMMERCY 55700"),
+    R(930, 1008, "# #e 1.17km Q"), R(1026, 1116, "BIJOUTERIE CENTRALE 8000 | 0+1 D"), R(1097, 1131, "5 CHARLES DE GAULLE PL"),
+    R(1135, 1197, "COMMERCY 55200 10:30 - 12:30 (©"),
+  ], opts19);
+  assertEqual(img2.map((b) => b.cp), ["55200", "55200"], "(a) le CP mal lu est corrige par la commune");
+  assertEqual(img2[1].nom, "BIJOUTERIE CENTRALE", "(a) majuscule isolee retiree du nom");
+  assertEqual(img2[0].rue, "22 CHARLES DE GAULLE PL", "(a) rue repliee sur deux lignes");
+
+  // (b) nom sur deux lignes, "@p" en fin de nom, "COMMERCY COMMERCY" comme
+  // ligne de commune d'une fiche de ramasse
+  const img3 = parseAddressList([
+    R(951, 1024, "Mme regnier massera 8000 | 0+1 ç"), R(1022, 1053, "valerie"), R(1042, 1102, "17 HAPTOUTE RUE 10:40 - 12:40 © e"),
+    R(1117, 1151, "COMMERCY 55200 ="), R(1200, 1275, "A9 1.28km Q"), R(1304, 1369, "LHERITIER MAINTENANCE | 8000 |0+2@p"),
+    R(1360, 1396, "14 ARTILLEURS AVE"), R(1387, 1445, "COMMERCY 55200 10:40 - 12:40 ©"), R(1545, 1618, "A° 1.5km Q"),
+    R(1650, 1714, "CHAUSSEA COMMERCY oSRO3E"), R(1683, 1779, "nG CHEMIN DES VERPILLERES"), R(1732, 1789, "COMMERCY COMMERCY 09:00 -16:00 (©"),
+    R(1808, 1837, "55200"),
+  ], opts19);
+  assertEqual(img3.map((b) => b.nom), ["Mme regnier massera valerie", "LHERITIER MAINTENANCE", "CHAUSSEA COMMERCY"], "(b) noms : deux lignes jointes, residus retires");
+  assertEqual(img3[2].rue, "CHEMIN DES VERPILLERES", "(b) 'nG' retire, commune non collee a la rue");
+  assertEqual(img3[2].ville, "COMMERCY", "(b) 'COMMERCY COMMERCY' reconnu comme la commune");
+
+  // (c) "55140 |" n'est pas un badge ; CP complete par la commune ; residus
+  const img8 = parseAddressList([
+    R(1303, 1367, "THIERRY LANTOINE 8000 | 041 ÉD"), R(1358, 1390, "GRANDE RUE"), R(1385, 1441, "RIGNY-LA-SALLE 55140 | 12:40-14:40 (©"),
+  ], opts19);
+  assertEqual(img8[0] && img8[0].cp, "55140", "(c) '55140 |' garde son CP");
+  const img4 = parseAddressList([R(1031, 1063, "3 BASSE RUE ["), R(1066, 1124, "BROUSSEY EN BLOIS 11:10-13:10 © ,")], opts19);
+  assertEqual(img4[0] && img4[0].cp, "55190", "(c) CP absent complete par la commune");
+  const img7 = parseAddressList([R(1744, 1779, "Brunel Andre"), R(1731, 1829, "19 BOIS RUE 3000 ( 9#) &"), R(1815, 1879, "SAUVIGNY 55140 12:10 - 14:10 © ë")], opts19);
+  assertEqual(img7[0] && img7[0].rue, "19 BOIS RUE", "(c) '3000 ( 9#) &' retire de la rue");
+  const img9 = parseAddressList([R(1374, 1462, "maison individuelle 3000 | 0+1 V©"), R(1421, 1480, "4 7 ROSIERE RUE"), R(1476, 1532, "DOMGERMAIN 54119 15:10-17:10 ®")], opts19);
+  assertEqual(img9[0] && img9[0].rue, "7 ROSIERE RUE", "(c) icone lue '4' devant le numero retiree");
+  assertEqual(img9[0] && img9[0].nom, "maison individuelle", "(c) nom propre");
+  assertEqual(parseAddressList([R(0, 20, "EURLGREGAUTO"), R(24, 44, "4 9EME RI AVE"), R(48, 68, "COMMERCY 55200")], opts19)[0].rue, "4 9EME RI AVE", "(c) '4 9EME RI AVE' garde son numero");
+
+  // (d) raison sociale longue sur deux lignes, jeton parasite en tete, badge
+  // residuel devant un numero
+  const img10 = parseAddressList([
+    R(646, 714, "SYND MIXTE DESEAUXDU | 8000} 041 @D"), R(695, 723, "TOULOIS"), R(733, 790, "31 LEOPOLD CABRET RUE 15:20-17:20(® ,"),
+    R(793, 823, "MONT-LE-VIGNOBLE 54113 :"), R(890, 956, "A° 25.72km Q"), R(972, 1058, "eus FARGE FREDERIC 8000 | 0+1"),
+    R(1040, 1070, "8 MORLOTS RUE"), R(1076, 1132, "URUFFE 54112 15:20 - 17:20 ©"), R(1580, 1646, "A° 26.87km ç"),
+    R(1683, 1747, "8000 | 0+2 3"), R(1726, 1758, "5 SAINT MANSUY RUE"), R(1765, 1822, "GYE 54113 15:30 - 17:30 ® …"),
+  ], opts19);
+  assertEqual(img10.map((b) => b.nom), ["SYND MIXTE DESEAUXDU TOULOIS", "FARGE FREDERIC", null], "(d) noms");
+  assertEqual(img10[2].rue, "5 SAINT MANSUY RUE", "(d) residu de badge '3' retire devant le numero");
+
+  // (e) code de ramasse dans le nom, creneau "18:0C", commune en minuscules
+  const img11 = parseAddressList([
+    R(1126, 1169, "DOMAINE CLAUDE A1912WF"), R(1147, 1240, "nG VOSGIEN"), R(1217, 1249, "37 - 39 Route de Toul 09:00 - 18:0C"),
+    R(1265, 1296, "Blenod-les-Toul"), R(1311, 1342, "Blenod-les-Toul 54113"),
+  ], opts19);
+  assertEqual(img11[0] && img11[0].nom, "DOMAINE CLAUDE VOSGIEN", "(e) code de ramasse retire, nom joint");
+  assertEqual(img11[0] && img11[0].rue, "37 - 39 Route de Toul", "(e) creneau '18:0C' retire de la rue");
+  assertEqual(img11[0] && img11[0].cp, "54113", "(e) CP");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)
