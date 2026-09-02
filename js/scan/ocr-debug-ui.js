@@ -76,13 +76,13 @@ function renderScanReportsSection(reports) {
     return `
       <div class="card" style="margin-top:16px;">
         <div class="card-title">${icon("camera")}Compte rendu du scan de liste</div>
-        <p class="muted">Aucun scan de liste enregistré pour l'instant. Après un scan par vidéo, le texte OCR brut de chaque image apparaîtra ici, prêt à être copié.</p>
+        <p class="muted">Aucun scan de liste enregistré pour l'instant. Après un scan par photos ou par vidéo, le texte OCR brut de chaque image apparaîtra ici, prêt à être copié.</p>
       </div>
     `;
   }
   const r = reports[0];
   const resume = [
-    `Scan ${r.source === "video" ? "par vidéo" : "en direct"} du ${new Date(r.date).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`,
+    `Scan ${{ video: "par vidéo", photos: "par photos" }[r.source] || "en direct"} du ${new Date(r.date).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`,
     `${r.framesAnalysees} image(s) analysée(s) en ${Math.round((r.dureeMs || 0) / 1000)} s`,
     `${r.adressesRetenues} adresse(s) retenue(s)`,
   ].join(" — ");

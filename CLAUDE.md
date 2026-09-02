@@ -137,6 +137,18 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   classé, un format de rue non géré) et corriger `classifyShipToBlock`/les regex de
   `parse-ups-label.js` en conséquence — c'est exactement l'usage prévu de ce journal, pas
   juste un historique passif.**
+- **Scan de liste par PHOTOS** (build 124, 2026-09-02, « si photo plus fiable on fait photo,
+  c'est largement plus simple ») : `analyzePhotoFiles` dans `batch-scan-ui.js`, chemin
+  principal de « Scanner une liste » — une photo par page de la liste prise avec l'appareil
+  natif, puis sélection multiple dans la photothèque (`<input accept="image/*" multiple>`,
+  sans `capture`). Décision mesurée sur deux vidéos réelles : 13 paires d'images strictement
+  identiques sur 45 (défilement à l'arrêt) et du charabia sur celles prises pendant le
+  défilement (flou de mouvement + compression vidéo). Même moteur que la vidéo (OCR, parser,
+  `dedup-drafts.js`, compte rendu `source: "photos"`), seule la source change ; chargement
+  via `preprocess.js`'s `loadImageToCanvas` (même plafond 2400 px que le scan d'étiquette,
+  éprouvé sur l'appareil). Le conteneur porte `data-analyse-en-cours` pendant l'analyse :
+  `app.js` diffère un rechargement de mise à jour tant qu'il existe (pas de `<video>` ici,
+  contrairement au chemin vidéo). La vidéo et le direct restent disponibles en secours.
 - **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
   `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
   vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE

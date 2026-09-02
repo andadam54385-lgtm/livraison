@@ -87,12 +87,13 @@ let bootDone = false;
 let reloadPending = false;
 let reloadDone = false;
 
-// Un <video> vivant dans le DOM = viseur code-barres ou analyse d'une video de
-// liste en cours. Ce sont les deux seuls moments ou un rechargement detruit un
-// travail non enregistre (une analyse dure plusieurs minutes et ne sauvegarde
-// qu'a la fin) : on differe jusqu'a ce que l'ecran soit revenu au calme.
+// Un <video> vivant dans le DOM (viseur code-barres, analyse d'une video de
+// liste) ou un conteneur marque data-analyse-en-cours (analyse d'une serie de
+// photos, voir batch-scan-ui.js) : les seuls moments ou un rechargement
+// detruit un travail non enregistre (une analyse dure plusieurs minutes et
+// ne sauvegarde qu'a la fin). On differe jusqu'au retour au calme.
 function rechargementSansRisque() {
-  return !document.querySelector("video");
+  return !document.querySelector("video, [data-analyse-en-cours]");
 }
 
 function applyServiceWorkerUpdate() {

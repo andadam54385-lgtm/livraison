@@ -13,6 +13,7 @@ import { loadingHtml, inlineLoadingHtml } from "../lib/loading.js";
 import { emit } from "../lib/event-bus.js";
 import { saveScanReport } from "./scan-reports-store.js";
 import { ingestDrafts } from "./dedup-drafts.js";
+import { loadImageToCanvas } from "./preprocess.js";
 
 // Scan en rafale : filme un ECRAN affichant plusieurs adresses a la fois
 // (ex: appli/portail du transporteur listant une tournee), par opposition au
@@ -320,6 +321,131 @@ function analyzeVideoFile(file, container) {
   });
 }
 
+// Analyse d'une serie de PHOTOS de l'ecran (une par page de la liste, prises
+// avec l'appareil photo natif puis selectionnees d'un coup dans la
+// phototheque) -- retour terrain apres deux videos reelles : "si photo plus
+// fiable on fait photo, c'est largement plus simple". Les comptes rendus
+// OCR l'ont montre noir sur blanc : sur 45 images de video, 13 paires
+// etaient strictement identiques (defilement a l'arret) et les images prises
+// PENDANT le defilement sortaient du charabia (flou de mouvement, compression
+// video). Une photo, c'est une mise au point verrouillee, pas de flou, et
+// bien plus de pixels. Moins d'images (une dizaine au lieu de 45), mais
+// chacune nettement meilleure. Meme moteur derriere (OCR, parser,
+// deduplication, compte rendu) que la video : seule la source change.
+function analyzePhotoFiles(files, container) {
+  return new Promise((resolve, reject) => {
+    // Meme signal que les flux camera : la carte se suspend pour laisser la
+    // memoire a Tesseract sur des photos pleine resolution.
+    emit("camera:open");
+
+    container.innerHTML = `
+      <div class="batch-photo-preview" style="width:100%;max-height:38vh;border-radius:var(--radius-card);background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+        <img id="batch-photo-img" alt="" style="max-width:100%;max-height:38vh;object-fit:contain;">
+      </div>
+      <p class="muted" id="batch-photo-status" style="text-align:center;margin-top:10px;">${inlineLoadingHtml("Lecture des photos…")}</p>
+      <div class="button-row">
+        <button type="button" id="batch-photo-cancel">Annuler</button>
+        <button type="button" class="primary" id="batch-photo-finish" hidden>${icon("check")}Terminer (<span id="batch-photo-count">0</span>)</button>
+      </div>
+    `;
+    // Signale a app.js qu'un travail long non enregistre est en cours : un
+    // rechargement automatique (nouvelle version) est differe tant que cet
+    // attribut existe (voir rechargementSansRisque).
+    container.dataset.analyseEnCours = "1";
+    const imgEl = container.querySelector("#batch-photo-img");
+    const statusEl = container.querySelector("#batch-photo-status");
+    const finishBtn = container.querySelector("#batch-photo-finish");
+    const countEl = container.querySelector("#batch-photo-count");
+    const collected = [];
+    let stopped = false;
+    let done = false;
+    let previewUrl = null;
+    const rapportFrames = [];
+    const debutMs = Date.now();
+
+    function enregistrerRapport() {
+      return saveScanReport({
+        source: "photos",
+        frames: rapportFrames,
+        drafts: collected,
+        dureeMs: Date.now() - debutMs,
+      }).catch((err) => console.warn("[batch-scan] compte rendu non enregistre:", err));
+    }
+
+    function cleanup() {
+      stopped = true;
+      delete container.dataset.analyseEnCours;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = null;
+    }
+    container.querySelector("#batch-photo-cancel").addEventListener("click", () => {
+      cleanup();
+      reject(new Error("Scan annulé."));
+    });
+    finishBtn.addEventListener("click", async () => {
+      cleanup();
+      await enregistrerRapport();
+      resolve(collected.slice());
+    });
+
+    (async () => {
+      try {
+        const langs = (await getSetting("ocrLangs")) || "fra";
+        const cities = await listDistinctCities();
+        const knownCities = new Set(cities.map((c) => looseCommune(c.cn)));
+        const knownCps = new Set(cities.map((c) => c.cp).filter(Boolean)); // voir le meme choix cote video
+        const total = files.length;
+        let lisibles = 0;
+
+        for (let index = 1; index <= total && !stopped; index++) {
+          const file = files[index - 1];
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          previewUrl = URL.createObjectURL(file);
+          imgEl.src = previewUrl;
+          statusEl.innerHTML = inlineLoadingHtml(
+            `Photo ${index}/${total} — ${collected.length} adresse${collected.length > 1 ? "s" : ""} détectée${collected.length > 1 ? "s" : ""}`
+          );
+          // Une photo illisible est SAUTEE, jamais fatale : les voisines se
+          // chevauchent en general un peu.
+          try {
+            // loadImageToCanvas : meme chargement (et meme plafond de
+            // resolution) que le scan d'une etiquette, eprouve sur l'appareil.
+            const canvas = await loadImageToCanvas(file);
+            if (stopped) break;
+            preprocessForOcr(canvas.getContext("2d"), canvas);
+            const { lines } = await recognizeCanvasWithLines(canvas, { langs });
+            if (stopped) break;
+            rapportFrames.push({
+              index,
+              lignes: lines.map((l) => ({ texte: l.text, y0: Math.round(l.bbox?.y0 ?? 0), y1: Math.round(l.bbox?.y1 ?? 0) })),
+            });
+            ingestDrafts(collected, parseAddressList(lines, { knownCities, knownCps }));
+            lisibles++;
+          } catch (photoErr) {
+            console.warn(`[batch-scan] photo ${index}/${total} sautee:`, photoErr?.message || photoErr);
+            continue;
+          }
+          countEl.textContent = String(collected.length);
+          finishBtn.hidden = false;
+        }
+        if (stopped) return;
+        done = true;
+        if (lisibles === 0) throw new Error("aucune photo n'a pu être lue");
+        cleanup();
+        await enregistrerRapport();
+        resolve(collected.slice());
+      } catch (err) {
+        if (stopped && !done) return;
+        done = true;
+        cleanup();
+        console.error("[batch-scan] Analyse des photos échouée:", err);
+        statusEl.textContent = `Analyse impossible (${escapeHtml(err?.message || String(err))}).`;
+        container.querySelector("#batch-photo-cancel").textContent = "Retour";
+      }
+    })();
+  });
+}
+
 // Verification BAN EN AMONT de l'ecran de revision (pas seulement au moment
 // d'"Enregistrer") : retour terrain "pourquoi ne pas verifier qu'une adresse
 // existe avant de la valider, pour ne pas perdre de temps ?" -- on ne peut
@@ -398,21 +524,32 @@ async function bulkGeocodeAndSave(colis) {
 // d'avoir rien detecte.
 export function startBatchScan(container) {
   return new Promise((resolve, reject) => {
-    // Ecran de choix : l'import d'une video filmee avec la camera NATIVE est
-    // le chemin principal (fiable, refaisable, pas de flux getUserMedia en
-    // memoire a cote de la carte) ; le direct reste disponible en secours.
-    // L'input SANS attribut capture laisse iOS proposer son menu natif
-    // ("Prendre une video" / "Phototheque") -- les deux usages en un bouton.
+    // Ecran de choix : les PHOTOS prises avec l'appareil natif (une par page
+    // de la liste, selectionnees d'un coup) sont le chemin principal -- voir
+    // analyzePhotoFiles pour la raison, mesuree sur de vraies videos. La
+    // video reste disponible, le direct en dernier recours.
+    // Les inputs SANS attribut capture laissent iOS proposer son menu natif
+    // ("Prendre une photo" / "Phototheque") ; "multiple" autorise la
+    // selection de toute la serie dans la phototheque.
     container.innerHTML = `
       <div class="card">
         <div class="card-title">${icon("camera")}Scanner une liste</div>
-        <p class="muted">Filme l'écran du terminal avec la caméra (en balayant lentement la liste), puis importe la vidéo — ou choisis une vidéo déjà prise.</p>
+        <p class="muted">Prends une photo de chaque page de la liste avec l'appareil photo (en avançant page par page, un léger chevauchement ne gêne pas), puis sélectionne toutes les photos d'un coup.</p>
+        <input type="file" id="batch-photo-input" accept="image/*" multiple hidden>
+        <button type="button" class="primary btn-lg" id="batch-choose-photos" style="width:100%;">${icon("camera")}Choisir les photos</button>
         <input type="file" id="batch-video-input" accept="video/*" hidden>
-        <button type="button" class="primary btn-lg" id="batch-choose-video" style="width:100%;">${icon("camera")}Filmer ou choisir une vidéo</button>
+        <button type="button" id="batch-choose-video" style="width:100%;margin-top:8px;">Filmer ou choisir une vidéo</button>
         <button type="button" id="batch-choose-live" style="width:100%;margin-top:8px;">Scanner en direct (ancien mode)</button>
       </div>
       <div class="button-row"><button type="button" id="batch-choose-cancel">Annuler</button></div>
     `;
+    const photoInput = container.querySelector("#batch-photo-input");
+    container.querySelector("#batch-choose-photos").addEventListener("click", () => photoInput.click());
+    photoInput.addEventListener("change", () => {
+      const files = Array.from(photoInput.files || []);
+      if (files.length === 0) return;
+      analyzePhotoFiles(files, container).then(resolve, reject);
+    });
     const fileInput = container.querySelector("#batch-video-input");
     container.querySelector("#batch-choose-video").addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", () => {

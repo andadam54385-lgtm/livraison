@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pwa-local",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["http-server", "-p", "8125", "-c-1", "--silent"],
+      "port": 8125
+    }
+  ]
+}

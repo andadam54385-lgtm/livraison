@@ -24,7 +24,7 @@ export async function saveScanReport({ source, frames, drafts, dureeMs }) {
   const report = {
     id: uuid(),
     date: new Date().toISOString(),
-    source, // "video" | "live"
+    source, // "photos" | "video" | "live"
     dureeMs,
     framesAnalysees: frames.length,
     adressesRetenues: drafts.length,
