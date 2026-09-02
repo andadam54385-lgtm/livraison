@@ -46,6 +46,31 @@ console.log("\n=== Garde-fou : deux numeros differents de la MEME rue restent di
   );
 }
 
+console.log("\n=== Clients reels SANS numero de voie (entreprises) : jamais absorbes ===");
+{
+  // Retour terrain du build 121 ("il a trouve moins d'adresses qu'en
+  // realite") : trois clients reels de la meme rue, dont un sans numero.
+  const yzance = d("GRANDE TERRE ALL", "BAR-LE-DUC", "55000", "YZANCE");
+  const bridji = d("1 GRANDE TERRE ALL", "BAR LE DUC", "55000", "Kader Bridji");
+  const audition = d("6 GRANDE TERRE ALL MEUSE", "BAR-LE-DUC", "55000", "AUDITION MUTUALISTE");
+  assertEqual(isSameAddress(yzance, bridji), false, "YZANCE (sans numero) distinct de 1 GRANDE TERRE ALL");
+  assertEqual(isSameAddress(yzance, audition), false, "YZANCE distinct de 6 GRANDE TERRE ALL MEUSE");
+  assertEqual(isSameAddress(bridji, audition), false, "les deux clients numerotes restent distincts");
+  const collected = [];
+  ingestDrafts(collected, [yzance]);
+  ingestDrafts(collected, [bridji, audition]);
+  assertEqual(collected.length, 3, "trois arrets retenus pour trois clients");
+}
+
+console.log("\n=== Meme fiche lue avec et sans tirets dans la commune : dedupliquee ===");
+{
+  assertEqual(
+    isSameAddress(d("10 LIBERATION AVE", "FAINS-VEEL", "55000"), d("10 LIBERATION AVE", "FAINS VEEL", "55000")),
+    true,
+    "FAINS-VEEL et FAINS VEEL sont la meme commune"
+  );
+}
+
 console.log("\n=== Un CP ou une commune qui divergent tranchent toujours ===");
 {
   assertEqual(isSameAddress(d("53 FOUR RUE", null, "55000"), d("53 FOUR RUE", null, "55500")), false, "CP differents");

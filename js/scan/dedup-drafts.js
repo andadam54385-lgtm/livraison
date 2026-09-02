@@ -1,4 +1,4 @@
-import { streetSimilarity } from "../geocode/match-address.js";
+import { streetSimilarity, looseCommune } from "../geocode/match-address.js";
 import { normalizeStreet, normalizeCity } from "../geocode/normalize-address.js";
 
 // Deduplication des brouillons d'un scan de LISTE (video importee ou camera
@@ -39,10 +39,19 @@ function houseNumber(street) {
   return m ? m[1] : null;
 }
 
+// Une fiche "complete" porte au moins sa commune ou son code postal. Un
+// fragment de bord de cadre n'a jamais ni l'un ni l'autre : ce sont
+// precisement les lignes restees hors du champ de la camera.
+function isCompleteCard(d) {
+  return Boolean(d.cp || d.ville);
+}
+
 export function isSameAddress(a, b) {
   if (a.cp && b.cp && a.cp !== b.cp) return false;
-  const villeA = normalizeCity(a.ville || "");
-  const villeB = normalizeCity(b.ville || "");
+  // looseCommune : "BAR-LE-DUC" et "BAR LE DUC" sont la meme commune -- sans
+  // ca, la meme fiche lue avec et sans tirets ne se dedupliquait jamais.
+  const villeA = looseCommune(normalizeCity(a.ville || ""));
+  const villeB = looseCommune(normalizeCity(b.ville || ""));
   if (villeA && villeB && villeA !== villeB) return false;
   const streetA = normalizeStreet(a.rue || "");
   const streetB = normalizeStreet(b.rue || "");
@@ -62,6 +71,17 @@ export function isSameAddress(a, b) {
   const numA = houseNumber(streetA);
   const numB = houseNumber(streetB);
   if (numA && numB && numA !== numB) return false;
+  // Une fiche numerotee et une fiche NON numerotee, toutes deux completes
+  // (commune ou CP presents des deux cotes) : deux clients distincts, pas une
+  // coupure. Retour terrain du build 121 ("il a trouve moins d'adresses qu'en
+  // realite") : les livraisons en entreprise SANS numero de voie sont
+  // frequentes ("YZANCE, GRANDE TERRE ALL") et se faisaient absorber par un
+  // client numerote de la meme rue ("6 GRANDE TERRE ALL"). Un vrai fragment
+  // de coupure, lui, n'est jamais complet -- sa commune et son CP sont restes
+  // hors cadre -- donc cette regle ne bloque pas la fusion des fragments.
+  if ((numA === null) !== (numB === null) && isCompleteCard(a) && isCompleteCard(b)) {
+    return false;
+  }
 
   const shorter = streetA.length <= streetB.length ? streetA : streetB;
   const longer = streetA.length <= streetB.length ? streetB : streetA;
