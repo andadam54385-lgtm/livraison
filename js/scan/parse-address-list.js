@@ -126,7 +126,14 @@ const UI_CHROME_RE =
   /(liste\s*\(\s*\d|\bsynth[èe]se\b|\bcr[ée]er\b|\bitin[ée]raire\b|bouygues|telecom|\d{1,3}\s?%|\borange\b|\bsfr\b|\bfree\b)/i;
 
 const NOISE_TOKEN_PATTERNS = [
-  /\b\d+[.,]?\d*\s?(km|m)\b\s*Q?/gi, // distance + l'icone "Q" qui la suit : "12.61km Q"
+  // Icone de navigation qui PRECEDE la distance ("A9 17.62km", "# a 27.43km",
+  // "Û 27.11km", "ke 31.52m") : deux caracteres au plus, jamais un contenu.
+  // Un vrai texte devant une distance ("JONCHERY RUE 21.8km", autre
+  // terminal) est plus long et reste intact.
+  /^[^\sa-z0-9]{0,2}\s*[a-z0-9]{0,2}\s+(?=\d+[.,]?\d*\s?(?:km|kr|ki|k|m)\b)/i,
+  // Distance + l'icone d'epingle qui la suit : "12.61km Q". L'unite est lue
+  // "km", "kr", "ki" ou "k" selon l'image ; l'epingle "Q" parfois "9".
+  /\b\d+[.,]?\d*\s?(km|kr|ki|k|m)\b\s*[Q9]?(?=\s|$)/gi,
   /\b\d{1,2}\s?[:.]\s?\d{2}\s*[-\u2013]\s*\d{1,2}\s?[:.]\s?\d{2}\b/g, // creneau "11:30-13:30"
   // Badge de colis : "8000 | 0+1" mais aussi ses formes TRONQUEES par le
   // bord du cadre ou par l'OCR ("8000 | 0:", "2000 |o+1", "8000|0+2") --
@@ -158,9 +165,21 @@ function stripNoiseTokens(text) {
   // code postal reel ("55000 )", "FAINS VEEL 55000 @"), ils empechaient la
   // reconnaissance du CP et la fiche entiere finissait "a verifier".
   out = out
-    .replace(/^[\s,;:.|>\-–_*"'°«»()@=~#]+/, "")
-    .replace(/[\s,;:|>_*"'°«»()@=~#]+$/, "")
+    .replace(/^[\s,;:.|>\-–—_*"'°«»“”‘’…()@=~#!]+/, "")
+    .replace(/[\s,;:|>_*"'°«»“”‘’…()@=~#!{}\[\]]+$/, "")
     .trim();
+  // Residu d'icone d'UN caractere colle au texte : en tete une minuscule
+  // isolee ("s ERICFRASIAK", "y 52 ANDRE THEURIET RUE", "n Doganay"), en fin
+  // une minuscule ou un chiffre ("Thieriot Kevin v", "2 MOULIN CHMN 3",
+  // "COMMERCY 55200 q" -- ce dernier faisait passer "q" pour la commune).
+  // Jamais une MAJUSCULE en fin : "BAT B", "ALLEE A" sont des adresses
+  // reelles. Jamais un chiffre en tete : c'est le numero de voie.
+  out = out.replace(/^[a-zà-ÿ]\s+(?=\S)/, "");
+  let avant;
+  do {
+    avant = out;
+    out = out.replace(/\s+[a-zà-ÿ0-9]$/, "");
+  } while (out !== avant);
   return out;
 }
 
@@ -232,6 +251,11 @@ function stripInterfaceNoise(ocrLines) {
     }
 
     if (isNoiseLine(text) || TRACKING_CODE_RE.test(text)) continue; // bruit isole (hors bandeau) : retire entierement, voir Cas 9
+    // Ligne reduite a 1-4 chiffres : morceau de badge ("8000", "800", "0")
+    // ou icone lue comme un chiffre ("9", "4"), jamais une donnee -- dans ce
+    // terminal le numero de voie est toujours sur la ligne de la rue. Un
+    // "800" isole devenait le debut de la rue ("800 14 LISLE RUE").
+    if (/^\d{1,4}$/.test(text)) continue;
     if (UI_CHROME_RE.test(text)) continue; // en-tete d'appli / barre d'etat du telephone
 
     // Bruit COLLE en fin de ligne reelle (terminal "Itineraire" : la colonne
@@ -246,8 +270,12 @@ function stripInterfaceNoise(ocrLines) {
     // fiche s'ouvre sur sa distance ("12.61km Q"), qui est justement du
     // bruit -- elle serait effacee avant d'avoir pu servir de separateur
     // (bug reel du premier jet : la fusion n'etait pas coupee).
-    const isClientStart = DISTANCE_MARKER_RE.test(text);
-    const cleaned = stripTrailingNoise(stripNoiseTokens(text));
+    // ICON_ROW_RE : la meme rangee quand l'OCR a perdu la distance et n'a
+    // garde que l'icone de navigation ("a", "A", "A9", "As") -- observee entre
+    // presque toutes les fiches d'une video reelle. Elle vaut separateur, et
+    // n'est jamais un contenu (elle devenait un faux nom : "ar 1.16kr Q").
+    const isClientStart = DISTANCE_MARKER_RE.test(text) || ICON_ROW_RE.test(text);
+    const cleaned = ICON_ROW_RE.test(text) ? "" : stripTrailingNoise(stripNoiseTokens(text));
     kept.push({ ...l, text: cleaned, isClientStart });
   }
 
@@ -296,7 +324,7 @@ function peelKnownVille(text, knownCities) {
   // code postal ("BAR LE DUC 55000").
   for (let k = Math.min(MAX_VILLE_WORDS, words.length); k >= 1; k--) {
     const candidate = words.slice(words.length - k).join(" ");
-    const normalized = looseCommune(normalizeCity(candidate));
+    const normalized = looseCommune(normalizeCity(expandSaint(candidate)));
     if (normalized && knownCities.has(normalized)) {
       return { rest: words.slice(0, words.length - k).join(" "), ville: candidate };
     }
@@ -304,30 +332,81 @@ function peelKnownVille(text, knownCities) {
   return null;
 }
 
-function splitEmbeddedCpVille(line, knownCities) {
+// Le terminal abrege "SAINT" en "ST" ("SORCY ST MARTIN") la ou la base BAN
+// ecrit le mot entier : sans cette expansion la commune n'etait jamais
+// reconnue et la fiche restait sans ville.
+function expandSaint(text) {
+  return text.replace(/\bSTE\b/gi, "SAINTE").replace(/\bST\b/gi, "SAINT");
+}
+
+// Un code postal peut se trouver N'IMPORTE OU dans la ligne, pas seulement en
+// derniere position. Dans ce terminal chaque fiche se termine par
+// "<COMMUNE> <CP> <creneau horaire> <icones>", et l'OCR massacre le creneau de
+// cent facons ("1220-1420", "15:10-1710", "09:40 - 11:40 (D", "@ A") : des que
+// le nettoyage ne le reconnait pas, le CP n'est plus le dernier jeton et
+// n'etait plus lu du tout. Avec le filtre "fiche localisable", c'etait alors
+// la fiche ENTIERE qui disparaissait -- six arrets perdus sur une video reelle
+// de 66 (Sidoli, Noelyne CANDAS, SAFRAN, GUARRACINO, Gazon Philippe, "maison
+// individuelle"), tous pour cette seule raison. On cherche donc le CP par sa
+// VALEUR : un jeton de 5 chiffres present dans la base (n'importe lequel sans
+// base), ou qu'il soit dans la ligne ; ce qui le precede porte la commune, ce
+// qui le suit est du bruit -- sauf si c'est justement la commune (ordre
+// "<CP> <VILLE>", autres terminaux).
+const CP_TOKEN_RE = /(?:^|\s)(\d{5})(?=\s|$)/g;
+
+function findCpToken(text, knownCps) {
+  for (const m of text.matchAll(CP_TOKEN_RE)) {
+    if (!isPlausibleCp(m[1], knownCps)) continue;
+    const start = m.index + m[0].length - 5;
+    return { cp: m[1], before: text.slice(0, start).trim(), after: text.slice(start + 5).trim() };
+  }
+  return null;
+}
+
+// Commune connue en TETE d'un texte (le miroir de peelKnownVille) : "BAR LE
+// DUC 12:00" -> "BAR LE DUC". Null si la base ne la connait pas.
+function leadingKnownVille(text, knownCities) {
+  if (!text || !knownCities || knownCities.size === 0) return null;
+  const words = text.split(/\s+/).filter(Boolean);
+  for (let k = Math.min(MAX_VILLE_WORDS, words.length); k >= 1; k--) {
+    const candidate = words.slice(0, k).join(" ");
+    const normalized = looseCommune(normalizeCity(expandSaint(candidate)));
+    if (normalized && knownCities.has(normalized)) return candidate;
+  }
+  return null;
+}
+
+function splitEmbeddedCpVille(line, knownCities, knownCps) {
   const trimmed = line.trim();
   if (!trimmed || CP_VILLE_RE.test(trimmed)) return [trimmed];
-  const m = trimmed.match(CP_VILLE_TRAILING_RE);
-  if (m) return [m[1].trim(), `${m[2]} ${m[3]}`.trim()];
-  // CP en fin de ligne SANS ville derriere ("DEVANT BAR 55000" -- fin d'un
-  // nom de commune replie sur plusieurs lignes par le terminal) : isole le
-  // CP pour qu'il soit reconnu (CP_ONLY_RE), le reste suit le circuit normal.
-  const mCp = trimmed.match(/^(.*\S)\s+(\d{5})$/);
-  if (mCp && !/\d$/.test(mCp[1])) {
-    const rest = mCp[1].trim();
+  const found = findCpToken(trimmed, knownCps);
+  // "... 8000 55000" : un nombre juste avant le CP, on ne tranche pas.
+  if (found && !/\d$/.test(found.before)) {
+    const { cp, before, after } = found;
+    // La base BAN d'abord : une commune CONNUE de part ou d'autre du CP
+    // l'emporte sur la forme brute de la ligne ("COMMERCY 55200 q" : "q"
+    // ressemble a une ville pour une regex, pas pour la base).
+    const villeApres = leadingKnownVille(after, knownCities);
+    if (villeApres) {
+      const cpVille = `${cp} ${villeApres}`;
+      return before ? [before, cpVille] : [cpVille];
+    }
     // Ordre "<rue> <VILLE> <CP>" ("1 VERDUN RUE BAR LE DUC 55000"), tres
     // frequent quand l'OCR replie les trois lignes d'une fiche en une seule.
     // Sans ce decoupage la commune restait DANS la rue : l'adresse ne pouvait
     // pas etre geocodee et le colis finissait "a verifier" alors que tout
     // etait pourtant parfaitement lisible.
-    const peeled = peelKnownVille(rest, knownCities);
+    const peeled = peelKnownVille(before, knownCities);
     if (peeled) {
-      const cpVille = `${mCp[2]} ${peeled.ville}`;
+      const cpVille = `${cp} ${peeled.ville}`;
       return peeled.rest ? [peeled.rest, cpVille] : [cpVille];
     }
-    return [rest, mCp[2]];
   }
-  return [trimmed];
+  // Sans base (ou commune inconnue) : forme "<reste> <CP> <ville>" par regex.
+  const m = trimmed.match(CP_VILLE_TRAILING_RE);
+  if (m && isPlausibleCp(m[2], knownCps)) return [m[1].trim(), `${m[2]} ${m[3]}`.trim()];
+  if (!found || /\d$/.test(found.before)) return [trimmed];
+  return found.before ? [found.before, found.cp] : [found.cp];
 }
 
 // Badge/code/statut d'interface GENERIQUE : court, sans espace, tout en
@@ -421,7 +500,7 @@ function isPlausibleCp(cp, knownCps) {
 }
 
 export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps = new Set() } = {}) {
-  const lines = rawLines.flatMap((l) => splitEmbeddedCpVille(l, knownCities));
+  const lines = rawLines.flatMap((l) => splitEmbeddedCpVille(l, knownCities, knownCps));
   const result = { names: [], streets: [], cp: null, ville: null };
   let lastCategory = null;
 
@@ -560,7 +639,8 @@ export function groupLinesIntoBlocks(lines) {
 // meilleur que le code postal : il est present meme quand le CP a ete mal lu,
 // et il marque le DEBUT d'une fiche. Detecte sur le texte BRUT, avant que
 // stripNoiseTokens ne l'efface (d'ou l'ordre dans parseAddressList).
-const DISTANCE_MARKER_RE = /(^|\s)\d+[.,]?\d*\s?(km|m)\b/i;
+const DISTANCE_MARKER_RE = /(^|\s)\d+[.,]?\d*\s?(km|kr|ki|k|m)\b/i;
+const ICON_ROW_RE = /^[#@]?[aAÀ][sSrRiI9°]?$/;
 
 function splitOnDistanceMarkers(blockLines) {
   const starts = blockLines.map((l, i) => (l.isClientStart ? i : -1)).filter((i) => i >= 0);
@@ -576,14 +656,19 @@ function splitOnDistanceMarkers(blockLines) {
 }
 
 function splitFusedBlock(blockLines, knownCps) {
+  // Une ligne qui porte un code postal plausible est la FIN d'une fiche --
+  // ou qu'il soit dans la ligne (voir findCpToken : "<COMMUNE> <CP> <creneau>"
+  // est la forme normale de ce terminal, et l'ancien test n'acceptait que le
+  // CP seul ou l'ordre "<CP> <VILLE>"). Quand le marqueur de distance qui
+  // ouvre la fiche suivante a ete perdu par l'OCR (reduit a "a" ou "A9"),
+  // cette coupure est la seule qui reste : sans elle, deux clients
+  // consecutifs fusionnaient ("Mme regnier massera" absorbee par "LHERITIER
+  // MAINTENANCE", "BIJOUTERIE CENTRALE" par "CDM COMMERCY").
   const cuts = [];
   blockLines.forEach((l, i) => {
-    const t = l.text.trim();
-    const m = t.match(CP_ONLY_RE) || t.match(CP_VILLE_TRAILING_RE);
-    const cp = m ? (m[1].length === 5 && /^\d{5}$/.test(m[1]) ? m[1] : m[2]) : null;
-    if (cp && /^\d{5}$/.test(cp) && (!knownCps || knownCps.size === 0 || knownCps.has(cp))) cuts.push(i);
+    if (findCpToken(l.text.trim(), knownCps)) cuts.push(i);
   });
-  if (cuts.length < 2) return [blockLines];
+  if (cuts.length === 0) return [blockLines];
   const parts = [];
   let start = 0;
   for (const cut of cuts) {
@@ -600,7 +685,7 @@ function splitFusedBlock(blockLines, knownCps) {
 // recoupe donc le TEXTE lui-meme a chaque marqueur de distance, en pseudo-
 // lignes qui partagent la bbox d'origine (l'ecart vertical reste correct,
 // et isClientStart les separera ensuite).
-const DISTANCE_SPLIT_RE = /(?=(?:^|\s)\d+[.,]?\d*\s?(?:km|m)\b)/i;
+const DISTANCE_SPLIT_RE = /(?=(?:^|\s)\d+[.,]?\d*\s?(?:km|kr|ki|k|m)\b)/i;
 
 function explodeFusedLines(ocrLines) {
   const out = [];

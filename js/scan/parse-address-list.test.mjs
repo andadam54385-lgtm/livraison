@@ -505,6 +505,84 @@ console.log("\n=== Cas 17 : compte rendu OCR d'une vraie video (63 arrets, terra
   assertEqual(parseAddressList([L17("ERATION AVE FAINSAUEEL DRDLU")]).length, 1, "(e) sans reference, rien n'est filtre");
 }
 
+console.log("\n=== Cas 18 : video reelle de 66 arrets (terrain 2026-09-02) -- positions reelles, CP suivi d'un creneau mal lu ===");
+{
+  // Lignes REELLES du compte rendu OCR (texte + position verticale), pour les
+  // images qui portaient les six fiches perdues au build 121. Toutes avaient
+  // la meme cause : le CP n'etait lu que s'il terminait la ligne, or ce
+  // terminal ecrit "<COMMUNE> <CP> <creneau>" et l'OCR massacre le creneau.
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const knownCities18 = new Set(
+    ["Euville", "Sorcy-Saint-Martin", "Commercy", "Sauvigny", "Sepvigny", "Chalaines",
+      "Rigny-la-Salle", "Laneuville-au-Rupt", "Domgermain", "Vignot"].map((c) => looseCommune(normalizeCity(c)))
+  );
+  const opts18 = { knownCities: knownCities18, knownCps: new Set(["55190", "55200", "55140", "54119", "54113"]) };
+  const rues = (r) => r.map((b) => b.rue);
+
+  // (a) image 7 : "EUVILLE 55200 40 - 11:40 ©)" -- creneau tronque derriere le CP
+  const img7 = parseAddressList([
+    R(365, 398, "A° 28.78km"), R(417, 452, "FAGUET VIRGINIE 8000 | 0+1"), R(449, 465, "5 GARE RUE"),
+    R(463, 493, "SORCY ST MARTIN 55190 09:20- 11:20 (©"), R(636, 653, "17 SOUS LES VIGNES RUE"),
+    R(663, 679, "EUVILLE 55200"), R(753, 774, "a"), R(798, 814, "EST RAMONAGE"),
+    R(825, 841, "30 SOUS LES VIGNES RUE"), R(846, 878, "EUVILLE 55200 09:30 - 11:30 @ ="),
+    R(934, 971, "# a 27.43km Q"), R(974, 1014, "Sidoli thibaut Toner"),
+    R(993, 1032, "2 MOULIN CHMN 8000 | 0+1 3"), R(1040, 1070, "EUVILLE 55200 40 - 11:40 ©)"),
+  ], opts18);
+  assertEqual(img7.length, 4, "(a) quatre fiches");
+  const sidoli = img7.find((b) => (b.nom || "").startsWith("Sidoli"));
+  assertEqual(sidoli && sidoli.rue, "2 MOULIN CHMN", "(a) Sidoli retrouve, rue propre (plus de residu '3')");
+  assertEqual(sidoli && sidoli.cp, "55200", "(a) Sidoli : CP lu malgre le creneau tronque");
+  assertEqual(sidoli && sidoli.ville, "EUVILLE", "(a) Sidoli : commune");
+  const faguet = img7.find((b) => (b.nom || "").startsWith("FAGUET"));
+  assertEqual(faguet && faguet.rue, "5 GARE RUE", "(a) 'SORCY ST MARTIN' detache de la rue (ST = SAINT)");
+  assertEqual(faguet && faguet.ville, "SORCY ST MARTIN", "(a) commune abregee reconnue");
+
+  // (b) image 9 : "EUVILLE 55200 09:40 - 11:40 (D" -- une lettre parasite apres le creneau
+  const img9 = parseAddressList([
+    R(392, 428, "Noelyne CANDAS 8000 | 0+1 v"), R(425, 449, "27 JEANNE D'ARC RUE ‘"),
+    R(446, 471, "EUVILLE 55200 09:40 - 11:40 (D"), R(529, 573, "AR 30.1km Q"),
+    R(588, 624, "LYSE HENRY 8000 | 0+1 D"), R(619, 635, "SORCY RTE"), R(635, 666, "EUVILLE 55200 09:50 - 11:50 © ,"),
+  ], opts18);
+  const candas = img9.find((b) => (b.nom || "").startsWith("Noelyne"));
+  assertEqual(candas && candas.nom, "Noelyne CANDAS", "(b) Noelyne CANDAS retrouvee, sans residu 'v'");
+  assertEqual(candas && candas.rue, "27 JEANNE D'ARC RUE", "(b) rue sans l'apostrophe parasite");
+  assertEqual(candas && candas.cp, "55200", "(b) CP lu malgre '(D'");
+
+  // (c) image 18 : marqueur de distance reduit a "a" -> la coupure par CP
+  // doit separer trois clients consecutifs.
+  const img18 = parseAddressList([
+    R(426, 465, "Thieriot Kevin 8000 | 0+1 v"), R(455, 472, "9 HAPTOUTE RUE"), R(476, 509, "COMMERCY 55200 10:40-12:40 © ,"),
+    R(622, 668, "Mme regnier massera 8000 | 0+1 VU"), R(625, 678, "LS) valerie"),
+    R(675, 709, "17 HAPTOUTE RUE 10:40 - 12:40 © «"), R(706, 725, "COMMERCY 55200"), R(772, 794, "a"),
+    R(805, 845, "LHERITIER MAINTENANCE ©"), R(846, 865, "14 ARTILLEURS AVE"), R(874, 909, "COMMERCY 55200 10:40 - 12:40 © q"),
+  ], opts18);
+  assertEqual(rues(img18), ["9 HAPTOUTE RUE", "17 HAPTOUTE RUE", "14 ARTILLEURS AVE"], "(c) trois clients separes malgre le marqueur perdu");
+  assertEqual(img18[2].ville, "COMMERCY", "(c) 'q' n'est plus pris pour la commune");
+
+  // (d) image 35/40 : "SEPVIGNY 55140 1220-1420", "DOMGERMAIN 54119 @ A", "15:10-1710"
+  const img35 = parseAddressList([
+    R(577, 629, "… GUARRACINO GILLES 8000 | TS"), R(614, 634, "8 PETITE BOUCHERIE RUE"), R(640, 672, "SEPVIGNY 55140 1220-1420 ® ,"),
+  ], opts18);
+  assertEqual(img35.length === 1 && img35[0].cp, "55140", "(d) GUARRACINO : CP lu malgre '1220-1420'");
+  assertEqual(img35[0] && img35[0].ville, "SEPVIGNY", "(d) GUARRACINO : commune");
+  const img40 = parseAddressList([
+    R(619, 665, "Gazon Philippe 8000 | 0+1 VU"), R(646, 665, "39 TUILERIE RUE"), R(673, 706, "DOMGERMAIN 54119 15:00 - 17:00 @ A"),
+    R(763, 801, "a 11.64km Q"), R(809, 832, "maison individuelle ; 7"), R(828, 847, "8000 | 0+1"),
+    R(823, 860, "7 ROSIERE RUE ! ©"), R(857, 905, "DOMGERMAIN 54119 15:10-1710 © ,"),
+  ], opts18);
+  assertEqual(rues(img40), ["39 TUILERIE RUE", "7 ROSIERE RUE"], "(d) Gazon Philippe et 'maison individuelle' retrouves");
+  assertEqual(img40.map((b) => b.cp), ["54119", "54119"], "(d) les deux CP lus");
+
+  // (e) rangee d'icone sans distance ("Û 27.11km 9" -> "9") : plus jamais
+  // le debut d'une rue ("9 Alan morisot v 5 PRESSOIRS RUE" observe).
+  const img30 = parseAddressList([
+    R(396, 458, "Û 27.11km 9"), R(475, 511, "Alan morisot 8000 | 0+1 v"), R(502, 519, "5 PRESSOIRS RUE"),
+    R(523, 554, "BUREY EN VAUX 55140 12:10-1410 (© ,"),
+  ], { knownCities: new Set([looseCommune(normalizeCity("Burey-en-Vaux"))]), knownCps: new Set(["55140"]) });
+  assertEqual(img30.length === 1 && img30[0].rue, "5 PRESSOIRS RUE", "(e) residu du marqueur ecarte de la rue");
+  assertEqual(img30[0] && img30[0].nom, "Alan morisot", "(e) nom propre");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)
