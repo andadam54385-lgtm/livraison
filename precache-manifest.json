@@ -1,6 +1,6 @@
 {
-  "version": "8e191e6d281f",
-  "generatedAt": "2026-09-02T10:51:20.359Z",
+  "version": "6b3a70720480",
+  "generatedAt": "2026-09-02T11:11:50.820Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -37,7 +37,6 @@
     "./js/lib/idb.js",
     "./js/lib/loading.js",
     "./js/lib/toast.js",
-    "./js/map/live-position.js",
     "./js/map/map-ui.js",
     "./js/map/pmtiles-store.js",
     "./js/routing/dijkstra.js",

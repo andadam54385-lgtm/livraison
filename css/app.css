@@ -746,8 +746,10 @@ a { color: var(--accent-strong); }
 .hours-day.set .hours-dot { background: currentColor; }
 .hours-day.closed .hours-dot { background: var(--warn); }
 .hours-day.active.closed .hours-dot { background: var(--accent-ink); }
-.hours-ferme { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
-.hours-ferme input { width: 22px; height: 22px; margin: 0; }
+.hours-modes { display: flex; flex-direction: column; gap: 6px; }
+.hours-check { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+.hours-check input { width: 22px; height: 22px; margin: 0; flex-shrink: 0; }
+.hours-check[hidden] { display: none; }
 .hours-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .hours-grid label { display: flex; flex-direction: column; gap: 2px; font-size: 0.78rem; color: var(--text-muted); }
 .hours-grid input[type="time"] { width: 100%; min-height: 38px; }

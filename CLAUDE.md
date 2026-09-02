@@ -211,21 +211,27 @@ favoris portent déjà note + horaires de fermeture (`fermeDebut`/`fermeFin`, pr
 par l'optimiseur), éditables depuis la fiche colis, la carte d'arrêt (touche horloge sur
 les pros) et les Réglages (avec recherche).
   **Horaires JOUR PAR JOUR (build 126, 2026-09-02)** : `js/favoris/horaires.js` (module pur,
-  testé par `horaires.test.mjs`) — un favori porte `horaires = {lun..dim: {ferme, ouverture,
-  fermeture, pauseDebut, pauseFin}}` ; `closedWindowsForJour` le traduit en fenêtres fermées
-  (avant l'ouverture / pause / après la fermeture / journée entière) que `tourCost` pénalise
-  (plusieurs fenêtres par arrêt, l'ancienne paire `[debut, fin]` reste acceptée). L'ancien
-  couple `fermeDebut`/`fermeFin` est lu tel quel par `horairesOf` (une pause, tous les jours)
-  et mis à `""` dès qu'on enregistre des horaires. Éditeur unique `horaires-ui.js`
+  testé par `horaires.test.mjs`) — un favori porte `horaires = {lun..dim: {ferme, continu,
+  matinDebut, matinFin, apremDebut, apremFin}}` — **deux plages** (matin, après-midi)
+  par défaut, une case « journée continue » n'en laisse qu'une, bornée elle aussi (« si ça
+  ouvre à 12 mais en continu, c'est bien de le savoir », build 127) ; cocher la case
+  n'efface pas les heures de la coupure, elle les ignore. `closedWindowsForJour` renvoie le
+  **complément** des plages ouvertes (toute heure non explicitement ouverte est fermée —
+  évite les trous des cas partiels) que `tourCost` pénalise
+  (plusieurs fenêtres par arrêt, l'ancienne paire `[debut, fin]` reste acceptée). Les deux formats précédents (couple `fermeDebut`/`fermeFin` tous
+  les jours, puis `ouverture`/`fermeture`+`pause*` du build 126) sont convertis à la lecture
+  par `horairesOf` et mis à `""` dès qu'on enregistre. Éditeur unique `horaires-ui.js`
   (onglets Lun..Dim, un jour à la fois, « Copier sur lun–ven / tous les jours ») partagé par
   la fiche colis, la carte d'arrêt (touche horloge des pros) et les Réglages. **Cœur** dans
   l'en-tête de la fiche colis = mise en favori explicite (`saveFavoriInfo(..., {creer:true})`),
   retrait avec confirmation si note/horaires existent.
-  **Position GPS en continu** (`js/map/live-position.js`, même build) : un seul
-  `watchPosition` pour l'appli, démarré à la première carte, jamais coupé ; couche `me`
-  (halo + point, au-dessus des arrêts) rebâtie avec les autres après un changement de
-  style. Ne déplace JAMAIS la caméra — le bouton du `GeolocateControl` reste le recentrage.
-  En PWA Safari la mesure ne continue qu'au premier plan (limite iOS).
+  **Position GPS** : le `GeolocateControl` de MapLibre est le **seul** consommateur de la
+  géolocalisation de l'appli — `trackUserLocation` suit déjà la position en continu et
+  affiche le point du livreur en permanence après le premier appui. Une surveillance maison
+  (`js/map/live-position.js`) avait été ajoutée au build 126 à côté de lui : sur iOS, deux
+  `watchPosition` concurrents se gênent, le contrôle ne recevait plus de position et son
+  bouton restait bloqué (« recentre ne marche plus ») — module supprimé au build 127.
+  **Ne jamais rajouter de `watchPosition` ailleurs.**
   **Recherche d'entreprise** : le nom retenu est le texte tapé dans la recherche en ligne
   s'il diffère de l'adresse brute proposée par défaut (« mets le dernier nom mis pour la
   recherche, pas celui que l'app a noté »).
