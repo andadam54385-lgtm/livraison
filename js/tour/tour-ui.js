@@ -133,6 +133,17 @@ function focusColisInSheet(colisId) {
       containerRef.querySelector(`.prep-card[data-colis-id="${colisId}"]`) ||
       (containerRef.querySelector(`.hero-card [data-colis-id="${colisId}"]`) ? containerRef.querySelector(".hero-card") : null);
     if (!el) return;
+    // La carte peut vivre dans une section repliee (voir renderStopsList) :
+    // scrollIntoView n'y fait rien, un element non affiche n'a pas de
+    // position -- "la selection d'un point sur la carte ne marche plus
+    // toujours" (retour terrain, juste apres l'arrivee des sections). On
+    // ouvre la section, et on le memorise comme si le livreur l'avait fait.
+    const section = el.closest("details.stops-section");
+    if (section && !section.open) {
+      section.open = true;
+      if (section.dataset.section === "suivants") suivantsOuverts = true;
+      else if (section.dataset.section === "traites") traitesOuverts = true;
+    }
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.classList.add("flash-target");
     setTimeout(() => el.classList.remove("flash-target"), 2600);
@@ -1059,10 +1070,15 @@ function renderStopsList(filterText) {
   const traites = filtered.filter(({ stop }) => !isPending(stop));
   const forcerOuvert = Boolean(filterText) || reorderMode;
   const prochain = suivants[0]?.colis;
+  // Sous-titre ("prochain : ...") sur sa propre ligne : sur un ecran de
+  // telephone il etait tronque apres trois lettres du nom.
   const section = (cle, titre, sousTitre, entries, ouverte) => `
     <details class="stops-section" data-section="${cle}" ${ouverte ? "open" : ""}>
       <summary>
-        <span>${titre}${sousTitre ? ` <span class="muted">${sousTitre}</span>` : ""}</span>
+        <span class="stops-summary-text">
+          <span>${titre}</span>
+          ${sousTitre ? `<span class="muted stops-summary-sub">${sousTitre}</span>` : ""}
+        </span>
         <span class="stops-chevron">${icon("chevron-down", { spaced: false })}</span>
       </summary>
       <div class="stops-section-body">${entries.map(carte).join("")}</div>
@@ -1076,7 +1092,7 @@ function renderStopsList(filterText) {
       html += section(
         "suivants",
         `Arrêts suivants (${suivants.length})`,
-        prochain ? `— prochain : #${suivants[0].stop.ordre} ${escapeHtml(prochain.nom || formatAdresseAffichage(prochain))}` : "",
+        prochain ? `prochain : #${suivants[0].stop.ordre} ${escapeHtml(prochain.nom || formatAdresseAffichage(prochain))}` : "",
         suivants,
         suivantsOuverts || forcerOuvert
       );

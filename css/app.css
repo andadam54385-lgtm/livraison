@@ -578,8 +578,8 @@ a { color: var(--accent-strong); }
   -webkit-user-select: none;
 }
 .stops-section > summary::-webkit-details-marker { display: none; }
-.stops-section > summary > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stops-section > summary .muted { font-weight: 450; }
+.stops-summary-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.stops-summary-sub { font-weight: 450; font-size: 0.85rem; overflow-wrap: anywhere; }
 .stops-chevron { display: flex; flex-shrink: 0; transition: transform 0.2s var(--ease); }
 .stops-section[open] > summary .stops-chevron { transform: rotate(180deg); }
 .stops-section[open] > summary { margin-bottom: 8px; }
