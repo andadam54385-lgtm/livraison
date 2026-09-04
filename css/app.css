@@ -557,6 +557,33 @@ a { color: var(--accent-strong); }
   border-color: var(--accent) !important;
 }
 
+/* Sections repliables de la liste d'arrets (Etat B, voir renderStopsList) :
+   "Arrets suivants" et "Deja traites". Un <details> natif -- l'etat ouvert/
+   ferme est memorise par tour-ui pour la session. Le marqueur natif est
+   remplace par un chevron qui pivote. */
+.stops-section { margin-bottom: 8px; }
+.stops-section > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  background: var(--bg-card);
+  font-weight: 650;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.stops-section > summary::-webkit-details-marker { display: none; }
+.stops-section > summary > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stops-section > summary .muted { font-weight: 450; }
+.stops-chevron { display: flex; flex-shrink: 0; transition: transform 0.2s var(--ease); }
+.stops-section[open] > summary .stops-chevron { transform: rotate(180deg); }
+.stops-section[open] > summary { margin-bottom: 8px; }
+
 /* Feuille glissante a 3 positions (repliee/mi-hauteur/pleine hauteur, voir
    setupStopPanelSheet dans map-ui.js) : hauteur pilotee en JS (px) pendant le
    drag, pas de classe CSS par etat -- data-state ne sert qu'a un eventuel

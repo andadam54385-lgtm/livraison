@@ -50,6 +50,13 @@ let selectedStart = "depot"; // "depot" | "gps", choix Etat A
 // filtrer/re-dessiner juste la liste (recherche) sans tout re-fetcher.
 let lastTour = null;
 let lastStopsWithColis = [];
+// Etat des deux sections repliables de la liste d'arrets (Etat B), memorise
+// pour la session : "la liste des points doit etre un menu deroulant qui reste
+// sur le dernier point a faire" (retour terrain). Repliees au depart, l'arret
+// courant (hero card) reste seul sous les yeux ; ouvertes une fois par le
+// livreur, elles le restent d'un rendu a l'autre (chaque livraison re-rend).
+let suivantsOuverts = false;
+let traitesOuverts = false;
 let lastNavApp = "apple";
 let lastEtas = new Map();
 let lastDepotEta = null;
@@ -1033,22 +1040,65 @@ function renderStopsList(filterText) {
   );
   const pendingOrdered = lastStopsWithColis.filter(({ stop }) => isPending(stop)).map((s) => s.stop.ordre);
 
-  stopsContainer.innerHTML =
-    filtered.length === 0
-      ? `<div class="empty-state">${filterText ? `Aucun arrêt ne correspond à "${escapeHtml(filterText)}".` : "Tous les autres arrêts sont traités."}</div>`
-      : filtered
-          .map(({ stop, colis }) => {
-            const posInPending = pendingOrdered.indexOf(stop.ordre);
-            const canMoveUp = posInPending > 0;
-            const canMoveDown = posInPending !== -1 && posInPending < pendingOrdered.length - 1;
-            return renderStopCard(stop, colis, {
-              navApp: lastNavApp,
-              eta: colis ? lastEtas.get(colis.id) : null,
-              canMoveUp,
-              canMoveDown,
-            });
-          })
-          .join("");
+  const carte = ({ stop, colis }) => {
+    const posInPending = pendingOrdered.indexOf(stop.ordre);
+    return renderStopCard(stop, colis, {
+      navApp: lastNavApp,
+      eta: colis ? lastEtas.get(colis.id) : null,
+      canMoveUp: posInPending > 0,
+      canMoveDown: posInPending !== -1 && posInPending < pendingOrdered.length - 1,
+    });
+  };
+
+  // Deux sections repliables (voir suivantsOuverts) : les arrets ENCORE A
+  // FAIRE d'abord, les traites ensuite -- avant, la liste suivait l'ordre de
+  // tournee, donc commencait par tous les arrets deja livres, et il fallait
+  // les faire defiler a chaque fois pour retrouver le prochain. Une recherche
+  // ou le mode reordonner ouvrent tout : une liste repliee n'y sert a rien.
+  const suivants = filtered.filter(({ stop }) => isPending(stop));
+  const traites = filtered.filter(({ stop }) => !isPending(stop));
+  const forcerOuvert = Boolean(filterText) || reorderMode;
+  const prochain = suivants[0]?.colis;
+  const section = (cle, titre, sousTitre, entries, ouverte) => `
+    <details class="stops-section" data-section="${cle}" ${ouverte ? "open" : ""}>
+      <summary>
+        <span>${titre}${sousTitre ? ` <span class="muted">${sousTitre}</span>` : ""}</span>
+        <span class="stops-chevron">${icon("chevron-down", { spaced: false })}</span>
+      </summary>
+      <div class="stops-section-body">${entries.map(carte).join("")}</div>
+    </details>`;
+
+  let html = "";
+  if (filtered.length === 0) {
+    html = `<div class="empty-state">${filterText ? `Aucun arrêt ne correspond à "${escapeHtml(filterText)}".` : "Tous les autres arrêts sont traités."}</div>`;
+  } else {
+    if (suivants.length > 0) {
+      html += section(
+        "suivants",
+        `Arrêts suivants (${suivants.length})`,
+        prochain ? `— prochain : #${suivants[0].stop.ordre} ${escapeHtml(prochain.nom || formatAdresseAffichage(prochain))}` : "",
+        suivants,
+        suivantsOuverts || forcerOuvert
+      );
+    } else if (!filterText) {
+      html += `<div class="empty-state">Tous les autres arrêts sont traités.</div>`;
+    }
+    if (traites.length > 0) {
+      html += section("traites", `Déjà traités (${traites.length})`, "", traites, traitesOuverts || forcerOuvert);
+    }
+  }
+  stopsContainer.innerHTML = html;
+
+  // Memorise ce que le livreur a ouvert/ferme lui-meme -- pas ce qu'une
+  // recherche ou le mode reordonner ont force.
+  if (!forcerOuvert) {
+    stopsContainer.querySelectorAll("details.stops-section").forEach((d) => {
+      d.addEventListener("toggle", () => {
+        if (d.dataset.section === "suivants") suivantsOuverts = d.open;
+        else traitesOuverts = d.open;
+      });
+    });
+  }
 
   bindActionEvents(lastTour.id);
 }
@@ -1134,6 +1184,11 @@ async function renderEtatB(tour) {
   const sheetLabel = document.getElementById("tour-sheet-label");
   if (sheetLabel) sheetLabel.textContent = pendingCount > 0 ? `${pendingCount} arrêt${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}` : "Tournée traitée";
 
+  // Le rendu remplace tout le HTML, donc le defilement repartirait de zero a
+  // chaque livraison : on le remet ou il etait, pour "rester sur le dernier
+  // point a faire" (retour terrain) au lieu de renvoyer en haut.
+  const scrollAvant = containerRef.scrollTop;
+
   const heroEntry = stopsWithColis.find(({ stop, colis }) => isPending(stop) && colis);
   const heroHtml = heroEntry
     ? renderHeroCard(heroEntry.stop, heroEntry.colis, { navApp, eta: lastEtas.get(heroEntry.colis.id), smsTemplates: settings.smsTemplates })
@@ -1183,6 +1238,7 @@ async function renderEtatB(tour) {
 
   bindActionEvents(tour.id); // branche aussi les actions de la hero card
   renderStopsList("");
+  if (scrollAvant > 0) containerRef.scrollTop = scrollAvant;
 
   containerRef.querySelector("#tour-search").addEventListener("input", (e) => {
     renderStopsList(e.target.value);

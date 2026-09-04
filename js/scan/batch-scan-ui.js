@@ -792,14 +792,60 @@ export function startBatchScan(container) {
 function renderReviewList(container, drafts) {
   return new Promise((resolve) => {
     const state = drafts.map((d) => ({ draft: d, status: "pending", savedColis: null }));
+    // Ligne a remettre sous les yeux au prochain rendu (retour terrain : "on
+    // reste sur le point qu'on vient de modifier, on ne retourne pas en haut
+    // de la liste"). Le rendu remplace tout le HTML, donc le defilement
+    // repart de zero : on redescend explicitement jusqu'a cette ligne.
+    let focusIdx = null;
+
+    // Apres une suppression : la ligne qui occupe desormais la meme place
+    // (la suivante encore visible, sinon la precedente).
+    function voisinVisible(idx) {
+      const visibles = (i) => state[i] && state[i].status !== "discarded";
+      for (let i = idx + 1; i < state.length; i++) if (visibles(i)) return i;
+      for (let i = idx - 1; i >= 0; i--) if (visibles(i)) return i;
+      return null;
+    }
+
+    // Ouvre le formulaire de correction pour une ligne ; onCancel ramene a
+    // la liste sans rien changer (et sans rien enregistrer).
+    function ouvrirFiche(idx, colis, { annulationSupprime = false } = {}) {
+      renderReviewForm(container, colis, {
+        isNew: true,
+        duplicate: false,
+        onSaved: (savedColis) => {
+          state[idx].status = "saved";
+          state[idx].savedColis = savedColis;
+          focusIdx = idx;
+          render();
+        },
+        onCancel: () => {
+          if (annulationSupprime) {
+            state[idx].status = "discarded";
+            focusIdx = voisinVisible(idx);
+          } else {
+            focusIdx = idx;
+          }
+          render();
+        },
+      });
+    }
 
     function render() {
       const visible = state.filter((s) => s.status !== "discarded");
       const rows = visible
         .map((item) => {
           const idx = state.indexOf(item);
-          const label = item.draft.nom || [item.draft.rue, item.draft.ville].filter(Boolean).join(", ") || "(adresse incomplète)";
-          const sub = [item.draft.rue, `${item.draft.cp || ""} ${item.draft.ville || ""}`.trim()].filter(Boolean).join(" — ");
+          // Une ligne deja enregistree (corrigee, ou ajoutee a la main)
+          // s'affiche avec ce qui a ete ENREGISTRE, pas avec le brouillon OCR
+          // d'origine -- sinon une correction restait invisible dans la liste
+          // et une adresse ajoutee apparaissait "(adresse incomplete)".
+          const src =
+            item.status === "saved" && item.savedColis
+              ? { nom: item.savedColis.nom, rue: item.savedColis.adresseRaw?.rue, cp: item.savedColis.adresseRaw?.cp, ville: item.savedColis.adresseRaw?.ville }
+              : item.draft;
+          const label = src.nom || [src.rue, src.ville].filter(Boolean).join(", ") || "(adresse incomplète)";
+          const sub = [src.rue, `${src.cp || ""} ${src.ville || ""}`.trim()].filter(Boolean).join(" — ");
           // Badge de reconnaissance BAN (voir computeGeocodePreview) : jamais
           // un motif d'ecarter la ligne, seulement d'orienter l'oeil vers
           // celles qui meritent vraiment d'etre ouvertes/corrigees.
@@ -810,7 +856,7 @@ function renderReviewList(container, drafts) {
                 ? `<span class="badge badge-warn">À vérifier</span>`
                 : "";
           return `
-            <div class="card-row" style="padding:10px 0;border-bottom:1px solid var(--border);align-items:flex-start;">
+            <div class="card-row" data-review-row="${idx}" style="padding:10px 0;border-bottom:1px solid var(--border);align-items:flex-start;">
               <div style="flex:1;min-width:0;">
                 <div class="card-title" style="margin-bottom:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                   ${item.status === "saved" ? `${icon("check", { spaced: false })} ` : ""}${escapeHtml(label)} ${previewBadge}
@@ -842,33 +888,51 @@ function renderReviewList(container, drafts) {
             corrige ou supprime celles qui ne sont pas bonnes, les autres seront enregistrées telles quelles.
           </p>
           <div>${rows || `<p class="muted">Plus rien à enregistrer.</p>`}</div>
-          <div class="button-row" style="margin-top:14px;">
+          <button type="button" id="batch-review-add" style="width:100%;margin-top:12px;">${icon("plus")}Ajouter une adresse manquante</button>
+          <div class="button-row" style="margin-top:10px;">
             <button type="button" id="batch-review-cancel">Tout annuler</button>
             <button type="button" class="primary" id="batch-review-save">${icon("check")}Enregistrer (${pendingCount})</button>
           </div>
         </div>
       `;
 
+      // Retour sur la ligne qu'on vient de traiter (voir focusIdx) : centree,
+      // et brievement surlignee pour que l'oeil la retrouve tout de suite.
+      if (focusIdx != null) {
+        const ligne = container.querySelector(`[data-review-row="${focusIdx}"]`);
+        focusIdx = null;
+        if (ligne) {
+          ligne.scrollIntoView({ block: "center" });
+          ligne.classList.add("flash-target");
+          setTimeout(() => ligne.classList.remove("flash-target"), 2600);
+        }
+      }
+
       container.querySelectorAll("[data-correct]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const idx = Number(btn.dataset.correct);
-          const colis = draftToColis(state[idx].draft);
-          renderReviewForm(container, colis, {
-            isNew: true,
-            duplicate: false,
-            onSaved: (savedColis) => {
-              state[idx].status = "saved";
-              state[idx].savedColis = savedColis;
-              render();
-            },
-          });
+          ouvrirFiche(idx, draftToColis(state[idx].draft));
         });
       });
       container.querySelectorAll("[data-discard]").forEach((btn) => {
         btn.addEventListener("click", () => {
-          state[Number(btn.dataset.discard)].status = "discarded";
+          const idx = Number(btn.dataset.discard);
+          state[idx].status = "discarded";
+          focusIdx = voisinVisible(idx);
           render();
         });
+      });
+      // Point manque par l'OCR (retour terrain : "pouvoir rajouter les points
+      // manquants au fil de l'eau") : une fiche vierge, le meme formulaire que
+      // la correction, ajoutee a la fin de la liste. Un "Retour" sans valider
+      // ne laisse aucune ligne vide derriere lui.
+      container.querySelector("#batch-review-add").addEventListener("click", () => {
+        state.push({ draft: { nom: "", rue: "", cp: "", ville: "" }, status: "pending", savedColis: null });
+        const idx = state.length - 1;
+        const colis = draftToColis(state[idx].draft);
+        colis.source = "manuel";
+        colis.ocrRawText = "";
+        ouvrirFiche(idx, colis, { annulationSupprime: true });
       });
       container.querySelector("#batch-review-cancel").addEventListener("click", () => {
         resolve(state.filter((s) => s.status === "saved").map((s) => s.savedColis));

@@ -376,7 +376,11 @@ function bindVilleAutocomplete(container) {
   });
 }
 
-export function renderReviewForm(container, colis, { isNew, duplicate = false, onSaved } = {}) {
+// onCancel (optionnel) : ajoute un bouton "Retour" qui quitte la fiche SANS
+// enregistrer -- utilise par la revision d'un scan de liste, ou une fiche
+// ouverte pour correction (ou ajoutee a la main) doit pouvoir etre refermee
+// pour revenir a la liste, la ou "Rescanner" n'a pas de sens.
+export function renderReviewForm(container, colis, { isNew, duplicate = false, onSaved, onCancel } = {}) {
   const telBadge =
     colis.source === "manuel"
       ? "" // saisie directe par l'utilisateur : pas de validation croisee a afficher
@@ -396,7 +400,7 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
   container.innerHTML = `
     ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>${icon("alert-triangle")}Ce tracking a déjà été scanné.</strong></div>` : ""}
     <div class="button-row">
-      <button type="button" id="f-rescan">Rescanner</button>
+      ${onCancel ? `<button type="button" id="f-cancel">${icon("arrow-left")}Retour</button>` : `<button type="button" id="f-rescan">Rescanner</button>`}
       <button type="button" class="primary btn-lg" id="f-valider">Valider</button>
     </div>
     <div class="field">
@@ -448,11 +452,12 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
   bindAdresseAutocomplete(container, { initialQuery: initialAdresseQuery });
   bindVilleAutocomplete(container);
 
-  container.querySelector("#f-rescan").addEventListener("click", () =>
+  container.querySelector("#f-rescan")?.addEventListener("click", () =>
     // onCancelled : si l'utilisateur annule le rescan, revient a CETTE
     // fiche de revue (pas la liste) -- voir startScanFlow(onCancelled).
-    startScanFlow(container, { onSaved, onCancelled: () => renderReviewForm(container, colis, { isNew, duplicate, onSaved }) })
+    startScanFlow(container, { onSaved, onCancelled: () => renderReviewForm(container, colis, { isNew, duplicate, onSaved, onCancel }) })
   );
+  container.querySelector("#f-cancel")?.addEventListener("click", () => onCancel());
   container.querySelector("#f-valider").addEventListener("click", async () => {
     colis.nom = container.querySelector("#f-nom").value.trim();
     colis.tel = container.querySelector("#f-tel").value.trim();

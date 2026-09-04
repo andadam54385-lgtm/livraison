@@ -109,6 +109,17 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   doigt, bug terrain) DÉPLIE d'un cran ; un glissement franc (≥ 24px) va toujours au
   cran suivant dans le sens du geste, jamais de retour élastique. Réglages : engrenage
   du header + lien du menu carte. L'ancien hash `#map` retombe sur `#tour`.
+- **Liste d'arrêts de l'État B = deux sections repliables** (`<details>`, build 129, « la liste
+  des points doit être un menu déroulant qui reste sur le dernier point à faire ») : « Arrêts
+  suivants (N) — prochain : … » puis « Déjà traités (M) », repliées par défaut et mémorisées
+  pour la session (`suivantsOuverts`/`traitesOuverts` dans `tour-ui.js`) ; une recherche ou le
+  mode réordonner forcent l'ouverture sans toucher à la mémoire. `renderEtatB` conserve
+  `containerRef.scrollTop` d'un rendu à l'autre (chaque livraison re-rend tout le HTML).
+  **Révision d'un scan de liste** (`renderReviewList`) : bouton « Ajouter une adresse
+  manquante » (fiche vierge via `renderReviewForm`, `source: "manuel"`), et retour sur la ligne
+  qu'on vient de corriger/ajouter/supprimer (`focusIdx` + `flash-target`) au lieu du haut de la
+  liste. `renderReviewForm` accepte `onCancel` (bouton « Retour » à la place de « Rescanner ») ;
+  une ligne enregistrée s'affiche avec les valeurs enregistrées, pas le brouillon OCR.
 - **`js/scan/colis-detail-ui.js`** = fiche colis consolidée (seul endroit avec
   Corriger/Favori/Supprimer — jamais sur les cartes de liste).
 - **`js/scan/scan-ui.js`** = fonctions de flux (pas de vue auto-montée), paramétrées par
