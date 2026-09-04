@@ -175,8 +175,12 @@ function stripNoiseTokens(text) {
   // inclut ")", "@", "=", les chevrons et "#" : observes colles derriere un
   // code postal reel ("55000 )", "FAINS VEEL 55000 @"), ils empechaient la
   // reconnaissance du CP et la fiche entiere finissait "a verifier".
+  // Un tiret en tete COLLE a une lettre ("-LES-COTES") est la suite d'une
+  // commune repliee sur son tiret par le terminal (voir mergeHyphenWraps) :
+  // conserve. Un tiret isole ou suivi d'un espace ("- 14:10") reste du bruit.
   out = out
-    .replace(/^[\s,;:.|>\-–—_*"'°«»“”‘’…()@=~#!+\/\\?$%&]+/, "")
+    .replace(/^-(?![a-zà-ÿ])/i, "")
+    .replace(/^[\s,;:.|>–—_*"'°«»“”‘’…()@=~#!+\/\\?$%&]+/, "")
     .replace(/[\s,;:|>_*"'°«»“”‘’…()@=~#!{}\[\]]+$/, "")
     .trim();
   // Residus d'icones colles au texte, aux deux bouts :
@@ -341,6 +345,25 @@ const MAX_VILLE_WORDS = 5;
 // DUC" -> ["1 VERDUN RUE", "BAR LE DUC"]). Renvoie null si la fin du texte ne
 // correspond a aucune commune de la base : on ne devine jamais une ville a
 // partir de sa seule forme, seule la base BAN tranche.
+// Commune connue : correspondance exacte, ou PREFIXE unique -- le terminal
+// abrege les communes longues ("HEUDICOURT" pour Heudicourt-sous-les-Cotes,
+// photo reelle). Un prefixe n'est accepte que s'il fait au moins 6 lettres
+// et ne commence qu'UNE seule commune de la base, mot entier ("SAINT" en
+// commencerait des dizaines, "BAR" est un mot de trop de communes).
+const MIN_PREFIXE_COMMUNE = 6;
+
+function isKnownCity(normalized, knownCities) {
+  if (!normalized || !knownCities || knownCities.size === 0) return false;
+  if (knownCities.has(normalized)) return true;
+  if (normalized.length < MIN_PREFIXE_COMMUNE) return false;
+  const prefixe = normalized + " ";
+  let trouvee = 0;
+  for (const nom of knownCities) {
+    if (nom.startsWith(prefixe) && ++trouvee > 1) return false;
+  }
+  return trouvee === 1;
+}
+
 function peelKnownVille(text, knownCities) {
   if (!knownCities || knownCities.size === 0) return null;
   const words = text.split(/\s+/).filter(Boolean);
@@ -351,7 +374,7 @@ function peelKnownVille(text, knownCities) {
   for (let k = Math.min(MAX_VILLE_WORDS, words.length); k >= 1; k--) {
     const candidate = words.slice(words.length - k).join(" ");
     const normalized = looseCommune(normalizeCity(expandSaint(candidate)));
-    if (normalized && knownCities.has(normalized)) {
+    if (isKnownCity(normalized, knownCities)) {
       return { rest: words.slice(0, words.length - k).join(" "), ville: candidate };
     }
   }
@@ -380,11 +403,25 @@ function expandSaint(text) {
 // "<CP> <VILLE>", autres terminaux).
 const CP_TOKEN_RE = /(?:^|\s)(\d{5})(?=\s|$)/g;
 
+// CP suivi d'un chiffre parasite : "552100", "552109" -- l'icone "maison"
+// collee au code postal sur le terminal est lue comme un chiffre de plus
+// (photos reelles, 2026-09-04). Un vrai code postal fait 5 chiffres, un
+// telephone 10 : un jeton de 6 chiffres dont les 5 premiers sont un CP CONNU
+// de la zone ne peut etre que ca. Jamais sans base de reference.
+const CP_PLUS_ICONE_RE = /(?:^|\s)(\d{5})\d(?=\s|$)/g;
+
 function findCpToken(text, knownCps) {
   for (const m of text.matchAll(CP_TOKEN_RE)) {
     if (!isPlausibleCp(m[1], knownCps)) continue;
     const start = m.index + m[0].length - 5;
     return { cp: m[1], before: text.slice(0, start).trim(), after: text.slice(start + 5).trim() };
+  }
+  if (knownCps && knownCps.size > 0) {
+    for (const m of text.matchAll(CP_PLUS_ICONE_RE)) {
+      if (!knownCps.has(m[1])) continue;
+      const start = m.index + m[0].length - 6;
+      return { cp: m[1], before: text.slice(0, start).trim(), after: text.slice(start + 6).trim() };
+    }
   }
   return null;
 }
@@ -397,7 +434,7 @@ function leadingKnownVille(text, knownCities) {
   for (let k = Math.min(MAX_VILLE_WORDS, words.length); k >= 1; k--) {
     const candidate = words.slice(0, k).join(" ");
     const normalized = looseCommune(normalizeCity(expandSaint(candidate)));
-    if (normalized && knownCities.has(normalized)) return candidate;
+    if (isKnownCity(normalized, knownCities)) return candidate;
   }
   return null;
 }
@@ -534,8 +571,28 @@ function isPlausibleCp(cp, knownCps) {
   return knownCps.has(cp);
 }
 
+// Commune longue repliee par le terminal SUR le tiret ("VIEVILLE-SOUS" /
+// "-LES-COTES", "VIGNEULLES-LES-" / "HATTONCHATEL", photos reelles) : les
+// deux lignes sont un seul mot, a recoller AVANT toute classification --
+// separees, aucune des deux n'est une commune connue et la fiche perdait sa
+// ville. Seul un tiret colle a une lettre compte : "12:10 -" (creneau coupe)
+// se termine par un tiret precede d'un espace et n'est jamais recolle.
+function mergeHyphenWraps(rawLines) {
+  const out = [];
+  for (const raw of rawLines) {
+    const line = String(raw || "").trim();
+    const precedente = out.length > 0 ? out[out.length - 1] : null;
+    if (precedente && line && (/[a-zà-ÿ]-$/i.test(precedente) || /^-[a-zà-ÿ]/i.test(line))) {
+      out[out.length - 1] = precedente + line;
+    } else {
+      out.push(line);
+    }
+  }
+  return out;
+}
+
 export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps = new Set() } = {}) {
-  const lines = rawLines.flatMap((l) => splitEmbeddedCpVille(l, knownCities, knownCps));
+  const lines = mergeHyphenWraps(rawLines).flatMap((l) => splitEmbeddedCpVille(l, knownCities, knownCps));
   const result = { names: [], streets: [], cp: null, ville: null };
   let lastCategory = null;
 
@@ -576,7 +633,7 @@ export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps
     // looseCommune dans match-address.js, meme probleme deja resolu pour le
     // geocodage.
     const normalizedVille = looseCommune(normalizeCity(expandSaint(line)));
-    if (normalizedVille && knownCities.has(normalizedVille)) {
+    if (isKnownCity(normalizedVille, knownCities)) {
       // Dernier match l'emporte : un terminal peut afficher une ville en
       // double (ex: un libelle de zone au-dessus du bloc ET la ville propre
       // de l'adresse) -- la derniere occurrence est la plus fiable, jamais
@@ -834,7 +891,7 @@ export function parseAddressList(ocrLines, { knownCities = new Set(), knownCps =
       // precisement les lignes restees hors du cadre -- alors qu'une fiche
       // entiere en a toujours au moins un des deux. Aucun n'etait geocodable :
       // c'etait du tri manuel en pure perte.
-      const villeConnue = b.ville && knownCities.has(looseCommune(normalizeCity(expandSaint(b.ville))));
+      const villeConnue = b.ville && isKnownCity(looseCommune(normalizeCity(expandSaint(b.ville))), knownCities);
       return Boolean(b.cp) || Boolean(villeConnue);
     });
 }

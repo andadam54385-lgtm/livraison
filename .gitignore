@@ -18,3 +18,4 @@ assets/ban.json
 # les sessions Claude Code -- pas un artefact de l'app, ne doit pas etre
 # deploye ni publie (voir CLAUDE.md).
 graphify-out/
+.tmp-photos/

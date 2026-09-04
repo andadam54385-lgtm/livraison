@@ -83,8 +83,9 @@ function renderScanReportsSection(reports) {
   const r = reports[0];
   const resume = [
     `Scan ${{ video: "par vidéo", photos: "par photos" }[r.source] || "en direct"} du ${new Date(r.date).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`,
-    `${r.framesAnalysees} image(s) analysée(s) en ${Math.round((r.dureeMs || 0) / 1000)} s`,
+    `${r.framesAnalysees} image(s) analysée(s)${r.photosTotal ? ` sur ${r.photosTotal} sélectionnée(s)` : ""} en ${Math.round((r.dureeMs || 0) / 1000)} s`,
     `${r.adressesRetenues} adresse(s) retenue(s)`,
+    ...(r.illisibles?.length ? [`${r.illisibles.length} photo(s) ILLISIBLE(S) : ${r.illisibles.map((p) => `#${p.index} ${p.nom || "?"} (${p.type || "type ?"}, ${Math.round((p.taille || 0) / 1024)} Ko) — ${p.erreur}`).join(" ; ")}`] : []),
   ].join(" — ");
   const texte = [
     resume,

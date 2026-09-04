@@ -664,6 +664,53 @@ console.log("\n=== Cas 19 : scan par PHOTOS d'une vraie tournee (44 arrets, terr
   assertEqual(img11[0] && img11[0].cp, "54113", "(e) CP");
 }
 
+console.log("\n=== Cas 20 : recadrages reels d'un terminal (terrain 2026-09-04) -- CP + icone, commune coupee sur le tiret, commune abregee ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const villes20 = [
+    ["Vieville-sous-les-Cotes", "55210"], ["Vigneulles-les-Hattonchatel", "55210"], ["Heudicourt-sous-les-Cotes", "55210"],
+    ["Villers-sous-Preny", "54700"], ["Labeuville", "55160"], ["Saint-Mihiel", "55300"], ["Saint-Maurice-sous-les-Cotes", "55210"],
+  ];
+  const knownCities20 = new Set(villes20.map(([c]) => looseCommune(normalizeCity(c))));
+  const opts20 = { knownCities: knownCities20, knownCps: new Set(villes20.map(([, cp]) => cp)) };
+
+  // (a) image 1 : "552100" = 55210 + l'icone "maison" lue "0" ; commune
+  // repliee sur le tiret.
+  const img1 = parseAddressList([
+    R(49, 87, "DOMAINE DE"), R(100, 140, "MEUSSAMONT"), R(35, 103, "8000 | 0+1 v"),
+    R(123, 191, "11 ARNAY-LE-DUCRUE | 12:10-14100 ,"), R(191, 244, "VIEVILLE-SOUS :"), R(258, 295, "-LES-COTES"),
+    R(291, 375, "552100 57.02km Q"),
+  ], opts20);
+  assertEqual(img1.length, 1, "(a) la fiche est retenue");
+  assertEqual(img1[0] && img1[0].cp, "55210", "(a) CP lu malgre le chiffre de l'icone colle");
+  assertEqual(img1[0] && img1[0].ville, "VIEVILLE-SOUS-LES-COTES", "(a) commune recollee sur le tiret");
+  assertEqual(img1[0] && img1[0].nom, "DOMAINE DE MEUSSAMONT", "(a) nom sur deux lignes");
+
+  // (b) image 4 : deux fiches, commune coupee APRES le tiret, puis commune
+  // abregee ("HEUDICOURT" pour Heudicourt-sous-les-Cotes).
+  const img4 = parseAddressList([
+    R(19, 104, "COMPAGNIE DES 8000 | 0+2"), R(81, 120, "FROMAGES &"), R(127, 199, "SAINT-BENOIT RTE 12:30-14:30 (D «"),
+    R(184, 268, "VIGNEULLES-LES- °"), R(268, 305, "HATTONCHATEL"), R(324, 408, "552109 53.19km Q"),
+    R(454, 535, "MON TECHNICIEN 8000 | 0+1 D"), R(516, 554, "12 LAC RUE"), R(558, 627, "HEUDICOURT 55210 12:30 - 14:30 ®"),
+    R(752, 845, "@ kb 51.14km Q"),
+  ], opts20);
+  assertEqual(img4.length, 2, "(b) deux fiches");
+  assertEqual(img4[0] && img4[0].ville, "VIGNEULLES-LES-HATTONCHATEL", "(b) commune recollee (tiret en fin de ligne)");
+  assertEqual(img4[0] && img4[0].cp, "55210", "(b) CP lu malgre '552109'");
+  assertEqual(img4[0] && img4[0].rue, "SAINT-BENOIT RTE", "(b) rue propre");
+  assertEqual(img4[1] && img4[1].rue, "12 LAC RUE", "(b) la commune abregee n'est plus collee a la rue");
+  assertEqual(img4[1] && img4[1].ville, "HEUDICOURT", "(b) commune abregee reconnue par prefixe unique");
+  assertEqual(img4[1] && img4[1].cp, "55210", "(b) CP");
+
+  // (c) garde-fous du prefixe : trop court, ou ambigu, jamais accepte
+  const ambigu = parseAddressList([R(0, 20, "3 GRANDE RUE"), R(24, 44, "SAINT 55300")], opts20);
+  assertEqual(ambigu[0] && ambigu[0].ville, null, "(c) 'SAINT' commence plusieurs communes : pas une commune");
+  const court = parseAddressList([R(0, 20, "3 GRANDE RUE"), R(24, 44, "VIEVI 55210")], opts20);
+  assertEqual(court[0] && court[0].ville, null, "(c) prefixe de 5 lettres : refuse");
+  // Sans base, un jeton de 6 chiffres n'est jamais un CP.
+  assertEqual(parseAddressList([R(0, 20, "11 ARNAY RUE"), R(24, 44, "VIEVILLE 552100")])[0].cp, null, "(c) '552100' sans base : pas un CP");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)

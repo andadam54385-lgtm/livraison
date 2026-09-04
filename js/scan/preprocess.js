@@ -6,21 +6,67 @@
 // justesse prime sur la vitesse ici, l'echange est justifie.
 const MAX_DIMENSION = 2400;
 
+// Decodage par un element <img> D'ABORD, createImageBitmap en repli -- bug
+// reel (scan de liste par photos, 2026-09-04) : sur l'iPhone, les 5 photos
+// d'origine (4032x3024, orientation EXIF "tournee", ~3 Mo) ont toutes echoue
+// a se decoder et ont ete sautees, seuls 4 recadrages faits dans Photos
+// (deja droits, 500 Ko) sont passes. createImageBitmap(Blob) sur un gros
+// JPEG oriente par EXIF est le chemin le moins fiable de Safari (memoire,
+// formats -- il ne sait pas non plus decoder un HEIC, que le selecteur de
+// photos peut livrer tel quel en selection multiple). Un <img>, lui, prend
+// tout ce que Safari sait afficher, applique l'orientation EXIF (iOS >= 13.4,
+// naturalWidth/Height sont les dimensions une fois tournees) et se decode
+// cote natif sans copie en memoire JS. On dessine directement a la taille
+// reduite : jamais de bitmap pleine resolution en JavaScript.
 export async function loadImageToCanvas(file) {
-  const bitmap = await createImageBitmap(file);
-  let { width, height } = bitmap;
+  const source = await decodeViaImageElement(file).catch(async (errImg) => {
+    const bitmap = await createImageBitmap(file).catch((errBitmap) => {
+      throw new Error(`image illisible (img: ${errImg?.message || errImg} ; bitmap: ${errBitmap?.message || errBitmap})`);
+    });
+    return {
+      width: bitmap.width,
+      height: bitmap.height,
+      draw: (ctx, w, h) => ctx.drawImage(bitmap, 0, 0, w, h),
+      release: () => bitmap.close?.(),
+    };
+  });
+  try {
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(source.width, source.height));
+    const width = Math.max(1, Math.round(source.width * scale));
+    const height = Math.max(1, Math.round(source.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    source.draw(canvas.getContext("2d"), width, height);
+    return canvas;
+  } finally {
+    source.release();
+  }
+}
 
-  const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height));
-  width = Math.round(width * scale);
-  height = Math.round(height * scale);
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close?.();
-  return canvas;
+function decodeViaImageElement(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      if (!img.naturalWidth || !img.naturalHeight) {
+        URL.revokeObjectURL(url);
+        reject(new Error("dimensions nulles"));
+        return;
+      }
+      resolve({
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        draw: (ctx, w, h) => ctx.drawImage(img, 0, 0, w, h),
+        release: () => URL.revokeObjectURL(url),
+      });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("format non decodable"));
+    };
+    img.src = url;
+  });
 }
 
 export function cropCanvas(sourceCanvas, rect) {

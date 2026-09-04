@@ -14,6 +14,7 @@ import { emit } from "../lib/event-bus.js";
 import { saveScanReport } from "./scan-reports-store.js";
 import { ingestDrafts } from "./dedup-drafts.js";
 import { loadImageToCanvas } from "./preprocess.js";
+import { showToast } from "../lib/toast.js";
 
 // Scan en rafale : filme un ECRAN affichant plusieurs adresses a la fois
 // (ex: appli/portail du transporteur listant une tournee), par opposition au
@@ -378,6 +379,12 @@ function analyzePhotoFiles(files, container) {
     let done = false;
     let previewUrl = null;
     const rapportFrames = [];
+    // Photos que l'appli n'a PAS reussi a lire : comptees, montrees, et
+    // consignees dans le compte rendu (nom, type, taille, erreur). Bug reel
+    // (2026-09-04) : cinq photos sur neuf sautees en silence -- le livreur
+    // a cru que l'appli "n'avait garde que les 4 dernieres", et le compte
+    // rendu n'en portait aucune trace.
+    const illisibles = [];
     const debutMs = Date.now();
 
     function enregistrerRapport() {
@@ -386,6 +393,8 @@ function analyzePhotoFiles(files, container) {
         frames: rapportFrames,
         drafts: collected,
         dureeMs: Date.now() - debutMs,
+        photosTotal: files.length,
+        illisibles,
       }).catch((err) => console.warn("[batch-scan] compte rendu non enregistre:", err));
     }
 
@@ -418,7 +427,8 @@ function analyzePhotoFiles(files, container) {
           previewUrl = URL.createObjectURL(file);
           imgEl.src = previewUrl;
           statusEl.innerHTML = inlineLoadingHtml(
-            `Photo ${index}/${total} — ${collected.length} adresse${collected.length > 1 ? "s" : ""} détectée${collected.length > 1 ? "s" : ""}`
+            `Photo ${index}/${total} — ${collected.length} adresse${collected.length > 1 ? "s" : ""} détectée${collected.length > 1 ? "s" : ""}` +
+              (illisibles.length > 0 ? ` — ${illisibles.length} photo${illisibles.length > 1 ? "s" : ""} illisible${illisibles.length > 1 ? "s" : ""}` : "")
           );
           // Une photo illisible est SAUTEE, jamais fatale : les voisines se
           // chevauchent en general un peu.
@@ -438,6 +448,13 @@ function analyzePhotoFiles(files, container) {
             lisibles++;
           } catch (photoErr) {
             console.warn(`[batch-scan] photo ${index}/${total} sautee:`, photoErr?.message || photoErr);
+            illisibles.push({
+              index,
+              nom: file.name || "",
+              type: file.type || "",
+              taille: file.size || 0,
+              erreur: String(photoErr?.message || photoErr).slice(0, 200),
+            });
             continue;
           }
           countEl.textContent = String(collected.length);
@@ -448,6 +465,12 @@ function analyzePhotoFiles(files, container) {
         if (lisibles === 0) throw new Error("aucune photo n'a pu être lue");
         cleanup();
         await enregistrerRapport();
+        if (illisibles.length > 0) {
+          showToast(
+            `${illisibles.length} photo${illisibles.length > 1 ? "s" : ""} sur ${total} n'${illisibles.length > 1 ? "ont" : "a"} pas pu être lue${illisibles.length > 1 ? "s" : ""} — le résultat est incomplet (détail dans Réglages → debug OCR).`,
+            { variant: "warn", durationMs: 7000 }
+          );
+        }
         resolve(collected.slice());
       } catch (err) {
         if (stopped && !done) return;

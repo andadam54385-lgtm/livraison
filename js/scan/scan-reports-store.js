@@ -19,7 +19,7 @@ import { uuid } from "../lib/id.js";
 // centaines de lignes de texte.
 const MAX_REPORTS = 3;
 
-export async function saveScanReport({ source, frames, drafts, dureeMs }) {
+export async function saveScanReport({ source, frames, drafts, dureeMs, photosTotal = null, illisibles = [] }) {
   const db = await getDb();
   const report = {
     id: uuid(),
@@ -27,6 +27,11 @@ export async function saveScanReport({ source, frames, drafts, dureeMs }) {
     source, // "photos" | "video" | "live"
     dureeMs,
     framesAnalysees: frames.length,
+    // Photos : nombre selectionne et celles que l'appli n'a pas su lire (nom,
+    // type, taille, erreur) -- un scan incomplet doit se voir dans le compte
+    // rendu, pas seulement dans la console.
+    photosTotal,
+    illisibles,
     adressesRetenues: drafts.length,
     // Texte brut par image, avec la position verticale de chaque ligne : la
     // matiere premiere du diagnostic. Les anciens comptes rendus stockaient

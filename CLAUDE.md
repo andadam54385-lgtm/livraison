@@ -160,6 +160,19 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   éprouvé sur l'appareil). Le conteneur porte `data-analyse-en-cours` pendant l'analyse :
   `app.js` diffère un rechargement de mise à jour tant qu'il existe (pas de `<video>` ici,
   contrairement au chemin vidéo). La vidéo et le direct restent disponibles en secours.
+- **Chargement des photos = `<img>` d'abord, `createImageBitmap` en repli** (`preprocess.js`,
+  build 131). Bug réel 2026-09-04 : sur l'iPhone, 5 photos d'origine (4032×3024, EXIF
+  orientation 6, ~3 Mo) ont toutes échoué à se décoder et ont été **sautées en silence**, seuls 4
+  recadrages faits dans Photos (droits, 500 Ko) sont passés — « il a gardé que les 4 derniers ».
+  `createImageBitmap(Blob)` sur un gros JPEG orienté par EXIF est le chemin le moins fiable de
+  Safari (mémoire, HEIC non décodable) ; un `<img>` prend tout ce que Safari sait afficher,
+  applique l'EXIF et se décode côté natif. Rejoué dans Chromium sur les 9 images réelles :
+  9/9 lues. **Les photos illisibles sont désormais comptées, affichées (statut + toast) et
+  consignées dans le compte rendu** (`photosTotal`, `illisibles` avec nom/type/taille/erreur) —
+  un scan incomplet ne doit plus jamais passer pour un scan complet. Parser (cas 20) : CP
+  collé au chiffre de l'icône (« 552100 » → 55210, base requise), commune repliée sur son
+  tiret recollée (`mergeHyphenWraps`), commune abrégée reconnue par préfixe unique ≥ 6 lettres
+  (`isKnownCity`, « HEUDICOURT »).
 - **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
   `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
   vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE
