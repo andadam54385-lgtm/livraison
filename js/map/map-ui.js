@@ -275,8 +275,16 @@ function buildRouteGeoJson(depot, ordered, returnPoint, csr, recalcStart = null)
   const points = [depot];
   const doneFlags = [];
   if (recalcStart && restants.length > 0) {
-    points.push(...traites.map(toPoint), { lat: recalcStart.lat, lon: recalcStart.lon }, ...restants.map(toPoint));
-    doneFlags.push(...traites.map(() => true), true, ...restants.map(() => false));
+    // Le point s'insere a sa POSITION dans la tournee (afterOrdre = arrets
+    // deja traites au moment du recalcul), pas apres tous les traites : un
+    // arret livre apres le recalcul se dessine apres lui, et le troncon
+    // vif part bien du dernier arret fait. Anciennes tournees sans
+    // afterOrdre : repli sur le nombre de traites.
+    const k = Math.min(recalcStart.afterOrdre ?? traites.length, ordered.length);
+    const avant = ordered.slice(0, k);
+    const apres = ordered.slice(k);
+    points.push(...avant.map(toPoint), { lat: recalcStart.lat, lon: recalcStart.lon }, ...apres.map(toPoint));
+    doneFlags.push(...avant.map(({ stop }) => isTraite(stop)), true, ...apres.map(({ stop }) => isTraite(stop)));
   } else {
     points.push(...ordered.map(toPoint));
     doneFlags.push(...ordered.map(({ stop }) => isTraite(stop)));

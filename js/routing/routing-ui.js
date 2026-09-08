@@ -362,7 +362,11 @@ export async function runRecalculate(container, { tour, onDone, disableButtons =
       ...tour,
       stops: allStops,
       totalDureeSec: fixedTotal + pendingTotal,
-      recalcStart: { lat: start.lat, lon: start.lon, label: start.label },
+      // afterOrdre : position du point dans la tournee (nombre d'arrets deja
+      // traites AU MOMENT du recalcul). Un arret livre apres coup doit etre
+      // dessine APRES ce point, sinon le trajet "repart" du point GPS du
+      // recalcul au lieu de l'arret qui vient d'etre fait.
+      recalcStart: { lat: start.lat, lon: start.lon, label: start.label, afterOrdre: fixedStops.length },
     });
 
     for (const colis of eligibles) {
