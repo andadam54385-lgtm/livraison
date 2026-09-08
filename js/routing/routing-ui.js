@@ -353,10 +353,16 @@ export async function runRecalculate(container, { tour, onDone, disableButtons =
     });
     const fixedTotal = fixedStops.reduce((a, s) => a + (s.legDureeSec || 0), 0);
 
+    // Point de depart REEL du retri, conserve sur la tournee : la carte
+    // dessine le trajet depuis tour.depot (point du calcul initial), qui ne
+    // bouge jamais -- retour terrain "il me fait repartir du point de
+    // calcul d'itineraire". recalcStart s'insere entre les arrets traites
+    // et les arrets restants (voir buildRouteGeoJson dans map-ui.js).
     const updatedTour = await saveTour({
       ...tour,
       stops: allStops,
       totalDureeSec: fixedTotal + pendingTotal,
+      recalcStart: { lat: start.lat, lon: start.lon, label: start.label },
     });
 
     for (const colis of eligibles) {
@@ -364,7 +370,7 @@ export async function runRecalculate(container, { tour, onDone, disableButtons =
     }
 
     emit("tour:computed", { tour: updatedTour });
-    statusEl.textContent = `Tournée recalculée (${formatDurationShort(pendingTotal)} restantes estimées).`;
+    statusEl.textContent = `Tournée recalculée depuis « ${start.label} » (${formatDurationShort(pendingTotal)} restantes estimées).`;
     onDone?.(updatedTour);
   } catch (err) {
     console.error(err);

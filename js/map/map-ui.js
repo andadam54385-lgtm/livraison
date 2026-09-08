@@ -260,14 +260,32 @@ function buildRouteSegments(csr, grid, scratch, orderedPoints) {
 // Dijkstra quand le graphe routier est charge (repli en ligne droite sinon,
 // voir buildRouteSegments). `done` porte la coloration attenuee des troncons
 // deja parcourus.
-function buildRouteGeoJson(depot, ordered, returnPoint, csr) {
-  const points = [depot, ...ordered.map(({ colis }) => ({ lat: colis.geocode.lat, lon: colis.geocode.lon }))];
-  if (returnPoint) points.push(returnPoint);
-
+// `recalcStart` (tour.recalcStart, pose par runRecalculate) : point d'ou
+// les arrets restants ont ete retries. Sans lui, le trajet partait toujours
+// de tour.depot, le point du calcul initial, meme apres un recalcul depuis
+// la position GPS. On l'insere entre les arrets deja traites et les
+// restants : traites -> recalcStart (troncon attenue, deja parcouru) ->
+// premier arret restant (troncon vif).
+function buildRouteGeoJson(depot, ordered, returnPoint, csr, recalcStart = null) {
   const isTraite = (stop) => stop.statutLivraison === "livre" || stop.statutLivraison === "echec";
-  const allDelivered = ordered.length > 0 && ordered.every(({ stop }) => isTraite(stop));
-  const doneFlags = ordered.map(({ stop }) => isTraite(stop));
-  if (returnPoint) doneFlags.push(allDelivered);
+  const toPoint = ({ colis }) => ({ lat: colis.geocode.lat, lon: colis.geocode.lon });
+  const traites = ordered.filter(({ stop }) => isTraite(stop));
+  const restants = ordered.filter(({ stop }) => !isTraite(stop));
+
+  const points = [depot];
+  const doneFlags = [];
+  if (recalcStart && restants.length > 0) {
+    points.push(...traites.map(toPoint), { lat: recalcStart.lat, lon: recalcStart.lon }, ...restants.map(toPoint));
+    doneFlags.push(...traites.map(() => true), true, ...restants.map(() => false));
+  } else {
+    points.push(...ordered.map(toPoint));
+    doneFlags.push(...ordered.map(({ stop }) => isTraite(stop)));
+  }
+  const allDelivered = ordered.length > 0 && restants.length === 0;
+  if (returnPoint) {
+    points.push(returnPoint);
+    doneFlags.push(allDelivered);
+  }
 
   let segments;
   if (csr && points.length > 1) {
@@ -555,7 +573,8 @@ async function loadMapData() {
     ordered.forEach(({ stop }) => ordreParColisId.set(stop.colisId, stop.ordre));
   }
 
-  return { db, geocoded, settings, csr, depot, favGeoco, returnPoint, ordreParColisId, ordered };
+  const recalcStart = activeTour?.recalcStart ?? null;
+  return { db, geocoded, settings, csr, depot, favGeoco, returnPoint, ordreParColisId, ordered, recalcStart };
 }
 
 // Rebranche les boutons "Marquer livre" d'une liste d'arrets (portee limitee
@@ -589,10 +608,10 @@ export async function refreshMapData() {
   if (!containerRef || !containerRef.dataset.mapVariant) return;
   if (!mapInstance || !layersReady) return render();
 
-  const { geocoded, csr, depot, returnPoint, ordreParColisId, ordered, settings } = await loadMapData();
+  const { geocoded, csr, depot, returnPoint, ordreParColisId, ordered, settings, recalcStart } = await loadMapData();
 
   mapInstance.getSource("stops").setData(buildStopsGeoJson(geocoded, ordreParColisId));
-  mapInstance.getSource("route").setData(buildRouteGeoJson(depot, ordered, returnPoint, csr));
+  mapInstance.getSource("route").setData(buildRouteGeoJson(depot, ordered, returnPoint, csr, recalcStart));
 
   const stopListEl = containerRef.querySelector(".stop-panel-list");
   if (stopListEl) {
@@ -1078,7 +1097,7 @@ async function render() {
           if (map !== mapInstance) return;
           await ensureMapIcons(map);
           addMapLayers(map, {
-            routeGeoJson: buildRouteGeoJson(data.depot, data.ordered, data.returnPoint, data.csr),
+            routeGeoJson: buildRouteGeoJson(data.depot, data.ordered, data.returnPoint, data.csr, data.recalcStart),
             stopsGeoJson: buildStopsGeoJson(data.geocoded, data.ordreParColisId),
             favorisGeoJson: buildFavorisGeoJson(data.favGeoco),
             waypointsGeoJson: buildWaypointsGeoJson(data.depot, data.returnPoint),
