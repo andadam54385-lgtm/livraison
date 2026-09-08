@@ -252,6 +252,19 @@ export async function reporterColisEchec(colisId) {
   return colis;
 }
 
+// Supprime UNIQUEMENT les tournees archivees (bouton "Effacer l'historique
+// des tournees" dans Reglages). La tournee active est conservee : un
+// clear() du store la supprimait aussi, sans toucher a ses colis, qui
+// restaient "en_tournee" sans tournee -- orphelins invisibles en Etat B et
+// aspires par le recalcul suivant (voir recalc-eligibles.js). Renvoie le
+// nombre de tournees supprimees.
+export async function deleteArchivedTours() {
+  const db = await getDb();
+  const archivees = await getAllFromIndex(db, "tours", "by_statut", "archivee");
+  for (const tour of archivees) await del(db, "tours", tour.id);
+  return archivees.length;
+}
+
 // Purge les tournees archivees plus vieilles que `moisRetention` mois.
 // L'historique recent est garde deliberement (bilan sectoriel V3 B2B a
 // venir, voir roadmap) -- ce n'est qu'un menage sur la retention, pas une

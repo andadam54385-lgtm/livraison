@@ -4,7 +4,7 @@ import { clear, get } from "../lib/idb.js";
 import { listFavoris, updateFavori, deleteFavori } from "../favoris/favoris-store.js";
 import { horairesOf } from "../favoris/horaires.js";
 import { renderHorairesEditor } from "../favoris/horaires-ui.js";
-import { getToursGroupedByDay } from "../routing/tour-store.js";
+import { getToursGroupedByDay, deleteArchivedTours } from "../routing/tour-store.js";
 import { saveColis } from "../scan/colis-store.js";
 import { showToast } from "../lib/toast.js";
 import { renderOcrDebug } from "../scan/ocr-debug-ui.js";
@@ -358,10 +358,11 @@ async function render() {
   });
 
   containerRef.querySelector("#s-reset-tours").addEventListener("click", async () => {
-    if (!confirm("Effacer l'historique des tournées ? Les colis ne sont pas touchés. Action irréversible.")) return;
-    const db = await getDb();
-    await clear(db, "tours");
-    showToast("Historique des tournées effacé.");
+    if (!confirm("Effacer l'historique des tournées ? La tournée en cours et les colis ne sont pas touchés. Action irréversible.")) return;
+    // Jamais clear() du store : ca emportait aussi la tournee active et
+    // laissait ses colis "en_tournee" orphelins (voir deleteArchivedTours).
+    const n = await deleteArchivedTours();
+    showToast(n > 0 ? `${n} tournée${n > 1 ? "s" : ""} archivée${n > 1 ? "s" : ""} effacée${n > 1 ? "s" : ""}.` : "Aucune tournée archivée à effacer.");
     render();
   });
 

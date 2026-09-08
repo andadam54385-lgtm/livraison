@@ -1,6 +1,6 @@
 {
-  "version": "495d3baca06d",
-  "generatedAt": "2026-09-04T11:35:54.928Z",
+  "version": "67e06bf4270d",
+  "generatedAt": "2026-09-08T07:26:24.279Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -43,6 +43,8 @@
     "./js/routing/graph-loader.js",
     "./js/routing/insert-stop.js",
     "./js/routing/matrix-builder.js",
+    "./js/routing/recalc-eligibles.js",
+    "./js/routing/recalc-eligibles.test.mjs",
     "./js/routing/routing-ui.js",
     "./js/routing/routing-worker.js",
     "./js/routing/spatial-index.js",

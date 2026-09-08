@@ -11,16 +11,33 @@ import { horairesOf, closedWindowsForJour, jourKeyForDate } from "../favoris/hor
 import { formatDurationShort, hhmmToSec, secondsSinceMidnight } from "../lib/geo-utils.js";
 import { emit } from "../lib/event-bus.js";
 import { setInlineLoading } from "../lib/loading.js";
+import { pickRecalcEligibles } from "./recalc-eligibles.js";
 
-// Colis "eligibles" pour un (re)calcul de tournee : les tout juste geocodes
-// ("pret") ET ceux d'une tournee precedente pas encore livres ("en_tournee").
-// Inclure "en_tournee" est ce qui permet de recalculer une tournee en cours
-// de route (nouveaux colis scannes, retard...) sans avoir a repasser
-// manuellement chaque colis restant au statut "pret" -- seuls les colis deja
-// "livre" sont exclus.
+// Colis "eligibles" pour le calcul INITIAL d'une tournee (runSort, Etat A) :
+// exactement ce que la preparation affiche (tout sauf livre/echec, voir
+// renderEtatA dans tour-ui.js), donc "pret" ET "en_tournee" -- un colis
+// reste "en_tournee" quand sa tournee a disparu sans fin de journee, et
+// l'utilisateur le voit dans la liste avant d'optimiser.
+//
+// NE PLUS utiliser pour le recalcul en place : voir listColisPourRecalcul.
 export async function listColisEligibles() {
   const [pret, enTournee] = await Promise.all([listColisByStatut("pret"), listColisByStatut("en_tournee")]);
   return [...pret, ...enTournee];
+}
+
+// Colis a retrier lors d'un recalcul EN PLACE de `tour` : ses arrets encore
+// a livrer + les "pret" scannes entre-temps, rien d'autre. Un "en_tournee"
+// absent de tour.stops est un orphelin d'une autre tournee, il n'est pas
+// aspire ici -- voir pickRecalcEligibles (et son test) pour le bug corrige.
+async function listColisPourRecalcul(tour) {
+  const colisById = new Map();
+  for (const stop of tour.stops || []) {
+    if (stop.statutLivraison !== "a_livrer") continue;
+    const colis = await getColis(stop.colisId);
+    if (colis) colisById.set(colis.id, colis);
+  }
+  const pretColis = await listColisByStatut("pret");
+  return pickRecalcEligibles({ tour, colisById, pretColis });
 }
 
 function getCurrentPosition() {
@@ -273,7 +290,7 @@ export async function runSort(container, { useGps, depotReturn, onDone, disableB
 // tour-ui.js) : contrairement a runSort (qui archive/remplace toute la
 // tournee), garde les arrets deja livres/en echec intacts a leur place et ne
 // retrie que les arrets restants -- en incluant les colis "pret" scannes
-// entre-temps (voir listColisEligibles). Le point de depart du retri essaie
+// entre-temps (voir listColisPourRecalcul). Le point de depart du retri essaie
 // la position GPS live (le camion a bouge depuis le calcul initial), puis le
 // dernier arret deja traite, puis le point de depart d'origine de la tournee
 // en dernier recours.
@@ -286,7 +303,7 @@ export async function runRecalculate(container, { tour, onDone, disableButtons =
     const settings = await getAllSettings();
     const sortedStops = tour.stops.slice().sort((a, b) => a.ordre - b.ordre);
     const fixedStops = sortedStops.filter((s) => s.statutLivraison === "livre" || s.statutLivraison === "echec");
-    const eligibles = await listColisEligibles();
+    const eligibles = await listColisPourRecalcul(tour);
 
     if (eligibles.length === 0) {
       statusEl.textContent = "Aucun arrêt en attente à recalculer.";
