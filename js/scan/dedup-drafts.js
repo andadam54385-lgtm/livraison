@@ -55,7 +55,20 @@ export function isSameAddress(a, b) {
   if (villeA && villeB && villeA !== villeB) return false;
   const streetA = normalizeStreet(a.rue || "");
   const streetB = normalizeStreet(b.rue || "");
-  if (!streetA || !streetB) return Boolean(villeA) && villeA === villeB;
+  if (!streetA || !streetB) {
+    // Une fiche complete SANS rue n'est pas un fragment : le terminal
+    // affiche reellement des cartes sans ligne de rue ("GARAGE CHAUVONCOURT /
+    // CHAUVONCOURT 55300", terrain 2026-09-09 -- et la 2e fiche de Mandres du
+    // 2026-09-08), et l'OCR rate parfois la ligne de rue d'une fiche normale
+    // (Apremont, meme tournee). L'absorber dans un client de la meme commune
+    // qui a, lui, une rue faisait disparaitre l'arret en silence -- deux
+    // manques reels sur la tournee du 2026-09-09. Un vrai fragment de coupure
+    // n'a ni CP ni ville (voir isCompleteCard) : lui seul reste absorbable.
+    const sansRue = !streetA ? a : b;
+    const avecRue = !streetA ? b : a;
+    if (normalizeStreet(avecRue.rue || "") && isCompleteCard(sansRue)) return false;
+    return Boolean(villeA) && villeA === villeB;
+  }
   // Fiche COUPEE au bord du cadre de capture (retour terrain "138 points au
   // lieu de 60" sur un ecran qui defile) : une image attrape "15 RUE DU
   // MARECHAL", la suivante la fiche entiere avec la commune repliee dans la

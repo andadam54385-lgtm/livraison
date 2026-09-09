@@ -219,6 +219,21 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
      `LT`…) et `BAT` sont exclus.
   7. **Marqueur de distance à l'unité abîmée** (« 6.12KMm ») : ni coupure de fiche ni
      nettoyage, la distance partait dans le nom.
+- **Fiches SANS rue = vrais arrêts** (build 139, photos du terminal comparées carte par
+  carte au rejeu du 2026-09-09 — deux arrêts manquaient encore). Le terminal affiche
+  réellement des cartes sans ligne de rue (« GARAGE CHAUVONCOURT / CHAUVONCOURT 55300 »),
+  et l'OCR rate parfois la ligne de rue d'une carte normale (« 7 PRINCIPALE RUE » à
+  Apremont, jamais lue). Or `isSameAddress` (dedup-drafts.js) absorbait toute fiche sans
+  rue dans n'importe quel client de la même commune → l'arrêt disparaissait en silence.
+  Règle corrigée : une fiche sans rue mais **complète** (commune/CP présents) n'est jamais
+  un fragment — un vrai fragment de coupure n'a ni l'un ni l'autre (doctrine
+  `isCompleteCard` déjà en place) — donc jamais absorbée par un client qui a une rue ;
+  deux fiches sans rue de la même commune fusionnent toujours (recouvrement de photos).
+  À l'arrivée : colis `a_verifier` sans rue, affiché « 55300 CHAUVONCOURT »
+  (`formatAdresseAffichage` filtre la virgule orpheline), le livreur complète la rue à la
+  main. Au passage : badge sans barre (« 8000 0+1 ») nettoyé, et résidu d'icône de 1–2
+  minuscules en fin de ligne retiré (« Samuel FERRI vw ») — jamais un mot de liaison
+  (« RUE DU GENERAL DE » replié garde son « de »), jamais une majuscule (« BAT B »).
 - **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
   `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
   vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE

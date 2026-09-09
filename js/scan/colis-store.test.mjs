@@ -63,6 +63,17 @@ console.log("\n=== Cas limite : geocode.manual, adresseRaw vide ===");
   assertEqual(formatAdresseForNav(colis), null, "nav (toujours null pour geocode.manual, quel que soit adresseRaw)");
 }
 
+// Fiche sans rue (carte reelle du terminal sans ligne de rue, ex "GARAGE
+// CHAUVONCOURT / CHAUVONCOURT 55300") : pas de virgule orpheline en tete.
+{
+  const colis = {
+    adresseAffichage: null,
+    adresseRaw: { rue: "", cp: "55300", ville: "CHAUVONCOURT" },
+    geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
+  };
+  assertEqual(formatAdresseAffichage(colis), "55300 CHAUVONCOURT", "affichage sans rue : cp + ville seuls");
+}
+
 // Statut apres (re)geocodage -- retour terrain : un colis LIVRE corrige apres
 // coup repassait "pret" et ressortait dans la preparation du lendemain
 // ("il en restait 3 alors que je les avais livres").

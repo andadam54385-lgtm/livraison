@@ -948,6 +948,19 @@ console.log("\n=== Cas 23 : compte rendu photos reel du 2026-09-09 (12 images, 4
   // un code postal invente ; ici elle reste non localisable, donc ecartee.
   const faux = parseAddressList([R(0, 30, "3 GRANDE RUE"), R(34, 64, "SS3OO")], opts23);
   assertEqual(faux.length, 0, "(g) un mot de 5 lettres ne fabrique pas un CP, meme s'il en donnerait un valide");
+
+  // (h) fiche sans rue avec badge sans barre ("GARAGE CHAUV UONCOURT
+  // 8000 0+1 wo") : le nom doit survivre au nettoyage -- badge "8000 0+1"
+  // sans le "|", puis residu d'icone "wo" en fin. La fiche (nom + commune +
+  // CP, pas de rue) est retenue ; c'est ensuite dedup-drafts.js qui la
+  // protege de l'absorption (voir son test).
+  const sansRue = parseAddressList([
+    R(1475, 1554, "GARAGE CHAUV UONCOURT 8000 0+1 wo"),
+    R(1531, 1560, "CHAUVONCOURT 55300"),
+  ], { ...opts23, knownCities: new Set([...opts23.knownCities, looseCommune(normalizeCity("Chauvoncourt"))]), knownCps: new Set([...opts23.knownCps]) });
+  assertEqual(sansRue.length, 1, "(h) la fiche sans rue est retenue");
+  assertEqual(sansRue[0] && sansRue[0].nom, "GARAGE CHAUV UONCOURT", "(h) nom nettoye du badge sans barre et du residu");
+  assertEqual(sansRue[0] && sansRue[0].ville, "CHAUVONCOURT", "(h) commune");
 }
 
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");

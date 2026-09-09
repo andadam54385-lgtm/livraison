@@ -147,6 +147,10 @@ const NOISE_TOKEN_PATTERNS = [
   // barre parasite) passait pour un badge et le CP disparaissait.
   // La barre du badge est parfois lue "}" ou "]" ("8000} 041").
   /\b\d{3,4}\s*[|}\]]\s*[o0-9]{0,3}\s*[+: ]?\s*\d{0,3}/gi, // badge "8000 | 0+1", "8000 | 0:", "4000 | 140 87"
+  // Badge dont la barre n'a pas ete lue du tout ("8000 0+1", terrain
+  // 2026-09-09 "GARAGE CHAUV UONCOURT 8000 0+1 wo") : la forme
+  // <3-4 chiffres> <n>+<n> reste sans ambiguite meme sans separateur.
+  /\b\d{3,4}\s+[o0-9]{1,3}\+\d{1,3}\b/gi,
   /\b\d{3,4}[xX]\d{2,}\b/g, // reference "999X99"
   // Code de colis/ramasse : 6-7 caracteres melant lettres et chiffres
   // ("A1912WF", "05R03E", "1V34Y3", "437W43"), colle au nom du client.
@@ -213,7 +217,13 @@ function stripNoiseTokens(text) {
   do {
     avant = out;
     out = out
-      .replace(/\s+[a-zà-ÿ0-9]$/, "")
+      // Un chiffre seul (comportement historique), ou 1 a 2 caracteres
+      // commencant par une MINUSCULE : l'icone du badge lue comme des lettres
+      // ("Samuel FERRI vw", "CHRISTOPHE DAHBI mn", "EMILIE MICHEL uw" --
+      // terrain 2026-09-09). Jamais une majuscule en tete ("BAT B" reste une
+      // adresse), et jamais un mot de liaison ("RUE DU GENERAL DE" +
+      // "GAULLE" : le "de" fait partie de la rue repliee).
+      .replace(/\s+(?:[0-9]|(?!(?:de|du|la|le|au|et|en)$)[a-zà-ÿ][a-zà-ÿ0-9]?)$/, "")
       .replace(/\s+(?=\S{1,3}$)(?=\S*[^a-zA-Z0-9À-ÿ])\S{1,3}$/, "")
       .replace(/^(\S+\s+\S+.*?)\s+(?:[1-9]000|800)$/, "$1");
   } while (out !== avant);

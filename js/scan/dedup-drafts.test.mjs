@@ -110,5 +110,30 @@ console.log("\n=== ingestDrafts : 4 images d'une meme fiche -> 1 seul arret ==="
   assertEqual(collected[0].nom, "Fenetre du Barrois", "le nom lu plus tard est repris");
 }
 
+console.log("\n=== Fiche complete SANS rue (terrain 2026-09-09 : GARAGE CHAUVONCOURT) ===");
+{
+  // Le terminal affiche des cartes sans ligne de rue ; l'OCR rate parfois la
+  // rue d'une carte normale. Dans les deux cas la fiche porte commune + CP :
+  // ce n'est PAS un fragment de coupure (un fragment n'a ni l'un ni l'autre),
+  // et elle ne doit jamais etre absorbee par un client de la meme commune qui
+  // a, lui, une rue -- deux arrets reels ont disparu ainsi le 2026-09-09.
+  assertEqual(
+    isSameAddress(d("14 COLONEL DE CHERON RUE", "CHAUVONCOURT", "55300"), d(null, "CHAUVONCOURT", "55300", "GARAGE CHAUVONCOURT")),
+    false,
+    "une fiche complete sans rue reste un client distinct"
+  );
+  // Deux lectures de la MEME carte sans rue (bord de photo) : toujours
+  // fusionnees, sinon chaque recouvrement fabriquerait un fantome.
+  assertEqual(
+    isSameAddress(d(null, "CHAUVONCOURT", "55300"), d(null, "CHAUVONCOURT", "55300")),
+    true,
+    "deux fiches sans rue de la meme commune fusionnent"
+  );
+  const collected = [d("14 COLONEL DE CHERON RUE", "CHAUVONCOURT", "55300", "URT")];
+  ingestDrafts(collected, [d(null, "CHAUVONCOURT", "55300", "GARAGE CHAUVONCOURT")]);
+  assertEqual(collected.length, 2, "l'arret sans rue survit au dedoublonnage");
+  assertEqual(collected[1].nom, "GARAGE CHAUVONCOURT", "avec son nom");
+}
+
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);
 process.exit(failures === 0 ? 0 : 1);

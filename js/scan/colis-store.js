@@ -51,7 +51,10 @@ export function formatAdresseAffichage(colis) {
   const cp = colis.adresseRaw?.cp || "";
   const ville = colis.adresseRaw?.ville || "";
   if (!rue && !cp && !ville) return "(adresse à vérifier)";
-  return `${rue}, ${cp} ${ville}`.trim();
+  // filter(Boolean) : une fiche SANS rue existe reellement (carte du terminal
+  // sans ligne de rue, voir dedup-drafts.js) -- sans ce filtre elle
+  // s'affichait ", 55300 CHAUVONCOURT" avec la virgule orpheline en tete.
+  return [rue, `${cp} ${ville}`.trim()].filter(Boolean).join(", ");
 }
 
 // Adresse a passer aux liens de navigation GPS (deep-links.js) -- DIFFERENT de
