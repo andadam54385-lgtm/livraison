@@ -158,8 +158,17 @@ function normalizeRep(rep) {
 // ligne "ville" via la liste des communes connues), meme probleme -- un
 // terminal affiche souvent une commune composee SANS tirets ("DOMMARTIN LES
 // TOUL") alors que la BAN la stocke AVEC ("dommartin-les-toul").
+// Les ligatures sont expansees ICI et pas dans normalizeCity, pour la meme
+// raison que les tirets : les `cn` de assets/ban.json.gz sont deja calcules et
+// stockes avec la ligature ("kœur-la-grande", "vandœuvre-les-nancy", "jœuf",
+// "lalœuf" -- 5 communes de la zone). Un terminal ecrit toujours "KOEUR LA
+// GRANDE" : sans expansion des DEUX cotes au moment de comparer, la commune
+// n'etait jamais reconnue, elle finissait collee a la rue et l'arret partait
+// sans ville (terrain 2026-09-09, Kœur-la-Grande et Kœur-la-Petite).
 export function looseCommune(s) {
   return String(s || "")
+    .replace(/œ/g, "oe")
+    .replace(/æ/g, "ae")
     .replace(/[-']/g, " ")
     .replace(/\s+/g, " ")
     .trim();

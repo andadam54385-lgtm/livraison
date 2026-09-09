@@ -1,5 +1,5 @@
 import { normalizeCity } from "../geocode/normalize-address.js";
-import { looseCommune } from "../geocode/match-address.js";
+import { looseCommune, levenshtein } from "../geocode/match-address.js";
 
 // Parsing d'une LISTE de plusieurs adresses visibles en meme temps sur une
 // photo (ex: photo/scan d'un ecran d'appli transporteur affichant une
@@ -133,7 +133,7 @@ const NOISE_TOKEN_PATTERNS = [
   /^[^\sa-z0-9]{0,2}\s*[a-z0-9]{0,2}\s+(?=\d+[.,]?\d*\s?(?:km|kr|ki|k|m)\b)/i,
   // Distance + l'icone d'epingle qui la suit : "12.61km Q". L'unite est lue
   // "km", "kr", "ki" ou "k" selon l'image ; l'epingle "Q" parfois "9".
-  /\b\d+[.,]?\d*\s?(km|kr|ki|k|m)\b\s*[Q9]?(?=\s|$)/gi,
+  /\b\d+[.,]?\d*\s?(?:km|kr|ki|k|m)[a-z]?\b\s*[Q9]?(?=\s|$)/gi,
   /\b\d{1,2}\s?[:.]\s?\d{2}\s*[-\u2013]\s*\d{1,2}\s?[:.]\s?\d{2}\b/g, // creneau "11:30-13:30"
   // Creneau dont la FIN est mal lue ("12:10-1410", "09:00 - 18:0C") ou dont
   // les deux heures ont perdu leur ":" ("1220-1420") : la forme reste sans
@@ -198,6 +198,17 @@ function stripNoiseTokens(text) {
   // Jamais une MAJUSCULE isolee en fin : "BAT B", "ALLEE A" sont des adresses.
   out = out.replace(/^[a-zà-ÿ][a-zà-ÿA-ZÀ-Ü]{0,2}\s+(?=[A-ZÀ-Ü0-9])/, "");
   out = out.replace(/^\d\s+(?=\d+\s)/, "");
+  // Meme residu, mais en CAPITALES et donc invisible pour la regle ci-dessus
+  // ("LUN 18 L'OREE DU PARC RUE", "LS) 1 SAINT MICHEL RUE", "Le 12 BOUVREUILS
+  // RUE" -- terrain 2026-09-09). Uniquement devant un NUMERO de voie : c'est
+  // ce qui distingue un residu d'icone d'un vrai debut d'adresse. Les
+  // mots-cles de voie courts sont exclus ("ZI 3 ...", "LT 5 ...", et "BAT 3"
+  // qui n'en est pas un mais reste une vraie indication d'adresse) --
+  // STREET_KEYWORDS est defini plus bas dans le module, lu ici a l'execution.
+  const debutResidu = out.match(/^([A-Za-zà-ÿ]{1,3})[)\]]?\s+(?=\d)/);
+  if (debutResidu && !STREET_KEYWORDS.includes(debutResidu[1].toUpperCase()) && debutResidu[1].toUpperCase() !== "BAT") {
+    out = out.slice(debutResidu[0].length);
+  }
   let avant;
   do {
     avant = out;
@@ -314,7 +325,12 @@ function stripInterfaceNoise(ocrLines) {
     // ligne ("0+1" sous "8000 |", terrain 2026-09-08) : le motif de badge
     // ci-dessus ne la reconnait plus une fois separee de ses 4 chiffres, et
     // elle finissait dans la rue ("12 LIBERATION RUE 0+1 MEUSE").
-    if (/^\d{1,4}\s*[.,;:]?$/.test(cleaned) || /^\d{1,2}\s*\+\s*\d{1,2}$/.test(cleaned)) cleaned = "";
+    // "74 A" (residu de badge/icone entre deux fiches, terrain 2026-09-09) :
+    // meme famille -- un chiffre suivi d'une lettre isolee, sans le moindre
+    // mot. Classe en rue (elle commence par un chiffre), la ligne avalait
+    // ensuite le nom du client et la vraie rue : "74 A MANSION NICOLAS 61
+    // SAINT PAUL RUE", geocodee au 74 au lieu du 61.
+    if (/^\d{1,4}\s*[.,;:]?\s*[a-zà-ÿ]?$/i.test(cleaned) || /^\d{1,2}\s*\+\s*\d{1,2}$/.test(cleaned)) cleaned = "";
     kept.push({ ...l, text: cleaned, isClientStart });
   }
 
@@ -446,6 +462,33 @@ const CP_TOKEN_RE = /(?:^|\s)(\d{5})(?=\s|$)/g;
 // de la zone ne peut etre que ca. Jamais sans base de reference.
 const CP_PLUS_ICONE_RE = /(?:^|\s)(\d{5})\d(?=\s|$)/g;
 
+// Un CHIFFRE du code postal lu comme une lettre ("ST MIHIEL 5530C" pour
+// 55300, terrain 2026-09-09) : le jeton n'etait plus un CP, la ligne restait
+// donc collee a la rue, la fiche n'avait ni CP ni ville et le filtre "fiche
+// localisable" la supprimait -- un arret entier perdu, alors que tout etait
+// lisible. Une seule confusion toleree (4 vrais chiffres sur 5), et le
+// resultat doit exister dans la base : sans cette double condition, n'importe
+// quel mot de 5 lettres deviendrait un code postal.
+const CONFUSIONS_CHIFFRE = { O: "0", D: "0", Q: "0", C: "0", U: "0", I: "1", L: "1", S: "5", B: "8", G: "6", Z: "2" };
+const CP_AVEC_CONFUSION_RE = /(?:^|\s)([0-9ODQCUILSBGZ]{5})(?=\s|$)/gi;
+
+function cpParConfusion(token, knownCps) {
+  let chiffres = 0;
+  let out = "";
+  for (const ch of token) {
+    if (ch >= "0" && ch <= "9") {
+      chiffres++;
+      out += ch;
+    } else {
+      const remplacement = CONFUSIONS_CHIFFRE[ch.toUpperCase()];
+      if (!remplacement) return null;
+      out += remplacement;
+    }
+  }
+  if (chiffres < 4) return null;
+  return knownCps.has(out) ? out : null;
+}
+
 function findCpToken(text, knownCps) {
   for (const m of text.matchAll(CP_TOKEN_RE)) {
     if (!isPlausibleCp(m[1], knownCps)) continue;
@@ -458,8 +501,39 @@ function findCpToken(text, knownCps) {
       const start = m.index + m[0].length - 6;
       return { cp: m[1], before: text.slice(0, start).trim(), after: text.slice(start + 6).trim() };
     }
+    for (const m of text.matchAll(CP_AVEC_CONFUSION_RE)) {
+      const corrige = cpParConfusion(m[1], knownCps);
+      if (!corrige) continue;
+      const start = m.index + m[0].length - 5;
+      return { cp: corrige, before: text.slice(0, start).trim(), after: text.slice(start + 5).trim() };
+    }
   }
   return null;
+}
+
+// Commune a UNE lettre pres, quand la ligne porte deja un code postal
+// (terrain 2026-09-09 : "SOMMEDIEUF 55270" pour Sommedieue 55320 -- l'OCR a
+// rate la derniere lettre ET le CP, qui est par malchance un vrai CP de la
+// zone, donc plausible). Resultat avant : un arret fantome, sans ville, en
+// double du meme client lu correctement sur la photo precedente. Une fois la
+// commune reconnue, cpParCommune corrige le CP et le dedoublonnage fait le
+// reste. Garde-fous : au moins 8 lettres (un mot court a une lettre pres est
+// un autre mot), meme premiere lettre, et une SEULE commune candidate --
+// sinon on ne devine pas.
+const MIN_LONGUEUR_COMMUNE_FLOUE = 8;
+
+function communeFloue(text, knownCities) {
+  if (!text || !knownCities || knownCities.size === 0) return null;
+  const normalized = looseCommune(normalizeCity(expandSaint(text)));
+  if (normalized.length < MIN_LONGUEUR_COMMUNE_FLOUE) return null;
+  let trouvee = null;
+  for (const nom of knownCities) {
+    if (Math.abs(nom.length - normalized.length) > 1 || nom[0] !== normalized[0]) continue;
+    if (levenshtein(nom, normalized) > 1) continue;
+    if (trouvee) return null;
+    trouvee = nom;
+  }
+  return trouvee;
 }
 
 // Commune connue en TETE d'un texte (le miroir de peelKnownVille) : "BAR LE
@@ -503,6 +577,12 @@ function splitEmbeddedCpVille(line, knownCities, knownCps) {
       const cpVille = `${cp} ${peeled.ville}`;
       return peeled.rest ? [peeled.rest, cpVille] : [cpVille];
     }
+    // Dernier recours avant de rendre la ligne telle quelle : la commune a
+    // une lettre pres (voir communeFloue). C'est la FORME CORRIGEE qui est
+    // rendue, pas le texte OCR -- sinon ni cpParCommune ni le geocodage ne
+    // s'y retrouvent.
+    const floue = communeFloue(before, knownCities);
+    if (floue) return [`${cp} ${floue.toUpperCase()}`];
   }
   // Sans base (ou commune inconnue) : forme "<reste> <CP> <ville>" par regex.
   const m = trimmed.match(CP_VILLE_TRAILING_RE);
@@ -629,10 +709,18 @@ function mergeHyphenWraps(rawLines, knownCities) {
   for (const raw of rawLines) {
     const line = String(raw || "").trim();
     const precedente = out.length > 0 ? out[out.length - 1] : null;
-    const recolleSurTiret = precedente && line && (/[a-zà-ÿ]-$/i.test(precedente) || /^-[a-zà-ÿ]/i.test(line));
+    // Jamais devant un NUMERO de voie : un nom finissant par un tiret
+    // ("Denise Rossetti-", "Marie-Christine HOULIEZ-", tres frequent quand le
+    // terminal coupe un nom compose) se recollait a la rue suivante --
+    // "Denise Rossetti-6 GRANDE RUE", nom perdu et rue inutilisable. Une
+    // commune repliee ne commence jamais par un chiffre.
+    const suivanteEstUneRue = /^\d/.test(line);
+    const recolleSurTiret =
+      precedente && line && !suivanteEstUneRue && (/[a-zà-ÿ]-$/i.test(precedente) || /^-[a-zà-ÿ]/i.test(line));
     const recolleEnPleinMot =
       precedente &&
       line &&
+      !suivanteEstUneRue &&
       FRAGMENT_AVEC_TIRET_RE.test(line) &&
       /[a-zà-ÿ]$/i.test(precedente) &&
       isKnownCity(looseCommune(normalizeCity(expandSaint(precedente + line))), knownCities);
@@ -814,7 +902,11 @@ export function groupLinesIntoBlocks(lines) {
 // meilleur que le code postal : il est present meme quand le CP a ete mal lu,
 // et il marque le DEBUT d'une fiche. Detecte sur le texte BRUT, avant que
 // stripNoiseTokens ne l'efface (d'ou l'ordre dans parseAddressList).
-const DISTANCE_MARKER_RE = /(^|\s)\d+[.,]?\d*\s?(km|kr|ki|k|m)\b/i;
+// Une lettre parasite peut suivre l'unite ("6.12KMm", "39.1kmQ" colle) :
+// l'OCR recolle l'icone d'epingle a l'unite. Sans elle, ni le separateur de
+// fiche ni le nettoyage ne reconnaissaient le marqueur, et la distance
+// entiere partait dans le nom du client ("fÂA° '6.12KMm EMILIE MICHEL uw").
+const DISTANCE_MARKER_RE = /(^|\s)\d+[.,]?\d*\s?(?:km|kr|ki|k|m)[a-z]?\b/i;
 const ICON_ROW_RE = /^[#@]?[aAÀ][sSrRiI9°]?$/;
 
 function splitOnDistanceMarkers(blockLines) {

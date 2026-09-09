@@ -193,6 +193,32 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   4. **« 2. » en tête de la photo suivante** : commençait par un chiffre → pris pour une rue
      et collé devant la vraie, fabriquant un faux doublon du même arrêt avec un autre numéro.
   5. **Queue de badge isolée** (« 0+1 » séparé de ses « 8000 | ») : atterrissait dans la rue.
+- **Compte rendu photos du 2026-09-09 (12 images, 47 arrêts)** — 7 défauts de plus, corrigés
+  au build 138 (cas 23 des tests). Rejeu complet : 43 fiches dont un fantôme → 43 fiches dont
+  un arrêt qui était perdu, aucune ville manquante. Par ordre de gravité :
+  1. **Ligature œ** — la BAN écrit « Kœur-la-Grande », « Vandœuvre-lès-Nancy », « Jœuf »,
+     « Lalœuf » (5 communes de la zone) ; le terminal écrit « KOEUR ». Les `cn` déployés
+     contiennent déjà la ligature, donc l'expansion est faite dans `looseCommune`
+     (comparaison uniquement, comme les tirets), **jamais** dans `normalizeCity` — sinon les
+     `cn` indexés ne correspondraient plus.
+  2. **Nom fini par un tiret** (« Denise Rossetti- », nom composé coupé) recollé à la rue
+     suivante par la règle des communes repliées → `mergeHyphenWraps` ne recolle plus jamais
+     devant une ligne qui commence par un chiffre.
+  3. **CP dont un chiffre est lu comme une lettre** (« ST MIHIEL 5530C ») : la fiche perdait
+     CP et ville et le filtre « localisable » la supprimait — **un arrêt entier disparu**.
+     Reconstruction par table de confusions (O/D/Q/C/U→0, I/L→1, S→5, B→8, G→6, Z→2), avec
+     deux verrous : au moins 4 vrais chiffres sur 5, et le résultat doit exister dans la base.
+  4. **Commune à une lettre près** (« SOMMEDIEUF 55270 » pour Sommedieue 55320, le CP faux
+     étant par malchance un vrai CP de la zone) : créait un arrêt fantôme en double.
+     `communeFloue` (distance 1, ≥ 8 lettres, même initiale, une seule candidate) ; une fois
+     la commune reconnue, `cpParCommune` corrige le CP et le dédoublonnage fait le reste.
+  5. **« 74 A » seul sur sa ligne** : commençait par un chiffre → pris pour une rue, avalait
+     le nom puis la vraie rue (adresse géocodée au 74 au lieu du 61).
+  6. **Résidu court en CAPITALES avant le numéro** (« LUN 18 … », « LS) 1 … », « Le 12 … ») —
+     l'ancienne règle n'attrapait que les minuscules. Les mots-clés de voie courts (`ZI`,
+     `LT`…) et `BAT` sont exclus.
+  7. **Marqueur de distance à l'unité abîmée** (« 6.12KMm ») : ni coupure de fiche ni
+     nettoyage, la distance partait dans le nom.
 - **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
   `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
   vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE
