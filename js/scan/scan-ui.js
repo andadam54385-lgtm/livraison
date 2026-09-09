@@ -13,6 +13,7 @@ import { getSetting } from "../settings/settings-store.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
 import { googleMapsSearchUrl } from "../tour/deep-links.js";
 import { searchOnlinePlaces } from "../geocode/online-search.js";
+import { statutApresGeocodage } from "./colis-store.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { loadingHtml, inlineLoadingHtml } from "../lib/loading.js";
@@ -564,7 +565,9 @@ export async function runGeocodeAndSave(container, colis, { onSaved } = {}) {
   // conditionne "pret". Absence de nom : la carte affiche l'adresse en titre
   // a la place (voir renderPrepCard/renderStopCard/renderHeroCard), simple
   // repli d'affichage, pas un blocage de statut.
-  colis.statut = colis.geocode.status === "ok" ? "pret" : "a_verifier";
+  // Jamais "pret" impose : un colis livre reste livre, un colis en tournee y
+  // reste (voir statutApresGeocodage).
+  colis.statut = statutApresGeocodage(colis.statut, colis.geocode.status === "ok");
 
   await saveColis(colis);
   emit("colis:saved", { colis });
@@ -646,7 +649,7 @@ function renderGeocodePicker(container, colis, { onSaved }) {
   async function acceptEntry(entry) {
     colis.geocode = { status: "ok", lat: entry.lat, lon: entry.lon, candidates: [] };
     colis.adresseAffichage = formatEntry(entry);
-    colis.statut = "pret"; // adresse confirmee ici (choix manuel/candidat) -> le nom n'est pas bloquant
+    colis.statut = statutApresGeocodage(colis.statut, true); // adresse confirmee ici (choix manuel/candidat) -> le nom n'est pas bloquant
     await saveColis(colis);
     emit("colis:saved", { colis });
     await warnIfFavoriMatch(colis);
@@ -659,7 +662,7 @@ function renderGeocodePicker(container, colis, { onSaved }) {
   // l'entreprise) pour l'affichage.
   async function acceptManualCoords(lat, lon) {
     colis.geocode = { status: "ok", lat, lon, candidates: [], manual: true };
-    colis.statut = "pret";
+    colis.statut = statutApresGeocodage(colis.statut, true);
     await saveColis(colis);
     emit("colis:saved", { colis });
     await warnIfFavoriMatch(colis);

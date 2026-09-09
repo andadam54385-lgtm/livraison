@@ -206,6 +206,25 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
 - **Statuts colis** : `a_verifier` → `pret` → `en_tournee` → `livre` **ou** `echec`
   (nouveau, avec motif libre — distinct de `a_verifier`, qui est une alerte de qualité
   géocodage/OCR, pas un statut de livraison).
+  **Un (re)géocodage ne fixe plus jamais « prêt » d'office** (build 135,
+  `statutApresGeocodage` dans `colis-store.js`, testé) : « Corriger » sur un colis livré
+  le laissait `livre` côté arrêt mais repassait le colis `pret` — il ressortait dans la
+  préparation du lendemain (« des colis ne se sont pas enlevés quand je les ai modifiés
+  après avoir optimisé », « à la fin il en restait 3 alors que je les avais livrés »).
+  Règle : `livre`/`echec` sont acquis ; `en_tournee` reste `en_tournee` si l'adresse
+  tient, sinon `a_verifier` ; le reste devient `pret`/`a_verifier` comme avant. Les trois
+  points de sauvegarde de `scan-ui.js` (géocodage auto, choix d'un candidat, coordonnées
+  collées) passent par là — ne pas réintroduire un `statut = "pret"` en dur.
+  **Recalcul en place** (builds 132–134) : `pickRecalcEligibles`
+  (`js/routing/recalc-eligibles.js`, testé) ne retrie que les arrêts `a_livrer` de la
+  tournée courante plus les `pret` scannés entre-temps — jamais les orphelins
+  `en_tournee` hors tournée ; la carte repart du point GPS du retri.
+- **Géocodage : mots porteurs** (build 135, `match-address.js`). Retour terrain Onville :
+  « 33 GORZE RUE » (ordre du terminal, type de voie en fin) sortait « 33 Grande Rue » —
+  même longueur, même fin, la distance d'édition préférait la mauvaise voie. Un candidat
+  dont aucun mot porteur (tout sauf types de voie et articles, `motsPorteurs`) ne ressemble
+  (≥ 0,5) à un mot porteur de la recherche voit sa similarité de rue multipliée par 0,6.
+  Jamais de bonus dans l'autre sens. Cas réels dans `match-address.test.mjs`.
 - **4 couleurs sémantiques strictes** (voir `css/app.css`) : livré=vert, échec=rouge,
   avant12h=orange clair, à_livrer=neutre (couleur d'accent bleu). Mode clair/sombre auto
   (`prefers-color-scheme`, + override `data-theme`).

@@ -74,5 +74,42 @@ assert(
   );
 }
 
+// Regression (retour terrain, Onville) : "33 GORZE RUE" -- ordre du terminal,
+// type de voie en fin -- etait geocode "33 Grande Rue" au lieu de "33 Rue de
+// Gorze". Extrait reel de la BAN d'Onville (54890).
+{
+  const onville = (n, r) => ({ n, rep: "", r, rn: normalizeStreet(r), cp: "54890", c: "Onville", cn: "onville" });
+  const poolOnville = [
+    onville("33", "Grande Rue"),
+    onville("33", "Rue de Gorze"),
+    onville("14", "Grande Rue"),
+    onville("14", "Rue de Gorze"),
+    onville("26", "Grande Rue"),
+  ];
+  const communeOnville = normalizeCity("Onville");
+  for (const numero of ["33", "14"]) {
+    const scored = scoreCandidates(poolOnville, { normRue: normalizeStreet("GORZE RUE"), normCommune: communeOnville, numero });
+    assert(
+      scored[0].entry.r === "Rue de Gorze" && scored[0].entry.n === numero,
+      `"${numero} GORZE RUE" doit donner "${numero} Rue de Gorze" (obtenu: ${scored[0].entry.n} ${scored[0].entry.r})`
+    );
+    const grandeRue = scored.find((s) => s.entry.r === "Grande Rue" && s.entry.n === numero);
+    // Avant le correctif, Grande Rue DEVANCAIT Rue de Gorze (0.956 vs 0.933) ;
+    // l'ecart attendu ici est celui qu'apporte la penalite de mots porteurs
+    // sur la seule part "similarite de rue" du score (les bonus numero et
+    // commune, identiques des deux cotes, ne bougent pas).
+    assert(scored[0].score > grandeRue.score + 0.1, `... avec un ecart net sur "${numero} Grande Rue" (${scored[0].score.toFixed(3)} vs ${grandeRue.score.toFixed(3)})`);
+  }
+  // L'ordre BAN reste evidemment reconnu, et "Grande Rue" reste trouvable
+  // quand c'est bien elle qu'on cherche.
+  const direct = scoreCandidates(poolOnville, { normRue: normalizeStreet("Rue de Gorze"), normCommune: communeOnville, numero: "33" });
+  assert(direct[0].entry.r === "Rue de Gorze", `"33 Rue de Gorze" inchange (obtenu: ${direct[0].entry.r})`);
+  const grande = scoreCandidates(poolOnville, { normRue: normalizeStreet("GRANDE RUE"), normCommune: communeOnville, numero: "33" });
+  assert(grande[0].entry.r === "Grande Rue", `"33 GRANDE RUE" donne bien Grande Rue (obtenu: ${grande[0].entry.r})`);
+  // Faute OCR sur le mot porteur : toujours rattrapee (pas de faux ecart).
+  const ocr = scoreCandidates(poolOnville, { normRue: normalizeStreet("GORSE RUE"), normCommune: communeOnville, numero: "33" });
+  assert(ocr[0].entry.r === "Rue de Gorze", `"GORSE RUE" (faute OCR) donne encore Rue de Gorze (obtenu: ${ocr[0].entry.r})`);
+}
+
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);
 process.exit(failures === 0 ? 0 : 1);

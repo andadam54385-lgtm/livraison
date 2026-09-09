@@ -1,7 +1,7 @@
 // Tests unitaires des formatteurs d'adresse purs de colis-store.js (aucun
 // acces IndexedDB necessaire pour ces deux fonctions). Execute directement
 // via `node js/scan/colis-store.test.mjs`, comme parse-ups-label.test.mjs.
-import { formatAdresseAffichage, formatAdresseForNav } from "./colis-store.js";
+import { formatAdresseAffichage, formatAdresseForNav, statutApresGeocodage } from "./colis-store.js";
 
 let failures = 0;
 
@@ -61,6 +61,22 @@ console.log("\n=== Cas limite : geocode.manual, adresseRaw vide ===");
   };
   assertEqual(formatAdresseAffichage(colis), "(adresse à vérifier)", "affichage (repli texte vide)");
   assertEqual(formatAdresseForNav(colis), null, "nav (toujours null pour geocode.manual, quel que soit adresseRaw)");
+}
+
+// Statut apres (re)geocodage -- retour terrain : un colis LIVRE corrige apres
+// coup repassait "pret" et ressortait dans la preparation du lendemain
+// ("il en restait 3 alors que je les avais livres").
+{
+  assertEqual(statutApresGeocodage("livre", true), "livre", "livre + adresse corrigee : reste livre");
+  assertEqual(statutApresGeocodage("livre", false), "livre", "livre + adresse introuvable : reste livre quand meme");
+  assertEqual(statutApresGeocodage("echec", true), "echec", "echec : reste echec (le report passe par 'Reporter')");
+  assertEqual(statutApresGeocodage("en_tournee", true), "en_tournee", "en tournee + adresse ok : reste en tournee (pas un colis neuf)");
+  assertEqual(statutApresGeocodage("en_tournee", false), "a_verifier", "en tournee + adresse introuvable : a verifier");
+  assertEqual(statutApresGeocodage("pret", true), "pret", "pret + ok : pret");
+  assertEqual(statutApresGeocodage("a_verifier", true), "pret", "a verifier + ok : devient pret");
+  assertEqual(statutApresGeocodage("a_verifier", false), "a_verifier", "a verifier + introuvable : reste a verifier");
+  assertEqual(statutApresGeocodage(undefined, true), "pret", "colis neuf sans statut + ok : pret");
+  assertEqual(statutApresGeocodage(undefined, false), "a_verifier", "colis neuf sans statut + introuvable : a verifier");
 }
 
 console.log(`\n${failures === 0 ? "TOUS LES TESTS SONT PASSES" : `${failures} ECHEC(S)`}`);

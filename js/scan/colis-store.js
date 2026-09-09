@@ -99,6 +99,23 @@ export const AVANT12H_OPTIONS = [
   { value: "oui", label: "Avant 12h", icon: "clock" },
 ];
 
+// Statut d'un colis APRES un (re)geocodage -- correction d'adresse, choix
+// d'un candidat, coordonnees collees. Bug reel corrige ici (retour terrain :
+// "des colis ne se sont pas enleves quand je les ai modifies apres avoir
+// optimise la tournee", "a la fin il en restait 3 alors que je les avais
+// livres") : la sauvegarde remettait TOUJOURS "pret" des que l'adresse etait
+// reconnue, y compris sur un colis deja livre ou deja dans la tournee. Un
+// colis livre corrige apres coup repassait "pret" et ressortait dans la
+// preparation du lendemain. Le statut de LIVRAISON (livre/echec) est un
+// fait acquis qu'une correction d'adresse ne remet pas en cause ; un colis
+// en tournee y reste tant que son adresse tient. Fonction pure, testee dans
+// colis-store.test.mjs.
+export function statutApresGeocodage(statutActuel, geocodeOk) {
+  if (statutActuel === "livre" || statutActuel === "echec") return statutActuel;
+  if (!geocodeOk) return "a_verifier";
+  return statutActuel === "en_tournee" ? "en_tournee" : "pret";
+}
+
 export function isRamasse(colis) {
   return colis?.operation === "ramasse";
 }

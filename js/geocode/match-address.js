@@ -51,6 +51,59 @@ export function streetSimilarity(a, b) {
 
 const CONFIDENCE_THRESHOLD = 0.72;
 
+// Bug reel corrige ici (retour terrain, Onville) : "33 GORZE RUE" -- l'ordre
+// du terminal, type de voie en fin -- etait geocode "33 Grande Rue" au lieu
+// de "33 Rue de Gorze", dans la bonne commune. streetSimilarity, lettre a
+// lettre, preferait "grande rue" : meme longueur, meme fin "rue", quatre
+// lettres communes -- alors que le seul mot qui identifie la voie, "gorze",
+// n'y figure pas. Les mots de LIAISON (rue, de, la...) pesent autant que le
+// nom propre dans une distance d'edition, et l'inversion "gorze rue" /
+// "rue de gorze" coute cher a Levenshtein.
+// On extrait donc les mots PORTEURS de chaque cote (tout sauf les types de
+// voie et les articles/prepositions) : un candidat dont AUCUN mot porteur ne
+// ressemble a un mot porteur de la recherche voit sa similarite de rue
+// reduite. Jamais de bonus dans l'autre sens (un "place de l'eglise" ne doit
+// pas rattraper "rue de l'eglise" parce qu'ils partagent "eglise") : la
+// distance d'edition garde le dernier mot entre candidats plausibles, on ne
+// fait qu'ecarter ceux qui parlent d'une autre voie.
+const MOTS_DE_VOIE = new Set([
+  "rue", "avenue", "boulevard", "route", "chemin", "impasse", "allee", "place", "cours", "quai", "square",
+  "ruelle", "voie", "faubourg", "lotissement", "residence", "hameau", "zone", "zi", "za", "zac", "passage",
+  "sentier", "chaussee", "montee", "promenade", "esplanade", "mail", "clos", "venelle", "traverse", "cite",
+  "lieu", "dit", "lieudit", "rd", "cd", "rn", "d", "n",
+]);
+const MOTS_DE_LIAISON = new Set(["de", "du", "des", "la", "le", "les", "l", "et", "a", "au", "aux", "en", "sur", "sous", "par", "pour"]);
+const CONTENT_MATCH_MIN = 0.5;
+const CONTENT_MISMATCH_FACTOR = 0.6;
+
+export function motsPorteurs(normalized) {
+  return String(normalized || "")
+    .split(/[\s'-]+/)
+    .filter((t) => t && !MOTS_DE_VOIE.has(t) && !MOTS_DE_LIAISON.has(t));
+}
+
+function tokenSimilarity(a, b) {
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  return maxLen === 0 ? 1 : 1 - levenshtein(a, b) / maxLen;
+}
+
+// Meilleure ressemblance entre un mot porteur de la recherche et un mot
+// porteur du candidat ; null si l'un des deux n'a aucun mot porteur (rien a
+// comparer, on ne penalise pas).
+export function contentMatch(queryTokens, candidateNormalized) {
+  const candTokens = motsPorteurs(candidateNormalized);
+  if (queryTokens.length === 0 || candTokens.length === 0) return null;
+  let best = 0;
+  for (const q of queryTokens) {
+    for (const c of candTokens) {
+      const s = tokenSimilarity(q, c);
+      if (s > best) best = s;
+    }
+  }
+  return best;
+}
+
 // Bug reel corrige ici (retour terrain : "6 rue de l'eglise" a Ansauville
 // remontait Rembercourt-sur-Mad, meme apres correction manuelle repetee) :
 // "Rue de l'Eglise"/"Place de l'Eglise" existe dans des dizaines de communes
@@ -113,8 +166,13 @@ export function looseCommune(s) {
 // que d'aller le chercher lui-meme.
 export function scoreCandidates(pool, { normRue, normCommune, numero }) {
   const wanted = splitNumeroRep(numero);
+  const queryTokens = motsPorteurs(normRue);
   const scored = pool.map((entry) => {
     let score = streetSimilarity(normRue, entry.rn);
+    // Aucun mot porteur en commun : c'est une autre voie, quelle que soit la
+    // ressemblance des mots de liaison (voir MOTS_DE_VOIE).
+    const contenu = contentMatch(queryTokens, entry.rn);
+    if (contenu != null && contenu < CONTENT_MATCH_MIN) score *= CONTENT_MISMATCH_FACTOR;
     if (wanted.n && entry.n && wanted.n === String(entry.n).trim()) {
       score += NUMERO_MATCH_BONUS;
       // Numero identique : departage par le suffixe (bis/A/B...), frequent
