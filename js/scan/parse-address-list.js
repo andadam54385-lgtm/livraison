@@ -305,7 +305,16 @@ function stripInterfaceNoise(ocrLines) {
     // Ce qui reste d'un badge apres nettoyage ("8000 | 0+2 3" -> "3") n'est
     // jamais un contenu : un chiffre isole devenait le debut de la rue
     // suivante ("3 5 SAINT MANSUY RUE").
-    if (/^\d{1,4}$/.test(cleaned)) cleaned = "";
+    // Point/virgule collee au chiffre comprise ("2." en tete de la 2e photo
+    // d'une liste, terrain 2026-09-08) : sans ca, la ligne commencait par un
+    // chiffre, passait pour une rue et se collait devant la vraie ("2. 7 BAR
+    // LE DUC ROUT") -- l'arret devenait un FAUX doublon du meme arret vu sur
+    // la photo precedente, avec un numero de voie different.
+    // Meme chose pour la QUEUE d'un badge que l'OCR a mise sur sa propre
+    // ligne ("0+1" sous "8000 |", terrain 2026-09-08) : le motif de badge
+    // ci-dessus ne la reconnait plus une fois separee de ses 4 chiffres, et
+    // elle finissait dans la rue ("12 LIBERATION RUE 0+1 MEUSE").
+    if (/^\d{1,4}\s*[.,;:]?$/.test(cleaned) || /^\d{1,2}\s*\+\s*\d{1,2}$/.test(cleaned)) cleaned = "";
     kept.push({ ...l, text: cleaned, isClientStart });
   }
 
@@ -329,6 +338,20 @@ const STREET_KEYWORDS = [
   // conditionnee ("Lt" = lieutenant dans la BAN) : voir normalize-address.js.
   "LT",
 ];
+
+// Un mot-cle COURT seul sur sa ligne n'ouvre pas une adresse : c'est presque
+// toujours un residu d'icone du terminal ("Qu", la loupe, terrain
+// 2026-09-08). Classe en rue, il avalait ensuite le nom du client ET la vraie
+// rue en continuation ("Qu Adrien Harelle 7 HAUTE RUE", nom perdu). En
+// CONTINUATION d'une rue deja ouverte la meme ligne reste legitime et le
+// repli de fin de boucle la rattache normalement ("3 GEORGES BEAUMONT" /
+// "ALL" pour une allee).
+const MAX_MOT_VOIE_SEUL = 3;
+
+function isLoneShortStreetWord(line) {
+  const mot = line.trim();
+  return mot.length <= MAX_MOT_VOIE_SEUL && STREET_KEYWORDS.includes(mot.toUpperCase());
+}
 
 // Mot entier, jamais une sous-chaine (meme raison que parse-ups-label.js :
 // "AV" dans "DAVID", "BD" dans "ABDALLAH", "VOIE" dans "SAVOIE"...).
@@ -356,11 +379,19 @@ const MAX_VILLE_WORDS = 5;
 // et ne commence qu'UNE seule commune de la base, mot entier ("SAINT" en
 // commencerait des dizaines, "BAR" est un mot de trop de communes).
 const MIN_PREFIXE_COMMUNE = 6;
+// Seuil abaisse quand la ligne porte AUSSI un code postal : "DIEUE 55320"
+// (Dieue-sur-Meuse, terrain 2026-09-08) etait refuse pour une lettre de trop
+// peu, la commune finissait collee a la rue ("114 RATTENTOUT RUE DIEUE") et
+// l'arret perdait sa ville. Le CP sur la meme ligne est la corroboration qui
+// manque a une ligne nue : sans lui, "PETIT" ou "GRAND" (premiers mots de
+// communes reelles du secteur, mais aussi noms de famille tres courants)
+// pourraient passer pour une commune sur une simple ligne de nom.
+const MIN_PREFIXE_COMMUNE_AVEC_CP = 5;
 
-function isKnownCity(normalized, knownCities) {
+function isKnownCity(normalized, knownCities, minPrefixe = MIN_PREFIXE_COMMUNE) {
   if (!normalized || !knownCities || knownCities.size === 0) return false;
   if (knownCities.has(normalized)) return true;
-  if (normalized.length < MIN_PREFIXE_COMMUNE) return false;
+  if (normalized.length < minPrefixe) return false;
   const prefixe = normalized + " ";
   let trouvee = 0;
   for (const nom of knownCities) {
@@ -369,7 +400,7 @@ function isKnownCity(normalized, knownCities) {
   return trouvee === 1;
 }
 
-function peelKnownVille(text, knownCities) {
+function peelKnownVille(text, knownCities, minPrefixe = MIN_PREFIXE_COMMUNE) {
   if (!knownCities || knownCities.size === 0) return null;
   const words = text.split(/\s+/).filter(Boolean);
   // Du plus LONG au plus court : "BAR LE DUC" doit gagner contre "DUC". Le
@@ -379,7 +410,7 @@ function peelKnownVille(text, knownCities) {
   for (let k = Math.min(MAX_VILLE_WORDS, words.length); k >= 1; k--) {
     const candidate = words.slice(words.length - k).join(" ");
     const normalized = looseCommune(normalizeCity(expandSaint(candidate)));
-    if (isKnownCity(normalized, knownCities)) {
+    if (isKnownCity(normalized, knownCities, minPrefixe)) {
       return { rest: words.slice(0, words.length - k).join(" "), ville: candidate };
     }
   }
@@ -433,13 +464,13 @@ function findCpToken(text, knownCps) {
 
 // Commune connue en TETE d'un texte (le miroir de peelKnownVille) : "BAR LE
 // DUC 12:00" -> "BAR LE DUC". Null si la base ne la connait pas.
-function leadingKnownVille(text, knownCities) {
+function leadingKnownVille(text, knownCities, minPrefixe = MIN_PREFIXE_COMMUNE) {
   if (!text || !knownCities || knownCities.size === 0) return null;
   const words = text.split(/\s+/).filter(Boolean);
   for (let k = Math.min(MAX_VILLE_WORDS, words.length); k >= 1; k--) {
     const candidate = words.slice(0, k).join(" ");
     const normalized = looseCommune(normalizeCity(expandSaint(candidate)));
-    if (isKnownCity(normalized, knownCities)) return candidate;
+    if (isKnownCity(normalized, knownCities, minPrefixe)) return candidate;
   }
   return null;
 }
@@ -454,7 +485,10 @@ function splitEmbeddedCpVille(line, knownCities, knownCps) {
     // La base BAN d'abord : une commune CONNUE de part ou d'autre du CP
     // l'emporte sur la forme brute de la ligne ("COMMERCY 55200 q" : "q"
     // ressemble a une ville pour une regex, pas pour la base).
-    const villeApres = leadingKnownVille(after, knownCities);
+    // Le CP est trouve : c'est LA ligne commune+CP de la fiche, ce qui
+    // autorise un prefixe de commune plus court (voir
+    // MIN_PREFIXE_COMMUNE_AVEC_CP).
+    const villeApres = leadingKnownVille(after, knownCities, MIN_PREFIXE_COMMUNE_AVEC_CP);
     if (villeApres) {
       const cpVille = `${cp} ${villeApres}`;
       return before ? [before, cpVille] : [cpVille];
@@ -464,7 +498,7 @@ function splitEmbeddedCpVille(line, knownCities, knownCps) {
     // Sans ce decoupage la commune restait DANS la rue : l'adresse ne pouvait
     // pas etre geocodee et le colis finissait "a verifier" alors que tout
     // etait pourtant parfaitement lisible.
-    const peeled = peelKnownVille(before, knownCities);
+    const peeled = peelKnownVille(before, knownCities, MIN_PREFIXE_COMMUNE_AVEC_CP);
     if (peeled) {
       const cpVille = `${cp} ${peeled.ville}`;
       return peeled.rest ? [peeled.rest, cpVille] : [cpVille];
@@ -582,12 +616,27 @@ function isPlausibleCp(cp, knownCps) {
 // separees, aucune des deux n'est une commune connue et la fiche perdait sa
 // ville. Seul un tiret colle a une lettre compte : "12:10 -" (creneau coupe)
 // se termine par un tiret precede d'un espace et n'est jamais recolle.
-function mergeHyphenWraps(rawLines) {
+// Le meme repli, mais coupe EN PLEIN MOT et non sur un tiret : "COUSANCES-LE"
+// / "S-TRICONVILLE" (Cousances-les-Triconville, terrain 2026-09-08). Aucune
+// des deux moities ne se termine ni ne commence par un tiret, la regle
+// ci-dessus ne voyait rien, et la commune partait dans la rue. Ici la seule
+// forme ne suffit pas a trancher : on ne recolle QUE si la base BAN reconnait
+// le resultat comme une commune -- jamais sur une simple ressemblance.
+const FRAGMENT_AVEC_TIRET_RE = /^[a-zà-ÿ]{1,2}-[a-zà-ÿ]/i;
+
+function mergeHyphenWraps(rawLines, knownCities) {
   const out = [];
   for (const raw of rawLines) {
     const line = String(raw || "").trim();
     const precedente = out.length > 0 ? out[out.length - 1] : null;
-    if (precedente && line && (/[a-zà-ÿ]-$/i.test(precedente) || /^-[a-zà-ÿ]/i.test(line))) {
+    const recolleSurTiret = precedente && line && (/[a-zà-ÿ]-$/i.test(precedente) || /^-[a-zà-ÿ]/i.test(line));
+    const recolleEnPleinMot =
+      precedente &&
+      line &&
+      FRAGMENT_AVEC_TIRET_RE.test(line) &&
+      /[a-zà-ÿ]$/i.test(precedente) &&
+      isKnownCity(looseCommune(normalizeCity(expandSaint(precedente + line))), knownCities);
+    if (recolleSurTiret || recolleEnPleinMot) {
       out[out.length - 1] = precedente + line;
     } else {
       out.push(line);
@@ -597,7 +646,7 @@ function mergeHyphenWraps(rawLines) {
 }
 
 export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps = new Set() } = {}) {
-  const lines = mergeHyphenWraps(rawLines).flatMap((l) => splitEmbeddedCpVille(l, knownCities, knownCps));
+  const lines = mergeHyphenWraps(rawLines, knownCities).flatMap((l) => splitEmbeddedCpVille(l, knownCities, knownCps));
   const result = { names: [], streets: [], cp: null, ville: null };
   let lastCategory = null;
 
@@ -624,7 +673,7 @@ export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps
       continue;
     }
 
-    const hasStreetWord = lineHasStreetWord(line);
+    const hasStreetWord = lineHasStreetWord(line) && !isLoneShortStreetWord(line);
     const startsWithNumber = /^\d/.test(line);
     if (startsWithNumber || hasStreetWord) {
       result.streets.push(line);

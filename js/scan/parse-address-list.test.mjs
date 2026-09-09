@@ -742,6 +742,102 @@ console.log("\n=== Cas 21 : 'LT' = lotissement (retour terrain) ===");
   assertEqual(enTete[0] && enTete[0].rue, "LT DU CHENE", "(b) 'LT' en tete reconnu comme rue");
 }
 
+console.log("\n=== Cas 22 : compte rendu photos reel du 2026-09-08 (9 images, 35 fiches) ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const villes22 = [
+    ["Dieue-sur-Meuse", "55320"], ["Cousances-les-Triconville", "55500"], ["Cousances-les-Forges", "55170"],
+    ["Ranzieres", "55300"], ["Chauvoncourt", "55300"], ["Rupt-en-Woevre", "55320"],
+    ["Petit-Failly", "54260"], ["Grand-Failly", "54260"],
+  ];
+  const knownCities22 = new Set(villes22.map(([c]) => looseCommune(normalizeCity(c))));
+  const opts22 = { knownCities: knownCities22, knownCps: new Set(villes22.map(([, cp]) => cp)) };
+
+  // (a) commune abregee a 5 lettres, avec son CP sur la meme ligne : "DIEUE"
+  // pour Dieue-sur-Meuse. Refusee pour une lettre de trop peu, elle finissait
+  // DANS la rue et l'arret partait sans ville.
+  const dieue = parseAddressList([
+    R(1630, 1705, "UN TEMPS POUR SOI 8000 | 0+1 v"),
+    R(1680, 1713, "3 GEORGES BEAUMONT"),
+    R(1729, 1758, "ALL"),
+    R(1778, 1810, "DIEUE 55320"),
+  ], opts22);
+  assertEqual(dieue.length, 1, "(a) une fiche");
+  assertEqual(dieue[0] && dieue[0].ville, "DIEUE", "(a) commune de 5 lettres acceptee quand le CP est sur la ligne");
+  assertEqual(dieue[0] && dieue[0].rue, "3 GEORGES BEAUMONT ALL", "(a) la rue garde son type de voie replie, sans la commune");
+  assertEqual(dieue[0] && dieue[0].nom, "UN TEMPS POUR SOI", "(a) nom");
+
+  // (a-bis) le garde-fou : SANS CP sur la ligne, un mot de 5 lettres qui
+  // commence une commune reste un nom. "PETIT" (Petit-Failly) est aussi l'un
+  // des noms de famille les plus repandus.
+  const petit = parseAddressList([
+    R(0, 30, "PETIT"),
+    R(34, 64, "3 HAUTE RUE"),
+    R(68, 98, "RANZIERES 55300"),
+  ], opts22);
+  assertEqual(petit[0] && petit[0].nom, "PETIT", "(a-bis) 'PETIT' seul reste un nom, pas la commune Petit-Failly");
+  assertEqual(petit[0] && petit[0].ville, "RANZIERES", "(a-bis) la vraie commune est bien lue");
+
+  // (b) commune coupee EN PLEIN MOT, pas sur le tiret : "COUSANCES-LE" +
+  // "S-TRICONVILLE". Recollee seulement parce que la base reconnait le
+  // resultat.
+  const cousances = parseAddressList([
+    R(926, 958, "1 ULYSSE GUINARD RUE"),
+    R(976, 1008, "COUSANCES-LE"),
+    R(1027, 1059, "S-TRICONVILLE"),
+    R(1078, 1108, "55500"),
+  ], opts22);
+  assertEqual(cousances[0] && cousances[0].ville, "COUSANCES-LES-TRICONVILLE", "(b) commune recollee en plein mot");
+  assertEqual(cousances[0] && cousances[0].rue, "1 ULYSSE GUINARD RUE", "(b) la rue ne contient plus la commune");
+  // Jamais sur la seule forme : un fragment qui ne donne aucune commune connue
+  // reste une ligne a part.
+  const pasUneCommune = parseAddressList([
+    R(0, 30, "1 ULYSSE GUINARD RUE"),
+    R(34, 64, "MARTIN-LE"),
+    R(68, 98, "S-DUPONT"),
+    R(102, 132, "55500"),
+  ], opts22);
+  assertEqual(
+    (pasUneCommune[0] && pasUneCommune[0].ville) || null,
+    null,
+    "(b) un faux fragment n'est jamais recolle en commune"
+  );
+
+  // (c) residu d'icone "Qu" (la loupe) seul sur sa ligne : "QU" est un
+  // mot-cle de voie (quai), la ligne passait donc pour une rue et avalait le
+  // nom du client puis la vraie rue.
+  const icone = parseAddressList([
+    R(1383, 1427, "Qu"),
+    R(1455, 1483, "Adrien Harelle"),
+    R(1501, 1528, "7 HAUTE RUE"),
+    R(1546, 1573, "RANZIERES 55300"),
+  ], opts22);
+  assertEqual(icone[0] && icone[0].nom, "Adrien Harelle", "(c) le nom n'est plus avale par le residu d'icone");
+  assertEqual(icone[0] && icone[0].rue, "7 HAUTE RUE", "(c) rue propre");
+  // Le meme mot-cle court reste une CONTINUATION valable de rue (cas (a)).
+
+  // (d) "2." (numero de page/residu de badge) seul sur sa ligne, en tete de la
+  // photo suivante : il commencait par un chiffre, passait pour une rue et se
+  // collait devant la vraie -- l'arret devenait un faux doublon de lui-meme,
+  // avec un autre numero de voie.
+  const residuChiffre = parseAddressList([
+    R(697, 716, "2."),
+    R(742, 825, "7 BAR LE DUC ROUT 8000 | 041 =)"),
+    R(794, 832, "CHAUVONCOURT 55300"),
+  ], opts22);
+  assertEqual(residuChiffre[0] && residuChiffre[0].rue, "7 BAR LE DUC ROUT", "(d) le residu '2.' ne fabrique plus un faux numero de voie");
+
+  // (e) queue de badge isolee sur sa ligne par l'OCR ("0+1" separe de ses
+  // "8000 |") : le motif de badge ne la reconnait plus, elle partait dans la
+  // rue ("12 LIBERATION RUE 0+1 MEUSE").
+  const queueBadge = parseAddressList([
+    R(1466, 1498, "12 LIBERATION RUE"),
+    R(1492, 1522, "0+1"),
+    R(1571, 1605, "RANZIERES 55300"),
+  ], opts22);
+  assertEqual(queueBadge[0] && queueBadge[0].rue, "12 LIBERATION RUE", "(e) la queue de badge ne pollue plus la rue");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)

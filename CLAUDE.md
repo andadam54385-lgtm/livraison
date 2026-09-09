@@ -173,6 +173,26 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   collé au chiffre de l'icône (« 552100 » → 55210, base requise), commune repliée sur son
   tiret recollée (`mergeHyphenWraps`), commune abrégée reconnue par préfixe unique ≥ 6 lettres
   (`isKnownCity`, « HEUDICOURT »).
+- **Compte rendu photos du 2026-09-08 (9 images, 36 arrêts au terminal)** — 5 défauts
+  distincts corrigés au build 137, tous rejoués dans `parse-address-list.test.mjs` (cas 22)
+  et vérifiés bout en bout (rejeu des 9 images + dédup : 35 fiches dont un faux doublon →
+  34 fiches propres) :
+  1. **Commune abrégée à 5 lettres** (« DIEUE 55320 » pour Dieue-sur-Meuse) refusée par
+     `MIN_PREFIXE_COMMUNE` = 6 : elle finissait collée à la rue (« 114 RATTENTOUT RUE
+     DIEUE ») et l'arrêt partait sans ville. Seuil abaissé à 5 **seulement quand la ligne
+     porte aussi le CP** (`MIN_PREFIXE_COMMUNE_AVEC_CP`) — sans cette corroboration,
+     « PETIT » ou « GRAND » (premiers mots de communes réelles, et noms de famille très
+     courants) passeraient pour des communes sur une ligne de nom.
+  2. **Commune coupée en plein mot**, pas sur le tiret (« COUSANCES-LE » / « S-TRICONVILLE »)
+     : `mergeHyphenWraps` ne voyait aucun tiret aux extrémités. Recollage seulement si la
+     base BAN reconnaît le résultat — jamais sur la forme seule.
+  3. **Résidu d'icône « Qu »** (la loupe) seul sur sa ligne : « QU » étant un mot-clé de voie
+     (quai), la ligne passait pour une rue et avalait le nom du client puis la vraie rue
+     (« Qu Adrien Harelle 7 HAUTE RUE », nom perdu). Un mot-clé court SEUL n'ouvre plus une
+     adresse, mais reste une continuation valable (« 3 GEORGES BEAUMONT » / « ALL »).
+  4. **« 2. » en tête de la photo suivante** : commençait par un chiffre → pris pour une rue
+     et collé devant la vraie, fabriquant un faux doublon du même arrêt avec un autre numéro.
+  5. **Queue de badge isolée** (« 0+1 » séparé de ses « 8000 | ») : atterrissait dans la rue.
 - **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
   `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
   vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE
