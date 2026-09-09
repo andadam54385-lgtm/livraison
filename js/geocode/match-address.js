@@ -71,6 +71,10 @@ const MOTS_DE_VOIE = new Set([
   "ruelle", "voie", "faubourg", "lotissement", "residence", "hameau", "zone", "zi", "za", "zac", "passage",
   "sentier", "chaussee", "montee", "promenade", "esplanade", "mail", "clos", "venelle", "traverse", "cite",
   "lieu", "dit", "lieudit", "rd", "cd", "rn", "d", "n",
+  // Formes abregees de "lotissement" : "lt" quand normalizeStreet ne l'a pas
+  // expanse (voie qui porte deja un type, ex "rue du lt colonel"), "lot" que
+  // la BAN elle-meme utilise dans 8 libelles du secteur.
+  "lt", "lot",
 ]);
 const MOTS_DE_LIAISON = new Set(["de", "du", "des", "la", "le", "les", "l", "et", "a", "au", "aux", "en", "sur", "sous", "par", "pour"]);
 const CONTENT_MATCH_MIN = 0.5;

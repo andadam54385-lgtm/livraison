@@ -22,6 +22,7 @@ const STREET_KEYWORDS = [
   "ALLEE", "ALLÉE", "ZONE", "ZI", "ZAC", "LIEU-DIT", "LIEU DIT", "HAMEAU",
   "LOTISSEMENT", "RESIDENCE", "RÉSIDENCE", "PLACE", "COURS", "QUAI", "VOIE",
   "TER", "BIS", "FAUBOURG",
+  "LT", // lotissement abrege (voir normalize-address.js pour l'expansion)
 ];
 
 // Mot entier, jamais une sous-chaine : plusieurs mots-cles ci-dessus sont

@@ -323,6 +323,11 @@ const STREET_KEYWORDS = [
   // entiere passait alors a la trappe faute d'adresse exploitable). Le
   // terminal ecrit le type de voie APRES le nom, en abrege.
   "IMP", "ALL", "AVE", "BLVD", "BLV", "CHMN", "RTE", "PL", "SQ", "CRS", "QU",
+  // "LT" = lotissement (retour terrain). Sans numero de voie -- frequent pour
+  // un lotissement -- une ligne "LT LES ROSES" ne demarrait aucune adresse.
+  // L'expansion vers "lotissement" pour le geocodage est faite ailleurs, et
+  // conditionnee ("Lt" = lieutenant dans la BAN) : voir normalize-address.js.
+  "LT",
 ];
 
 // Mot entier, jamais une sous-chaine (meme raison que parse-ups-label.js :

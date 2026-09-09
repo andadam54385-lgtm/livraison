@@ -711,6 +711,37 @@ console.log("\n=== Cas 20 : recadrages reels d'un terminal (terrain 2026-09-04) 
   assertEqual(parseAddressList([R(0, 20, "11 ARNAY RUE"), R(24, 44, "VIEVILLE 552100")])[0].cp, null, "(c) '552100' sans base : pas un CP");
 }
 
+console.log("\n=== Cas 21 : 'LT' = lotissement (retour terrain) ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const opts21 = {
+    knownCities: new Set(["Onville", "Vandieres"].map((c) => looseCommune(normalizeCity(c)))),
+    knownCps: new Set(["54890"]),
+  };
+
+  // Un lotissement n'a souvent PAS de numero de voie : sans le mot-cle "LT",
+  // la ligne ne demarrait aucune adresse (ni chiffre en tete, ni type de voie
+  // reconnu) et partait en continuation du nom -- la fiche se retrouvait sans
+  // rue exploitable.
+  const sansNumero = parseAddressList([
+    R(0, 40, "MARTIN SOPHIE 8000 | 0+1 D"),
+    R(44, 84, "LES ROSES LT"),
+    R(88, 128, "ONVILLE 54890 12:30 - 14:30 ®"),
+  ], opts21);
+  assertEqual(sansNumero.length, 1, "(a) la fiche est retenue");
+  assertEqual(sansNumero[0] && sansNumero[0].rue, "LES ROSES LT", "(a) la ligne 'LT' est bien la rue");
+  assertEqual(sansNumero[0] && sansNumero[0].nom, "MARTIN SOPHIE", "(a) le nom n'a pas avale la ligne du lotissement");
+  assertEqual(sansNumero[0] && sansNumero[0].ville, "ONVILLE", "(a) commune");
+
+  // Type de voie en tete, toujours sans numero.
+  const enTete = parseAddressList([
+    R(0, 40, "DUPONT JEAN 8000 | 0+1 D"),
+    R(44, 84, "LT DU CHENE"),
+    R(88, 128, "ONVILLE 54890"),
+  ], opts21);
+  assertEqual(enTete[0] && enTete[0].rue, "LT DU CHENE", "(b) 'LT' en tete reconnu comme rue");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)

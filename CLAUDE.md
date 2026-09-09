@@ -225,6 +225,20 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   dont aucun mot porteur (tout sauf types de voie et articles, `motsPorteurs`) ne ressemble
   (≥ 0,5) à un mot porteur de la recherche voit sa similarité de rue multipliée par 0,6.
   Jamais de bonus dans l'autre sens. Cas réels dans `match-address.test.mjs`.
+- **« LT » = lotissement** (build 136, `expandLotissement` dans `normalize-address.js`,
+  plus le mot-clé `LT` dans les deux parsers). Expansion **conditionnelle**, et ce n'est pas
+  du zèle : dans la BAN déployée, les 74 seuls `lt` isolés sont des **lieutenants** (« Rue du
+  Lt Roland Excoffier », « Rue du Lt Colonel Bauclin »). Règle : pas d'expansion si `lt` suit
+  un article (`du`, `de`, `la`…) ou si la voie porte déjà son type (`rue`, `avenue`,
+  `boulevard`, `impasse`, `ruelle`, `faubourg` — liste volontairement courte, les
+  lotissements réels ont « Clos », « Hameau », « Cité » dans leur nom). `lot` n'est **jamais**
+  expansé : la BAN écrit elle-même 8 lotissements « Lot … », dont le `rn` indexé commence par
+  `lot`. **Vérification obligatoire avant toute règle ajoutée ici** : recalculer
+  `normalizeStreet(e.r)` sur les 366 396 entrées de `assets/ban.json.gz` et exiger 0 écart
+  avec le `rn` déployé (fait pour celle-ci) — une expansion qui change une forme déjà indexée
+  rend l'adresse introuvable sans le moindre message d'erreur. Le fichier n'est donc plus un
+  port strict de `data-prep/scripts/lib/ban-normalizer.js` : la référence est le
+  `ban.json.gz` déployé, régénéré avec ce fichier depuis le 2026-07-24.
 - **4 couleurs sémantiques strictes** (voir `css/app.css`) : livré=vert, échec=rouge,
   avant12h=orange clair, à_livrer=neutre (couleur d'accent bleu). Mode clair/sombre auto
   (`prefers-color-scheme`, + override `data-theme`).

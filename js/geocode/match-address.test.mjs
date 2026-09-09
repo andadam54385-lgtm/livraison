@@ -111,5 +111,38 @@ assert(
   assert(ocr[0].entry.r === "Rue de Gorze", `"GORSE RUE" (faute OCR) donne encore Rue de Gorze (obtenu: ${ocr[0].entry.r})`);
 }
 
+// Regression (retour terrain) : "LT" = lotissement sur les listes du terminal.
+// Piege verifie sur la vraie BAN : "Lt" y designe aussi un LIEUTENANT ("Rue du
+// Lt Roland Excoffier" a Sexey-aux-Forges, "Rue du Lt Colonel Bauclin" a
+// Seuil-d'Argonne -- les 74 seuls "lt" isoles des 366 396 entrees), et la BAN
+// abrege elle-meme certains lotissements en "Lot ..." (8 libelles) : ni l'un
+// ni l'autre ne doit bouger, sinon des adresses deja indexees deviennent
+// introuvables. Voir expandLotissement dans normalize-address.js.
+{
+  const eq = (actual, expected, label) => assert(actual === expected, `${label} (obtenu: ${JSON.stringify(actual)})`);
+  eq(normalizeStreet("LT LES ROSES"), "lotissement les roses", '"LT LES ROSES" : type de voie en tete');
+  eq(normalizeStreet("LES ROSES LT"), "les roses lotissement", '"LES ROSES LT" : type de voie en fin (ordre du terminal)');
+  eq(normalizeStreet("Rue du Lt Roland Excoffier"), "rue du lt roland excoffier", "lieutenant intact (article + type de voie deja present)");
+  eq(normalizeStreet("Lot le Clos des Iris"), "lot le clos des iris", '"Lot" jamais expanse (la BAN elle-meme l\'ecrit ainsi)');
+
+  const dombasle = (r) => ({ n: "5", rep: "", r, rn: normalizeStreet(r), cp: "54110", c: "Dombasle-sur-Meurthe", cn: "dombasle-sur-meurthe" });
+  const poolRoses = [dombasle("Rue des Roses"), dombasle("Lotissement les Roses")];
+  const communeRoses = normalizeCity("Dombasle-sur-Meurthe");
+  // Avant l'expansion, "lt les roses" ressemblait plus a "rue des roses"
+  // (meme longueur, meme squelette) qu'au lotissement cherche.
+  const lot = scoreCandidates(poolRoses, { normRue: normalizeStreet("LT LES ROSES"), normCommune: communeRoses, numero: "5" });
+  assert(lot[0].entry.r === "Lotissement les Roses", `"5 LT LES ROSES" doit donner le lotissement, pas la rue (obtenu: ${lot[0].entry.r})`);
+  const rue = scoreCandidates(poolRoses, { normRue: normalizeStreet("RUE DES ROSES"), normCommune: communeRoses, numero: "5" });
+  assert(rue[0].entry.r === "Rue des Roses", `"5 RUE DES ROSES" reste la rue (obtenu: ${rue[0].entry.r})`);
+
+  const sexey = (r) => ({ n: "2", rep: "", r, rn: normalizeStreet(r), cp: "54550", c: "Sexey-aux-Forges", cn: "sexey-aux-forges" });
+  const poolLt = [sexey("Rue de la Gare"), sexey("Rue du Lt Roland Excoffier")];
+  const lieutenant = scoreCandidates(poolLt, { normRue: normalizeStreet("RUE DU LT ROLAND EXCOFFIER"), normCommune: normalizeCity("Sexey-aux-Forges"), numero: "2" });
+  assert(
+    lieutenant[0].entry.r === "Rue du Lt Roland Excoffier",
+    `la rue du Lt (lieutenant) reste trouvable telle quelle (obtenu: ${lieutenant[0].entry.r})`
+  );
+}
+
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);
 process.exit(failures === 0 ? 0 : 1);
