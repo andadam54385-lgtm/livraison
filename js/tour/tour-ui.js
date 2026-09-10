@@ -1,9 +1,9 @@
-import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec, finDeJournee, listSecteursConnus } from "../routing/tour-store.js";
+import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec, finDeJournee, listSecteursConnus, startPause, endPause } from "../routing/tour-store.js";
 import { getColis, saveColis, listAllColis, deleteColis, formatAdresseAffichage, formatAdresseForNav, verbeAction } from "../scan/colis-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
 import { buildSmsOptions } from "./sms-template.js";
-import { computeEtas, formatRythme } from "./eta.js";
+import { computeEtas, formatRythme, normalisePauses } from "./eta.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
 import { runSort, runRecalculate } from "../routing/routing-ui.js";
 import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
@@ -61,6 +61,9 @@ let traitesOuverts = false;
 let lastNavApp = "apple";
 let lastEtas = new Map();
 let lastDepotEta = null;
+// Minuterie qui rafraichit l'affichage pendant une pause (compteur + heures
+// estimees qui reculent) -- voir la fin de renderEtatB.
+let pauseTicker = null;
 
 export async function mount(container) {
   containerRef = container;
@@ -695,6 +698,14 @@ function formatHeure(date) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// "12:15 → 13:00 (45 min)", ou "12:15 → en cours (12 min)" -- retour terrain :
+// "faudrait debut, fin et le temps pris".
+function formatPause(p, maintenant = Date.now()) {
+  const fin = p.fin ?? maintenant;
+  const minutes = Math.max(0, Math.round((fin - p.debut) / 60000));
+  return `${formatHeure(new Date(p.debut))} → ${p.fin ? formatHeure(new Date(p.fin)) : "en cours"} (${minutes} min)`;
+}
+
 function heureConnue(date) {
   return date instanceof Date && !Number.isNaN(date.getTime());
 }
@@ -1168,6 +1179,23 @@ async function renderEtatB(tour) {
   // point a faire" (retour terrain) au lieu de renvoyer en haut.
   const scrollAvant = containerRef.scrollTop;
 
+  // Pause en cours : elle prend la place de l'arret courant (on ne roule pas),
+  // avec le compteur qui tourne et le bouton "Reprendre". Les pauses terminees
+  // sont listees en dessous -- debut, fin, duree.
+  const pauses = normalisePauses(tour.pauses);
+  const pauseEnCoursActive = pauses.find((p) => p.fin == null) || null;
+  const pausesTerminees = pauses.filter((p) => p.fin != null);
+  const pauseHtml = pauseEnCoursActive
+    ? `<div class="card" style="border-color:var(--warn);">
+        <div class="card-title">${icon("clock")}En pause</div>
+        <p class="muted" style="margin:-2px 0 10px;">Depuis ${escapeHtml(formatPause(pauseEnCoursActive))} — les heures d'arrivée reculent tant que tu n'as pas repris.</p>
+        <button type="button" class="primary btn-lg" id="pause-end" style="width:100%;">${icon("navigation")}Reprendre la tournée</button>
+      </div>`
+    : `<div class="button-row" style="margin:-4px 0 10px;">
+        <button type="button" class="btn-compact" id="pause-start">${icon("clock")}Pause</button>
+        ${pausesTerminees.length > 0 ? `<span class="muted" style="align-self:center;">Pause${pausesTerminees.length > 1 ? "s" : ""} : ${pausesTerminees.map((p) => escapeHtml(formatPause(p))).join(" · ")}</span>` : ""}
+      </div>`;
+
   const heroEntry = stopsWithColis.find(({ stop, colis }) => isPending(stop) && colis);
   const heroHtml = heroEntry
     ? renderHeroCard(heroEntry.stop, heroEntry.colis, { navApp, eta: lastEtas.get(heroEntry.colis.id), smsTemplates: settings.smsTemplates })
@@ -1182,7 +1210,8 @@ async function renderEtatB(tour) {
     </div>
     <p id="routing-status" class="muted" style="margin:-2px 0 6px;"></p>
     <div class="progress-bar" style="margin:-2px 0 12px;"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
-    ${heroHtml}
+    ${pauseHtml}
+    ${pauseEnCoursActive ? "" : heroHtml}
     <div class="card">
       <div class="card-title">Aujourd'hui</div>
       <div class="stats-row" style="flex-wrap:wrap;">
@@ -1190,6 +1219,7 @@ async function renderEtatB(tour) {
         ${todayStats.echecs > 0 ? `<span class="stat-pill stat-pill-warn">${todayStats.echecs} échec${todayStats.echecs > 1 ? "s" : ""}</span>` : ""}
         <span class="stat-pill">${todayStats.toursCount} tournée${todayStats.toursCount > 1 ? "s" : ""}</span>
         <span class="stat-pill">${formatDurationShort(todayStats.dureeEstimeeSec)} estimées</span>
+        ${etaResult.pauseTotalSec > 0 ? `<span class="stat-pill">${formatDurationShort(Math.round(etaResult.pauseTotalSec))} de pause</span>` : ""}
       </div>
     </div>
     <div class="card-row" style="margin:4px 0 10px;">
@@ -1241,6 +1271,26 @@ async function renderEtatB(tour) {
   });
 
 
+
+  containerRef.querySelector("#pause-start")?.addEventListener("click", async () => {
+    await startPause(tour.id);
+    render();
+  });
+  containerRef.querySelector("#pause-end")?.addEventListener("click", async () => {
+    await endPause(tour.id);
+    render();
+  });
+  // Compteur de pause : sans ca, "12:15 → en cours (3 min)" et le "Fin ≈"
+  // resteraient figes a l'instant du dernier rendu, alors que c'est justement
+  // le temps qui passe qu'on veut voir. Jamais pendant une saisie (le rendu
+  // remplace tout le HTML et ferait perdre le focus).
+  clearInterval(pauseTicker);
+  if (pauseEnCoursActive) {
+    pauseTicker = setInterval(() => {
+      const enSaisie = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+      if (view === "list" && !enSaisie) render();
+    }, 60000);
+  }
 
   containerRef.querySelector("#end-tour-btn").addEventListener("click", () => openFinDeJournee());
 }

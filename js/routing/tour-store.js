@@ -121,6 +121,32 @@ export async function markStopFailed(tourId, ordre, raison) {
   });
 }
 
+// Pauses declarees par le livreur (repas, chargement, imprevu) -- retour
+// terrain 2026-09-10 : "faudrait debut, fin et le temps pris". Stockees sur la
+// tournee sous forme [{debut, fin}], la derniere sans `fin` etant celle en
+// cours. Elles servent a deux choses (voir js/tour/eta.js) : repousser les
+// heures d'arrivee estimees pendant et apres la pause, et retirer ce temps du
+// rythme mesure au lieu de jeter l'intervalle. Rien n'est jamais efface : la
+// journee archivee garde la trace de ses pauses.
+export async function startPause(tourId) {
+  const db = await getDb();
+  return updateTourAtomic(db, tourId, (tour) => {
+    if (!Array.isArray(tour.pauses)) tour.pauses = [];
+    // Deja en pause : on ne cree pas une 2e pause ouverte (double appui).
+    if (tour.pauses.some((p) => p && !p.fin)) return;
+    tour.pauses.push({ debut: new Date().toISOString(), fin: null });
+  });
+}
+
+export async function endPause(tourId) {
+  const db = await getDb();
+  return updateTourAtomic(db, tourId, (tour) => {
+    if (!Array.isArray(tour.pauses)) return;
+    const ouverte = tour.pauses.find((p) => p && !p.fin);
+    if (ouverte) ouverte.fin = new Date().toISOString();
+  });
+}
+
 // Echange la position (ordre) d'un arret avec son voisin immediat --
 // reordonnancement manuel simple (boutons ▲▼), plus fiable sur mobile qu'un
 // glisser-deposer. direction: -1 (remonte, plus tot) ou +1 (descend, plus tard).

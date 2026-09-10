@@ -395,6 +395,18 @@ suivants : le « Fin ≈ » glissait vers le soir toute la journée.
   `renderGeocodePicker` n'appelle `onSaved` qu'une seule fois (flag `termine`, double appui
   sur un résultat), et `insertStopCheapest` est **idempotent** (un colis déjà dans la
   tournée n'y est jamais réinséré, retourne `dejaPresent: true`).
+- **Pauses déclarées** (build 141, « faudrait début, fin et le temps pris ») :
+  `startPause`/`endPause` dans `tour-store.js` → `tour.pauses = [{debut, fin}]`, la dernière
+  sans `fin` étant celle en cours ; rien n'est jamais effacé, la journée archivée garde ses
+  pauses. Bouton « Pause » dans l'État B ; pendant la pause, la carte de l'arrêt courant
+  cède la place à une bannière avec le compteur et « Reprendre la tournée » (rafraîchie
+  chaque minute par `pauseTicker`, jamais pendant une saisie). Effet sur l'heure estimée
+  (`eta.js`) : pause **en cours** → l'ancre suit l'horloge, donc les heures reculent minute
+  par minute ; pause **terminée** après la dernière livraison → l'ancre est l'heure de
+  reprise. Et le temps de pause est **retiré** de l'intervalle mesuré par `apprendreRythme`
+  (avant, le repas faisait jeter la donnée par le garde-fou) — ce garde-fou reste, pour les
+  pauses non déclarées. Trace visible : « Pause : 12:15 → 13:00 (45 min) » sous les boutons,
+  et une pastille « 45 min de pause » dans la carte Aujourd'hui.
 
 ## Chantier D — scan code-barres (fait le 2026-07-20)
 

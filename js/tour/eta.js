@@ -34,6 +34,46 @@ const PAUSE_MARGE_SEC = 900;
 const RATIO_MIN = 0.6;
 const RATIO_MAX = 2.5;
 
+// Pauses REELLES du livreur (repas, chargement, imprevu) : posees a la main
+// depuis l'ecran Tournee, stockees sur le tour sous forme
+// [{debut, fin|null}] -- la derniere sans `fin` est la pause en cours.
+// Avant, l'app ne savait rien d'une pause : le "Fin ≈" ne bougeait pas
+// pendant le repas (il continuait de promettre l'heure d'avant), et
+// l'intervalle correspondant etait purement jete du calcul de rythme.
+// Maintenant : le temps de pause est retire du rythme mesure (la donnee est
+// conservee au lieu d'etre perdue) et repousse les heures estimees.
+export function normalisePauses(pauses) {
+  if (!Array.isArray(pauses)) return [];
+  return pauses
+    .map((p) => {
+      const debut = p && p.debut ? new Date(p.debut).getTime() : NaN;
+      const fin = p && p.fin ? new Date(p.fin).getTime() : null;
+      return { debut, fin: fin != null && !Number.isNaN(fin) ? fin : null };
+    })
+    .filter((p) => !Number.isNaN(p.debut))
+    .sort((a, b) => a.debut - b.debut);
+}
+
+export function pauseEnCours(pauses) {
+  return normalisePauses(pauses).find((p) => p.fin == null) || null;
+}
+
+// Duree cumulee des pauses (une pause en cours compte jusqu'a `maintenant`).
+export function pauseTotalSec(pauses, maintenant = Date.now()) {
+  return normalisePauses(pauses).reduce((total, p) => total + Math.max(0, (p.fin ?? maintenant) - p.debut), 0) / 1000;
+}
+
+// Part des pauses qui tombe entre deux instants -- sert a retirer le repas
+// d'un intervalle entre deux "Livre" avant d'en tirer un rythme.
+export function pauseOverlapSec(pauses, debutMs, finMs, maintenant = Date.now()) {
+  return (
+    normalisePauses(pauses).reduce((total, p) => {
+      const fin = p.fin ?? maintenant;
+      return total + Math.max(0, Math.min(finMs, fin) - Math.max(debutMs, p.debut));
+    }, 0) / 1000
+  );
+}
+
 function heureTraitement(stop) {
   const brut = stop.statutLivraison === "livre" ? stop.heureLivraison : stop.statutLivraison === "echec" ? stop.heureEchec : null;
   if (!brut) return null;
@@ -44,9 +84,10 @@ function heureTraitement(stop) {
 /**
  * @param {{stop: object}[]} stopsSorted arrets tries par ordre
  * @param {number} dwellSec duree moyenne d'un arret
+ * @param {{pauses?: object[], maintenant?: number}} options pauses declarees
  * @returns {{ratio:number, paires:number, reelSec:number, prevuSec:number} | null}
  */
-export function apprendreRythme(stopsSorted, dwellSec) {
+export function apprendreRythme(stopsSorted, dwellSec, { pauses = [], maintenant = Date.now() } = {}) {
   let reelSec = 0;
   let prevuSec = 0;
   let paires = 0;
@@ -59,11 +100,16 @@ export function apprendreRythme(stopsSorted, dwellSec) {
     // Pas de temps de trajet connu (arret insere en cours de route, vieille
     // tournee) : rien a comparer.
     if (!(courant.legDureeSec > 0)) continue;
-    const reel = (tCourant - tPrecedent) / 1000;
+    // Pause DECLAREE pendant cet intervalle : retiree, l'intervalle reste
+    // exploitable (avant, il etait jete par le garde-fou ci-dessous et la
+    // mesure du rythme perdait une donnee a chaque repas).
+    const reel = (tCourant - tPrecedent) / 1000 - pauseOverlapSec(pauses, tPrecedent, tCourant, maintenant);
     // Traite hors ordre (le suivant valide AVANT le precedent) : pas un
     // intervalle de trajet.
     if (reel <= 0) continue;
     const prevu = courant.legDureeSec + dwellSec;
+    // Garde-fou pour les pauses NON declarees (le livreur n'a pas appuye) :
+    // un intervalle demesure reste ecarte.
     if (reel > prevu * PAUSE_FACTEUR + PAUSE_MARGE_SEC) continue;
     reelSec += reel;
     prevuSec += prevu;
@@ -82,7 +128,7 @@ export function apprendreRythme(stopsSorted, dwellSec) {
 // Retourne aussi l'heure estimee de retour au depot quand applicable : le
 // trajet retour n'est pas un arret, il se deduit de totalDureeSec (qui inclut
 // TOUS les tronçons, retour compris) moins les tronçons des arrets.
-export function computeEtas(tour, stopsSorted, dwellSec, { margeTrajetPct = 0 } = {}) {
+export function computeEtas(tour, stopsSorted, dwellSec, { margeTrajetPct = 0, maintenant = Date.now() } = {}) {
   let anchorTime = new Date(tour.dateCreation).getTime();
   let anchorIndex = -1;
   stopsSorted.forEach(({ stop }, i) => {
@@ -93,7 +139,19 @@ export function computeEtas(tour, stopsSorted, dwellSec, { margeTrajetPct = 0 } 
     }
   });
 
-  const rythme = apprendreRythme(stopsSorted, dwellSec);
+  // Une pause repousse tout ce qui reste : EN COURS, l'ancre suit l'horloge
+  // (les heures reculent minute par minute tant que le livreur n'a pas repris)
+  // ; TERMINEE apres la derniere livraison, l'ancre est l'heure de reprise --
+  // sans ca le "Fin ≈" continuait de promettre l'heure d'avant le repas.
+  const pauses = normalisePauses(tour.pauses);
+  const enCours = pauses.find((p) => p.fin == null);
+  if (enCours) {
+    anchorTime = Math.max(anchorTime, maintenant);
+  } else {
+    for (const p of pauses) if (p.fin > anchorTime) anchorTime = p.fin;
+  }
+
+  const rythme = apprendreRythme(stopsSorted, dwellSec, { pauses, maintenant });
   const facteurTrajet = rythme ? rythme.ratio : 1 + (Number(margeTrajetPct) || 0) / 100;
   const facteurArret = rythme ? rythme.ratio : 1;
 
@@ -113,7 +171,7 @@ export function computeEtas(tour, stopsSorted, dwellSec, { margeTrajetPct = 0 } 
     depotEta = new Date(anchorTime + (cumulative + returnLegSec * facteurTrajet) * 1000);
   }
 
-  return { etas, depotEta, rythme, facteurTrajet };
+  return { etas, depotEta, rythme, facteurTrajet, pauseEnCours: enCours || null, pauseTotalSec: pauseTotalSec(pauses, maintenant) };
 }
 
 // "+22 %" / "−8 %" pour l'en-tete ; null si aucun rythme mesure.

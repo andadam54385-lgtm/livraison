@@ -1,7 +1,7 @@
 // Tests de l'heure d'arrivee estimee et de l'apprentissage du rythme reel
 // (retour terrain 2026-09-10 : "plus j'avance, plus je perds de temps").
 // Execute via `node js/tour/eta.test.mjs`.
-import { computeEtas, apprendreRythme, formatRythme } from "./eta.js";
+import { computeEtas, apprendreRythme, formatRythme, pauseTotalSec, pauseOverlapSec, pauseEnCours } from "./eta.js";
 
 let failures = 0;
 function assert(cond, label) {
@@ -112,6 +112,54 @@ console.log("\n=== Retour au depot : le trajet retour est majore comme les autre
   const { depotEta, etas } = computeEtas(tour({ returnToDepot: true, totalDureeSec: 6 * 600 + 900 }), s, DWELL, { margeTrajetPct: 10 });
   const dernier = etas.get("C6").getTime();
   assertClose(depotEta.getTime(), dernier + min(3) + 900 * 1.1 * 1000, "depot = dernier arret + 3 min + retour x 1,1");
+}
+
+console.log("\n=== Pause DECLAREE : repousse les heures et ne fausse pas le rythme ===");
+{
+  const t1 = T0 + min(12);
+  const t2 = t1 + min(13);
+  const t3 = t2 + min(13);
+  // Repas de 45 min entre l'arret 3 et l'arret 4, declare par le livreur :
+  // 2 min de route, le repas, puis les 11 min restantes -> 13 min utiles,
+  // exactement le prevu.
+  const pauseDebut = t3 + min(2);
+  const pauseFin = pauseDebut + min(45);
+  const t4 = pauseFin + min(11);
+  const s = stops({ 1: t1, 2: t2, 3: t3, 4: t4 });
+  const pauses = [{ debut: new Date(pauseDebut).toISOString(), fin: new Date(pauseFin).toISOString() }];
+
+  // Le repas est retire de l'intervalle : l'intervalle reste EXPLOITABLE
+  // (avant, il etait purement jete par le garde-fou des pauses non declarees).
+  const rythme = apprendreRythme(s, DWELL, { pauses, maintenant: t4 + min(1) });
+  assert(rythme && rythme.paires === 3, `les 3 intervalles comptent, repas retire (obtenu: ${rythme && rythme.paires})`);
+  assert(rythme && Math.abs(rythme.ratio - 1) < 0.01, `rythme = prevu malgre le repas (obtenu: ${rythme && rythme.ratio.toFixed(3)})`);
+
+  assert(Math.abs(pauseTotalSec(pauses, t4) - 45 * 60) < 1, "duree totale de pause = 45 min");
+  assert(Math.abs(pauseOverlapSec(pauses, t3, t4, t4) - 45 * 60) < 1, "le chevauchement couvre tout le repas");
+  assert(pauseEnCours(pauses) === null, "aucune pause en cours une fois terminee");
+
+  // Pause terminee APRES la derniere livraison : c'est l'heure de REPRISE qui
+  // sert d'ancre, pas la livraison d'avant.
+  const s3 = stops({ 1: t1, 2: t2, 3: t3 });
+  const r = computeEtas(tour({ pauses }), s3, DWELL, { maintenant: pauseFin + min(1) });
+  assertClose(r.etas.get("C4").getTime(), pauseFin + min(10), "l'arret suivant repart de l'heure de reprise");
+  assert(Math.abs(r.pauseTotalSec - 45 * 60) < 1, "le total de pause est remonte a l'ecran");
+}
+
+console.log("\n=== Pause EN COURS : les heures reculent avec l'horloge ===");
+{
+  const t1 = T0 + min(12);
+  const pauseDebut = t1 + min(5);
+  const pauses = [{ debut: new Date(pauseDebut).toISOString(), fin: null }];
+  const s = stops({ 1: t1 });
+  const maintenant = pauseDebut + min(20);
+  const r = computeEtas(tour({ pauses }), s, DWELL, { maintenant });
+  assert(r.pauseEnCours != null, "la pause en cours est signalee a l'ecran");
+  assertClose(r.etas.get("C2").getTime(), maintenant + min(10), "l'arret suivant est repousse a maintenant + trajet");
+  // 10 min plus tard sans avoir repris : l'heure a recule d'autant.
+  const plusTard = computeEtas(tour({ pauses }), s, DWELL, { maintenant: maintenant + min(10) });
+  assertClose(plusTard.etas.get("C2").getTime(), maintenant + min(20), "elle recule tant que le livreur n'a pas repris");
+  assert(Math.abs(plusTard.pauseTotalSec - 30 * 60) < 1, "le compteur de pause tourne (30 min)");
 }
 
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);
