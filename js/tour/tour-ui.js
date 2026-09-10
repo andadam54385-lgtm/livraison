@@ -3,6 +3,7 @@ import { getColis, saveColis, listAllColis, deleteColis, formatAdresseAffichage,
 import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
 import { buildSmsOptions } from "./sms-template.js";
+import { computeEtas, formatRythme } from "./eta.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
 import { runSort, runRecalculate } from "../routing/routing-ui.js";
 import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
@@ -698,52 +699,9 @@ function heureConnue(date) {
   return date instanceof Date && !Number.isNaN(date.getTime());
 }
 
-// Heure d'arrivee estimee par arret : cumul des temps de trajet (legDureeSec,
-// calcule au moment du tri) + temps moyen passe a chaque arret precedent, a
-// partir du dernier arret REELLEMENT valide (livre/echec) plutot que de la
-// creation de la tournee -- un livreur en avance ou en retard sur le plan
-// initial doit voir des heures qui suivent son rythme reel, pas figees au
-// moment du tri. Sans arret encore valide, repli sur la creation de la
-// tournee (premier depart). Absent sur les tournees creees avant cette
-// fonctionnalite (legDureeSec undefined -> traite comme 0), et devient
-// approximatif apres un reordonnancement manuel ou une insertion (les temps
-// de trajet ne sont pas recalcules pour les arrets deplaces).
-// Retourne aussi l'heure d'arrivee estimee au depot (retour en fin de
-// tournee) quand applicable : le trajet retour n'est pas un "arret" au sens
-// stops[], son temps de trajet se deduit de totalDureeSec (qui inclut TOUS
-// les troncons, y compris le retour) moins la somme des troncons deja
-// comptes pour les arrets -- voir routing-ui.js ou `legs` est calcule.
-function computeEtas(tour, stopsSorted, dwellSec) {
-  let anchorTime = new Date(tour.dateCreation).getTime();
-  let anchorIndex = -1;
-  stopsSorted.forEach(({ stop }, i) => {
-    const isTraite = stop.statutLivraison === "livre" || stop.statutLivraison === "echec";
-    if (!isTraite) return;
-    const heure = stop.heureLivraison || stop.heureEchec;
-    if (heure) {
-      anchorTime = new Date(heure).getTime();
-      anchorIndex = i;
-    }
-  });
-
-  let cumulative = 0;
-  const etas = new Map();
-  for (let i = anchorIndex + 1; i < stopsSorted.length; i++) {
-    const { stop } = stopsSorted[i];
-    cumulative += stop.legDureeSec || 0;
-    etas.set(stop.colisId, new Date(anchorTime + cumulative * 1000));
-    cumulative += dwellSec;
-  }
-
-  let depotEta = null;
-  if (tour.returnToDepot) {
-    const sumStopLegs = stopsSorted.reduce((s, { stop }) => s + (stop.legDureeSec || 0), 0);
-    const returnLegSec = Math.max(0, (tour.totalDureeSec || 0) - sumStopLegs);
-    depotEta = new Date(anchorTime + (cumulative + returnLegSec) * 1000);
-  }
-
-  return { etas, depotEta };
-}
+// Heure d'arrivee estimee par arret : voir js/tour/eta.js (computeEtas,
+// apprentissage du rythme reel, marge sur les trajets) -- sorti d'ici pour
+// etre teste hors navigateur.
 
 // Heure de fin de tournee estimee, affichee en haut de l'ecran (retour
 // terrain : "on ne voit pas comment on avance") -- avec retour au depot,
@@ -1180,9 +1138,12 @@ async function renderEtatB(tour) {
   lastTour = tour;
   lastStopsWithColis = stopsWithColis;
   lastNavApp = navApp;
-  const etaResult = computeEtas(tour, stopsWithColis, (settings.dureeArretMinutes || 0) * 60);
+  const etaResult = computeEtas(tour, stopsWithColis, (settings.dureeArretMinutes || 0) * 60, { margeTrajetPct: settings.margeTrajetPct });
   lastEtas = etaResult.etas;
   lastDepotEta = etaResult.depotEta;
+  // Rythme reel mesure sur les livraisons du jour (voir eta.js) : affiche a
+  // cote de la fin estimee, pour que le livreur voie POURQUOI l'heure a bouge.
+  const rythmeLabel = formatRythme(etaResult.rythme);
 
   const delivered = stopsWithColis.filter((s) => s.stop.statutLivraison === "livre").length;
   const failed = stopsWithColis.filter((s) => s.stop.statutLivraison === "echec").length;
@@ -1191,7 +1152,9 @@ async function renderEtatB(tour) {
 
   updateHeader({
     title: "Ma tournée",
-    statsHtml: heureConnue(finEstimee) ? `<span class="stat-pill">${icon("clock", { spaced: false })} Fin ≈ ${formatHeure(finEstimee)}</span>` : "",
+    statsHtml:
+      (heureConnue(finEstimee) ? `<span class="stat-pill">${icon("clock", { spaced: false })} Fin ≈ ${formatHeure(finEstimee)}</span>` : "") +
+      (rythmeLabel ? `<span class="stat-pill" title="Écart mesuré entre le temps prévu et le temps réel sur les livraisons du jour">${escapeHtml(rythmeLabel)}</span>` : ""),
     showProgress: true,
     progressPercent: total === 0 ? 0 : Math.round(((delivered + failed) / total) * 100),
   });

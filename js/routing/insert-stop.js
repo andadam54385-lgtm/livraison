@@ -30,6 +30,13 @@ function travelSeconds(csr, grid, scratch, from, to) {
  * un simple statut "pret", inclus au prochain recalcul complet).
  */
 export async function insertStopCheapest(tour, colis) {
+  // Idempotent : un colis deja dans la tournee n'y est jamais insere une 2e
+  // fois. Bug reel (2026-09-10) : un point ajoute par recherche GPS est
+  // apparu en DOUBLE -- deux arrets pour un seul colis (double appui sur le
+  // resultat, deux onSaved en course) -- et supprimer "l'un" supprimait les
+  // deux, puisque c'etait le meme colis.
+  const dejaLa = tour.stops.find((s) => s.colisId === colis.id);
+  if (dejaLa) return { tour, position: dejaLa.ordre, dejaPresent: true };
   const db = await getDb();
   const csr = await loadCsrFromDb(db);
   if (!csr || colis.geocode?.lat == null) return null;

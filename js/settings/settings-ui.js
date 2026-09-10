@@ -128,11 +128,16 @@ async function render() {
         <input type="time" id="s-limite-avant12h" value="${escapeHtml(settings.heureLimiteAvant12h)}">
       </div>
       <p class="muted" style="margin:-6px 0 12px;">Un colis marqué doit être servi avant cette heure. Tant qu'il y arrive, l'ordre du reste de la tournée reste libre — les autres arrêts peuvent tomber avant ou après.</p>
-      <div class="field" style="margin-bottom:0;">
+      <div class="field">
         <label>Durée moyenne par arrêt (minutes)</label>
         <input type="number" min="0" step="1" id="s-duree-arret" value="${settings.dureeArretMinutes}">
       </div>
-      <p class="muted" style="margin:6px 0 0;">Utilisée pour estimer l'heure d'arrivée à chaque arrêt, et pour vérifier les heures limites ci-dessus.</p>
+      <p class="muted" style="margin:-6px 0 12px;">Utilisée pour estimer l'heure d'arrivée à chaque arrêt, et pour vérifier les heures limites ci-dessus.</p>
+      <div class="field" style="margin-bottom:0;">
+        <label>Marge sur les temps de trajet (%)</label>
+        <input type="number" min="0" max="100" step="5" id="s-marge-trajet" value="${settings.margeTrajetPct}">
+      </div>
+      <p class="muted" style="margin:6px 0 0;">Les trajets sont calculés aux vitesses légales, sans carrefours ni place à chercher : cette marge corrige l'heure estimée en début de journée. Dès 3 livraisons, l'app mesure ton rythme réel et le remplace.</p>
     </div>
     <div class="card">
       <div class="card-title">Modèles de SMS</div>
@@ -271,6 +276,8 @@ async function render() {
     const heure = (sel, fallback) => containerRef.querySelector(sel).value || fallback;
     await setSetting("heureLimiteAvant12h", heure("#s-limite-avant12h", DEFAULTS.heureLimiteAvant12h));
     await setSetting("dureeArretMinutes", parseFloat(containerRef.querySelector("#s-duree-arret").value));
+    const marge = parseFloat(containerRef.querySelector("#s-marge-trajet").value);
+    await setSetting("margeTrajetPct", Number.isFinite(marge) && marge >= 0 ? marge : DEFAULTS.margeTrajetPct);
     // Capture le modele affiche au moment d'enregistrer (input deja tenu a
     // jour pour les autres, celui-ci peut avoir le focus sans avoir declenche
     // son evenement "input" si l'utilisateur clique direct sur Enregistrer).

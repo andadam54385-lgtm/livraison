@@ -404,6 +404,7 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
       ${onCancel ? `<button type="button" id="f-cancel">${icon("arrow-left")}Retour</button>` : `<button type="button" id="f-rescan">Rescanner</button>`}
       <button type="button" class="primary btn-lg" id="f-valider">Valider</button>
     </div>
+    <button type="button" id="f-gps-direct" style="width:100%;margin-bottom:10px;">${icon("navigation")}Entreprise / lieu-dit : placer le point GPS directement</button>
     <div class="field">
       <label>Adresse</label>
       <input type="text" id="f-adresse-complete" class="field-lg" placeholder="ex: 12 rue de la Liberté" autocomplete="off" value="${escapeAttr(initialAdresseQuery)}">
@@ -459,7 +460,9 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     startScanFlow(container, { onSaved, onCancelled: () => renderReviewForm(container, colis, { isNew, duplicate, onSaved, onCancel }) })
   );
   container.querySelector("#f-cancel")?.addEventListener("click", () => onCancel());
-  container.querySelector("#f-valider").addEventListener("click", async () => {
+  // Recopie les champs du formulaire dans le colis (partage par "Valider" et
+  // par le raccourci GPS direct ci-dessous).
+  function lireFormulaire() {
     colis.nom = container.querySelector("#f-nom").value.trim();
     colis.tel = container.querySelector("#f-tel").value.trim();
     let numeroField = container.querySelector("#f-numero").value.trim();
@@ -507,22 +510,49 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
     colis.avant12h = readSegmented(container, "avant12h") === "oui";
     const quantiteInput = parseInt(container.querySelector("#f-quantite").value, 10);
     colis.quantite = Number.isFinite(quantiteInput) && quantiteInput > 0 ? quantiteInput : 1;
+  }
 
-    // Journal des corrections OCR (retour terrain : "beaucoup d'erreurs",
-    // le but est d'ameliorer le parser pour les scans suivants, pas juste ce
-    // colis) -- voir ocr-corrections-store.js, no-op silencieux si ce colis
-    // n'a pas de texte OCR ou si rien n'a change par rapport a ce que le
-    // parser produit.
-    await recordCorrectionIfNeeded(colis, {
+  // Journal des corrections OCR (retour terrain : "beaucoup d'erreurs", le
+  // but est d'ameliorer le parser pour les scans suivants, pas juste ce
+  // colis) -- voir ocr-corrections-store.js, no-op silencieux si ce colis n'a
+  // pas de texte OCR ou si rien n'a change par rapport a ce que le parser
+  // produit.
+  function journaliserCorrection() {
+    return recordCorrectionIfNeeded(colis, {
       nom: colis.nom,
       tel: colis.tel,
       rue: colis.adresseRaw.rue,
       cp: colis.adresseRaw.cp,
       ville: colis.adresseRaw.ville,
     });
+  }
 
+  container.querySelector("#f-valider").addEventListener("click", async () => {
+    lireFormulaire();
+    await journaliserCorrection();
     container.innerHTML = loadingHtml("Géocodage…");
     await runGeocodeAndSave(container, colis, { onSaved });
+  });
+
+  // Raccourci GPS direct (retour terrain 2026-09-10 : "quand c'est une
+  // entreprise ou une adresse particuliere, mettre le GPS directement sans
+  // avoir a appuyer sur Valider"). Saute le geocodage BAN -- inutile pour un
+  // nom d'entreprise ou un lieu-dit, il n'y est pas -- et ouvre tout de suite
+  // l'ecran de placement (recherche en ligne / coordonnees collees), avec le
+  // NOM du client comme recherche par defaut : c'est lui qu'on cherche, pas
+  // l'adresse brute.
+  container.querySelector("#f-gps-direct").addEventListener("click", async () => {
+    lireFormulaire();
+    await journaliserCorrection();
+    colis.adresseAffichage = null;
+    colis.geocode = { status: "non_geocode", lat: null, lon: null, candidates: [] };
+    colis.statut = statutApresGeocodage(colis.statut, false);
+    await saveColis(colis);
+    renderGeocodePicker(container, colis, {
+      onSaved,
+      onlineQuery: colis.nom || null,
+      focusOnline: true,
+    });
   });
 }
 
@@ -607,8 +637,14 @@ function parseLatLon(text) {
   return { lat, lon };
 }
 
-function renderGeocodePicker(container, colis, { onSaved }) {
+function renderGeocodePicker(container, colis, { onSaved, onlineQuery = null, focusOnline = false }) {
   const rawQuery = `${colis.adresseRaw.rue} ${colis.adresseRaw.cp} ${colis.adresseRaw.ville}`.trim();
+  // Une seule sortie, jamais deux : un double appui sur un resultat (ou sur
+  // "Valider ces coordonnees") declenchait deux onSaved -> deux arrets pour le
+  // meme colis dans la tournee (bug reel 2026-09-10, voir aussi
+  // insertStopCheapest). Verrou pose au premier accept, jamais releve : cet
+  // ecran est detruit par le rendu qui suit.
+  let termine = false;
   container.innerHTML = `
     <div class="card">
       <div class="card-title">Adresse à confirmer</div>
@@ -620,7 +656,7 @@ function renderGeocodePicker(container, colis, { onSaved }) {
       <p class="muted">Cherche le nom directement ici (recherche en ligne OpenStreetMap) — la BAN ne connaît que les adresses officielles, pas les noms d'entreprise.</p>
       <div class="field">
         <label>Nom / lieu à chercher</label>
-        <input type="text" id="geocode-online-query" class="field-lg" value="${escapeAttr(rawQuery)}" autocomplete="off">
+        <input type="text" id="geocode-online-query" class="field-lg" value="${escapeAttr(onlineQuery || rawQuery)}" autocomplete="off">
       </div>
       <button type="button" class="primary" id="geocode-online-btn">${icon("search")}Chercher en ligne</button>
       <div id="geocode-online-results" class="candidate-list" style="margin-top:8px;"></div>
@@ -647,6 +683,8 @@ function renderGeocodePicker(container, colis, { onSaved }) {
   const slot = container.querySelector("#geocode-picker-slot");
 
   async function acceptEntry(entry) {
+    if (termine) return;
+    termine = true;
     colis.geocode = { status: "ok", lat: entry.lat, lon: entry.lon, candidates: [] };
     colis.adresseAffichage = formatEntry(entry);
     colis.statut = statutApresGeocodage(colis.statut, true); // adresse confirmee ici (choix manuel/candidat) -> le nom n'est pas bloquant
@@ -661,6 +699,8 @@ function renderGeocodePicker(container, colis, { onSaved }) {
   // se rabat alors sur adresseRaw (le texte scanne/tape, ex: le nom de
   // l'entreprise) pour l'affichage.
   async function acceptManualCoords(lat, lon) {
+    if (termine) return;
+    termine = true;
     colis.geocode = { status: "ok", lat, lon, candidates: [], manual: true };
     colis.statut = statutApresGeocodage(colis.statut, true);
     await saveColis(colis);
@@ -742,5 +782,10 @@ function renderGeocodePicker(container, colis, { onSaved }) {
     }
     acceptManualCoords(parsed.lat, parsed.lon);
   });
-  container.querySelector("#geocode-later").addEventListener("click", () => onSaved?.(colis));
+  container.querySelector("#geocode-later").addEventListener("click", () => {
+    if (termine) return;
+    termine = true;
+    onSaved?.(colis);
+  });
+  if (focusOnline) container.querySelector("#geocode-online-query")?.focus();
 }

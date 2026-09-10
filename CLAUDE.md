@@ -362,6 +362,40 @@ les pros) et les Réglages (avec recherche).
   s'il diffère de l'adresse brute proposée par défaut (« mets le dernier nom mis pour la
   recherche, pas celui que l'app a noté »).
 
+## Heure estimée et rythme réel (build 140, 2026-09-10)
+
+Retour terrain : « plus j'avance, plus je perds de temps — les 3 min par point sont bien
+comptées ? le temps de trajet est bon ? ». Diagnostic : les 3 min sont comptées une fois par
+arrêt restant (pas pour l'arrêt qu'on vient de valider — le livreur appuie « Livré » après
+la remise, confirmé) ; ce sont les **temps de trajet** qui sont optimistes : Dijkstra sur le
+graphe OSM aux vitesses **légales à vide** (`data-prep/scripts/lib/speed-table.js`, lu en
+lecture seule : 80/70/50/40/30 km/h par type de voie, ou le `maxspeed`), sans carrefour,
+entrée de village, camion ni place à chercher. L'heure du prochain arrêt repartait bien du
+dernier « Livré » réel, mais le retard de chaque tronçon n'était jamais réinjecté dans les
+suivants : le « Fin ≈ » glissait vers le soir toute la journée.
+
+- **`js/tour/eta.js`** (module pur, `eta.test.mjs`) — `computeEtas` sorti de `tour-ui.js`.
+  `apprendreRythme` compare, sur les arrêts déjà traités **dans l'ordre**, le temps réel
+  entre deux « Livré » au temps prévu (trajet + durée d'arrêt) : ratio appliqué à tout ce qui
+  reste, trajets **et** arrêts (c'est sur l'ensemble qu'il a été mesuré). Garde-fous : ≥ 3
+  intervalles et ≥ 10 min de prévu cumulé, un intervalle > 3× le prévu + 15 min est une
+  pause (repas) et n'est pas compté, intervalle négatif (validé hors ordre) ignoré, ratio
+  borné à [0,6 ; 2,5], arrêt sans `legDureeSec` (inséré en route) ignoré. Affiché en en-tête
+  à côté de « Fin ≈ » : « rythme +22 % ».
+- **Réglage `margeTrajetPct`** (défaut 15 %, Réglages → Calcul de tournée) : marge sur les
+  seuls trajets tant que la journée n'a pas 3 livraisons mesurées ; le rythme mesuré la
+  remplace ensuite. Ne change pas l'ordre de tournée (facteur uniforme).
+- **Raccourci GPS direct** (même build, retour terrain « quand c'est une entreprise, mettre
+  le GPS directement sans appuyer sur Valider ») : bouton `#f-gps-direct` au-dessus du champ
+  Adresse de `renderReviewForm` → saute le géocodage BAN et ouvre `renderGeocodePicker`
+  avec le **nom** du client comme recherche en ligne par défaut (`onlineQuery`,
+  `focusOnline`).
+- **Doublon d'arrêt** (bug réel : « un point ajouté par recherche GPS a été créé deux fois,
+  supprimer l'un a supprimé les deux » = deux arrêts pour un seul colis) : deux verrous —
+  `renderGeocodePicker` n'appelle `onSaved` qu'une seule fois (flag `termine`, double appui
+  sur un résultat), et `insertStopCheapest` est **idempotent** (un colis déjà dans la
+  tournée n'y est jamais réinséré, retourne `dejaPresent: true`).
+
 ## Chantier D — scan code-barres (fait le 2026-07-20)
 
 L'app ne filme jamais en direct pour l'OCR (capture.js utilise `<input capture>`, la
