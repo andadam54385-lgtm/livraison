@@ -82,6 +82,7 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
   const canFavori = colis.geocode?.status === "ok";
   const titre = colis.nom || adresse;
   const existingFavori = canFavori ? await findNearbyFavori(colis.geocode.lat, colis.geocode.lon) : null;
+  const aDesHoraires = !horairesSontVides(horairesOf(existingFavori));
   // Pas d'estimation de temps ici (ce calcul vit dans tour-ui.js, couteux a
   // refaire pour une seule fiche) -- {minutes_estimees} reste vide, voir
   // buildSmsOptions. Version avec minutes reelles : hero card (arret courant).
@@ -126,10 +127,10 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
         <label>${icon("star")}Note pour cette adresse</label>
         <textarea id="detail-note" class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(existingFavori?.note || "")}</textarea>
       </div>
-      <div class="field">
-        <label>${icon("clock")}Horaires d'ouverture (la tournée évitera les heures fermées)</label>
+      <details class="hours-disclosure" id="detail-horaires-box" ${aDesHoraires ? "open" : ""}>
+        <summary>${icon("clock")}Horaires d'ouverture${aDesHoraires ? "" : " — aucun"}</summary>
         <div id="detail-horaires"></div>
-      </div>
+      </details>
     `
         : ""
     }
@@ -193,13 +194,28 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
   // obtient ses fenetres evitees par l'optimiseur (la regle globale pros a
   // ete debranchee, voir routing-ui.js). fermeDebut/fermeFin vides : l'ancien
   // couple ne doit plus jamais etre relu a la place des horaires.
+  // L'editeur n'est CONSTRUIT qu'a l'ouverture du bloc (retour terrain : "la
+  // majorite du temps ca encombre pour rien") -- 7 onglets, 2 cases et 4
+  // champs d'heures sur une fiche qu'on ouvre surtout pour livrer. Une adresse
+  // qui a deja des horaires s'ouvre d'office : la, c'est une information a
+  // voir, pas un formulaire a remplir.
   const horairesHost = container.querySelector("#detail-horaires");
+  const horairesBox = container.querySelector("#detail-horaires-box");
   if (horairesHost) {
-    renderHorairesEditor(horairesHost, horairesOf(existingFavori), {
-      onChange: async (horaires) => {
-        await saveFavoriInfo(colis, { horaires, fermeDebut: "", fermeFin: "" });
-        showToast("Horaires enregistrés — pris en compte au prochain calcul de tournée.");
-      },
+    let editeurMonte = false;
+    const monterEditeur = () => {
+      if (editeurMonte) return;
+      editeurMonte = true;
+      renderHorairesEditor(horairesHost, horairesOf(existingFavori), {
+        onChange: async (horaires) => {
+          await saveFavoriInfo(colis, { horaires, fermeDebut: "", fermeFin: "" });
+          showToast("Horaires enregistrés — pris en compte au prochain calcul de tournée.");
+        },
+      });
+    };
+    if (horairesBox?.open) monterEditeur();
+    horairesBox?.addEventListener("toggle", () => {
+      if (horairesBox.open) monterEditeur();
     });
   }
   // Coeur : mise en favori EXPLICITE (retour terrain "il manque la mise en

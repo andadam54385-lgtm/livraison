@@ -123,7 +123,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   outline-offset: 2px;
 }
 
-input, select, textarea {
+/* :not(checkbox/radio) : sans ca, cette regle peignait AUSSI les cases a
+   cocher -- fond sombre, 44px de haut, coins arrondis, et aucune coche
+   visible par-dessus. Retour terrain 2026-09-11 ("les cadres sont bizarres,
+   il y a un problème") : les deux cases des horaires apparaissaient comme de
+   gros carres noirs. Les cases gardent donc leur rendu natif, teinte a
+   l'accent de l'appli. */
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
   font: inherit;
   color: var(--text);
   background: var(--bg-elevated);
@@ -134,6 +140,15 @@ input, select, textarea {
   width: 100%;
   max-width: 100%;
   transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+input[type="checkbox"], input[type="radio"] {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent-strong);
 }
 /* iOS centre la valeur d'un input[type=time] des que le champ est bien plus
    large que son contenu : sur un champ pleine largeur, l'heure flottait au
@@ -775,8 +790,15 @@ a { color: var(--accent-strong); }
 .hours-day.active.closed .hours-dot { background: var(--accent-ink); }
 .hours-modes { display: flex; flex-direction: column; gap: 6px; }
 .hours-check { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
-.hours-check input { width: 22px; height: 22px; margin: 0; flex-shrink: 0; }
 .hours-check[hidden] { display: none; }
+/* Horaires replies par defaut (retour terrain : "la majorite du temps ca
+   encombre pour rien") -- deplies d'office quand l'adresse en a deja. */
+.hours-disclosure { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--bg-elevated); }
+.hours-disclosure > summary { cursor: pointer; font-size: 0.9rem; color: var(--text-muted); list-style: none; display: flex; align-items: center; gap: 6px; }
+.hours-disclosure > summary::-webkit-details-marker { display: none; }
+.hours-disclosure > summary::after { content: "＋"; margin-left: auto; font-size: 1rem; }
+.hours-disclosure[open] > summary::after { content: "−"; }
+.hours-disclosure[open] > summary { margin-bottom: 10px; color: var(--text); }
 .hours-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .hours-grid label { display: flex; flex-direction: column; gap: 2px; font-size: 0.78rem; color: var(--text-muted); }
 .hours-grid input[type="time"] { width: 100%; min-height: 38px; }

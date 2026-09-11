@@ -180,7 +180,7 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   1. **Commune abrégée à 5 lettres** (« DIEUE 55320 » pour Dieue-sur-Meuse) refusée par
      `MIN_PREFIXE_COMMUNE` = 6 : elle finissait collée à la rue (« 114 RATTENTOUT RUE
      DIEUE ») et l'arrêt partait sans ville. Seuil abaissé à 5 **seulement quand la ligne
-     porte aussi le CP** (`MIN_PREFIXE_COMMUNE_AVEC_CP`) — sans cette corroboration,
+     porte aussi le CP** (`MIN_PREFIXE_COMMUNE_CORROBORE`) — sans cette corroboration,
      « PETIT » ou « GRAND » (premiers mots de communes réelles, et noms de famille très
      courants) passeraient pour des communes sur une ligne de nom.
   2. **Commune coupée en plein mot**, pas sur le tiret (« COUSANCES-LE » / « S-TRICONVILLE »)
@@ -234,6 +234,20 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   main. Au passage : badge sans barre (« 8000 0+1 ») nettoyé, et résidu d'icône de 1–2
   minuscules en fin de ligne retiré (« Samuel FERRI vw ») — jamais un mot de liaison
   (« RUE DU GENERAL DE » replié garde son « de »), jamais une majuscule (« BAT B »).
+- **Commune collée en FIN de ligne de rue** (build 142, terrain 2026-09-11 : « il m'a mis
+  Ranzières au lieu de St-Mihiel »). Quand le CP est sur la ligne SUIVANTE, rien ne détachait
+  la commune : « 8 TEMPLE RUE ST MIHIEL » partait sans ville, et le géocodage n'avait plus que
+  le CP pour trancher entre les **34 communes du 55300** — il a choisi « 8 Rue de Saint
+  Mihiel » à **Ranzières** (une rue qui porte le nom de la ville voisine, et qui existe aussi
+  aux Paroches et à Dompcevrin) au lieu de « 8 Rue du Temple » à Saint-Mihiel.
+  `peelVilleEnFinDeRue` s'applique à la rue **assemblée** (le terminal replie souvent la
+  commune sur la ligne d'après : « RUE APREMONT LA » / « FORET ») et ne détache que si le
+  reste **se termine par un type de voie** — c'est la forme de ce terminal, et le garde-fou
+  qui empêche « 3 RUE DE COMMERCY » de perdre son dernier mot. Au plus 2 jetons de résidu
+  tolérés entre la commune et la fin. Rejeu du compte rendu : 8 arrêts récupèrent leur
+  commune, aucune fiche perdue. `MIN_PREFIXE_COMMUNE_AVEC_CP` renommé
+  `MIN_PREFIXE_COMMUNE_CORROBORE` : la corroboration est soit le CP sur la ligne, soit ce
+  type de voie final.
 - **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
   `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
   vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE
@@ -351,6 +365,13 @@ les pros) et les Réglages (avec recherche).
   la fiche colis, la carte d'arrêt (touche horloge des pros) et les Réglages. **Cœur** dans
   l'en-tête de la fiche colis = mise en favori explicite (`saveFavoriInfo(..., {creer:true})`),
   retrait avec confirmation si note/horaires existent.
+  **Horaires repliés par défaut** (build 142, « la majorité du temps ça encombre pour rien ») :
+  sur la fiche colis, l'éditeur vit dans un `<details class="hours-disclosure">` fermé, et
+  n'est **construit qu'à l'ouverture** ; une adresse qui a déjà des horaires s'ouvre d'office
+  (là, c'est une information à voir). Au passage, correctif CSS **global** : la règle
+  `input, select, textarea` peignait aussi les cases à cocher (fond sombre, 44 px de haut,
+  coins arrondis, aucune coche visible) — d'où les « cadres bizarres » signalés. Elle exclut
+  désormais `checkbox`/`radio`, qui gardent leur rendu natif teinté par `accent-color`.
   **Position GPS** : le `GeolocateControl` de MapLibre est le **seul** consommateur de la
   géolocalisation de l'appli — `trackUserLocation` suit déjà la position en continu et
   affiche le point du livreur en permanence après le premier appui. Une surveillance maison

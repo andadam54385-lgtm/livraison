@@ -963,6 +963,63 @@ console.log("\n=== Cas 23 : compte rendu photos reel du 2026-09-09 (12 images, 4
   assertEqual(sansRue[0] && sansRue[0].ville, "CHAUVONCOURT", "(h) commune");
 }
 
+console.log("\n=== Cas 24 : commune collee en FIN de rue, sans CP sur la ligne (terrain 2026-09-11) ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const villes24 = [
+    ["Saint-Mihiel", "55300"], ["Ranzieres", "55300"], ["Apremont-la-Foret", "55300"], ["Les Paroches", "55300"],
+    ["Ansauville", "54470"], ["Dieue-sur-Meuse", "55320"], ["Genicourt-sur-Meuse", "55320"], ["Commercy", "55200"],
+  ];
+  const knownCities24 = new Set(villes24.map(([c]) => looseCommune(normalizeCity(c))));
+  const opts24 = { knownCities: knownCities24, knownCps: new Set(villes24.map(([, cp]) => cp)) };
+
+  // Bug reel : la commune restait dans la rue, l'arret partait sans ville, et
+  // le geocodage n'avait plus que le CP pour trancher entre les 34 communes du
+  // 55300 -- il a choisi "8 Rue de Saint Mihiel" a RANZIERES (une rue qui
+  // porte le nom de la ville voisine) au lieu de "8 Rue du Temple" a
+  // Saint-Mihiel. Deux arrets livres dans le mauvais village.
+  const temple = parseAddressList([R(1365, 1420, "8 TEMPLE RUE ST MIHIEL 8000 | 0+1 D"), R(1393, 1470, "LS 55300")], opts24);
+  assertEqual(temple[0] && temple[0].ville, "ST MIHIEL", "(a) commune detachee de la fin de la rue");
+  assertEqual(temple[0] && temple[0].rue, "8 TEMPLE RUE", "(a) la rue garde son type de voie, sans la commune ni le residu d'icone");
+
+  // Commune repliee sur la ligne suivante : le detachement se fait sur la rue
+  // ASSEMBLEE, pas ligne par ligne.
+  const gaulle = parseAddressList([
+    R(1143, 1219, "16 GENERAL DE GAULLE 8000 | 041 v"),
+    R(1213, 1243, "RUE APREMONT LA"),
+    R(1264, 1294, "FORET 55300"),
+  ], opts24);
+  assertEqual(gaulle[0] && gaulle[0].ville, "APREMONT LA FORET", "(b) commune recomposee sur deux lignes puis detachee");
+  assertEqual(gaulle[0] && gaulle[0].rue, "16 GENERAL DE GAULLE RUE", "(b) rue propre");
+
+  // Le detachement vaut aussi quand la commune est la BONNE : "2 VAUX RUE
+  // RANZIERES" est vraiment a Ranzieres.
+  const vaux = parseAddressList([R(1508, 1581, "2 VAUX RUE RANZIERES 8000180"), R(1558, 1626, "M, 55300")], opts24);
+  assertEqual(vaux[0] && vaux[0].ville, "RANZIERES", "(c) commune correcte detachee malgre le residu de badge");
+  assertEqual(vaux[0] && vaux[0].rue, "2 VAUX RUE", "(c) rue propre");
+
+  // Prefixe de 5 lettres accepte ici aussi : la rue qui se termine par son
+  // TYPE est la corroboration (voir MIN_PREFIXE_COMMUNE_CORROBORE).
+  const dieue = parseAddressList([R(734, 761, "2 MEUSE RUE DIEUE"), R(781, 808, "55320")], opts24);
+  assertEqual(dieue[0] && dieue[0].ville, "DIEUE", "(d) commune abregee a 5 lettres detachee");
+  assertEqual(dieue[0] && dieue[0].rue, "2 MEUSE RUE", "(d) rue propre");
+
+  // Garde-fou : une rue qui PORTE un nom de commune ne doit pas perdre son
+  // dernier mot. Ici le reste ne finirait pas par un type de voie.
+  const porteUnNom = parseAddressList([R(0, 30, "3 RUE DE COMMERCY"), R(34, 64, "55200")], opts24);
+  assertEqual(porteUnNom[0] && porteUnNom[0].rue, "3 RUE DE COMMERCY", "(e) 'Rue de Commercy' reste entiere");
+  assertEqual(porteUnNom[0] && porteUnNom[0].ville, null, "(e) et n'invente pas la commune");
+
+  // Garde-fou : au plus deux jetons entre la commune et la fin de ligne.
+  // Au-dela, ce n'est plus un residu d'icone -- on ne devine pas.
+  const tropLoin = parseAddressList([R(0, 30, "8 CROIX RUE ANSAUVILLE PORTE BLEUE ARRIERE"), R(34, 64, "54470")], opts24);
+  assertEqual(tropLoin[0] && tropLoin[0].ville, null, "(f) trois mots apres la commune : pas de detachement");
+  // Et une commune SEULE en fin de ligne, sans type de voie devant, n'est
+  // jamais detachee (ce serait la rue elle-meme).
+  const sansType = parseAddressList([R(0, 30, "8 GRANDE ANSAUVILLE"), R(34, 64, "54470")], opts24);
+  assertEqual(sansType[0] && sansType[0].ville, null, "(f) pas de type de voie avant la commune : pas de detachement");
+}
+
 console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
 {
   // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)

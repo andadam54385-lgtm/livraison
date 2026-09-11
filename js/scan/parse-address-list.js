@@ -412,7 +412,7 @@ const MIN_PREFIXE_COMMUNE = 6;
 // manque a une ligne nue : sans lui, "PETIT" ou "GRAND" (premiers mots de
 // communes reelles du secteur, mais aussi noms de famille tres courants)
 // pourraient passer pour une commune sur une simple ligne de nom.
-const MIN_PREFIXE_COMMUNE_AVEC_CP = 5;
+const MIN_PREFIXE_COMMUNE_CORROBORE = 5;
 
 function isKnownCity(normalized, knownCities, minPrefixe = MIN_PREFIXE_COMMUNE) {
   if (!normalized || !knownCities || knownCities.size === 0) return false;
@@ -571,8 +571,8 @@ function splitEmbeddedCpVille(line, knownCities, knownCps) {
     // ressemble a une ville pour une regex, pas pour la base).
     // Le CP est trouve : c'est LA ligne commune+CP de la fiche, ce qui
     // autorise un prefixe de commune plus court (voir
-    // MIN_PREFIXE_COMMUNE_AVEC_CP).
-    const villeApres = leadingKnownVille(after, knownCities, MIN_PREFIXE_COMMUNE_AVEC_CP);
+    // MIN_PREFIXE_COMMUNE_CORROBORE).
+    const villeApres = leadingKnownVille(after, knownCities, MIN_PREFIXE_COMMUNE_CORROBORE);
     if (villeApres) {
       const cpVille = `${cp} ${villeApres}`;
       return before ? [before, cpVille] : [cpVille];
@@ -582,7 +582,7 @@ function splitEmbeddedCpVille(line, knownCities, knownCps) {
     // Sans ce decoupage la commune restait DANS la rue : l'adresse ne pouvait
     // pas etre geocodee et le colis finissait "a verifier" alors que tout
     // etait pourtant parfaitement lisible.
-    const peeled = peelKnownVille(before, knownCities, MIN_PREFIXE_COMMUNE_AVEC_CP);
+    const peeled = peelKnownVille(before, knownCities, MIN_PREFIXE_COMMUNE_CORROBORE);
     if (peeled) {
       const cpVille = `${cp} ${peeled.ville}`;
       return peeled.rest ? [peeled.rest, cpVille] : [cpVille];
@@ -743,6 +743,32 @@ function mergeHyphenWraps(rawLines, knownCities) {
   return out;
 }
 
+// La rue se termine-t-elle par un TYPE de voie ("... RUE", "... ALL",
+// "... LT") ? C'est la forme de ce terminal (type en dernier), et donc le
+// signal qui autorise a detacher ce qui SUIT comme etant la commune. Sans
+// cette condition, "3 RUE DE COMMERCY" (une rue qui porte le nom d'une
+// commune) perdrait son dernier mot.
+function finitParMotDeVoie(text) {
+  const mots = String(text || "").trim().split(/\s+/);
+  const dernier = (mots[mots.length - 1] || "").toUpperCase();
+  return STREET_KEYWORDS.includes(dernier);
+}
+
+// Residus d'icone tolerés entre la commune et la fin de ligne ("... GENICOURT
+// D ME,", "... RANZIERES 8000180 M,") : au plus deux jetons, et seulement si
+// le detachement reussit ET laisse une rue qui se termine par son type.
+const MAX_RESIDUS_FIN_DE_RUE = 2;
+
+function peelVilleEnFinDeRue(rue, knownCities) {
+  const mots = String(rue || "").trim().split(/\s+/);
+  for (let drop = 0; drop <= MAX_RESIDUS_FIN_DE_RUE && drop < mots.length; drop++) {
+    const candidat = mots.slice(0, mots.length - drop).join(" ");
+    const peeled = peelKnownVille(candidat, knownCities, MIN_PREFIXE_COMMUNE_CORROBORE);
+    if (peeled && peeled.rest && finitParMotDeVoie(peeled.rest)) return peeled;
+  }
+  return null;
+}
+
 export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps = new Set() } = {}) {
   const lines = mergeHyphenWraps(rawLines, knownCities).flatMap((l) => splitEmbeddedCpVille(l, knownCities, knownCps));
   const result = { names: [], streets: [], cp: null, ville: null };
@@ -848,6 +874,25 @@ export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps
       result.names.push(nomPropre);
     }
     lastCategory = "name";
+  }
+
+  // Commune restee collee a la FIN de la rue, sans code postal sur la meme
+  // ligne pour la detacher (terrain 2026-09-11 : "8 TEMPLE RUE ST MIHIEL",
+  // le CP etant sur la ligne suivante). L'arret partait alors sans ville, et
+  // le geocodage n'avait plus que le CP pour trancher entre les 34 communes
+  // du 55300 : il a choisi "8 Rue de Saint Mihiel" a RANZIERES (une rue qui
+  // porte le nom de la ville voisine, et qui existe aussi aux Paroches et a
+  // Dompcevrin) au lieu de "8 Rue du Temple" a Saint-Mihiel. Deux arrets
+  // envoyes dans le mauvais village.
+  // Fait ici, sur la rue ASSEMBLEE, et pas ligne par ligne : le terminal
+  // replie souvent la commune sur la ligne d'apres ("RUE APREMONT LA" /
+  // "FORET").
+  if (!result.ville && result.streets.length > 0) {
+    const peeled = peelVilleEnFinDeRue(result.streets.join(" "), knownCities);
+    if (peeled) {
+      result.ville = peeled.ville;
+      result.streets = [peeled.rest];
+    }
   }
 
   return result;
