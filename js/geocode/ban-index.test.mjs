@@ -71,5 +71,40 @@ assertEqual(
 assertEqual(matchAdresseEntries(fixture, "xyzzy"), [], "aucune correspondance -> liste vide");
 assertEqual(matchAdresseEntries(fixture, ""), [], "saisie vide -> liste vide");
 
+console.log("\n=== 'st' = 'saint' et ligatures (terrain 2026-09-11 : aucune proposition) ===");
+// "4 Notre dame St mihiel" ne proposait RIEN : la recherche exige que chaque
+// mot tape soit le PREFIXE d'un mot de l'adresse, et "saint" ne commence pas
+// par "st". Meme probleme pour "kœur" : la ligature n'etant ni une lettre a-z
+// ni un accent decomposable, elle servait de SEPARATEUR et coupait le mot en
+// "k" + "ur" -- taper "koeur" ne trouvait rien.
+{
+  assertEqual(tokenizeQuery("Kœur-la-Grande"), ["koeur", "la", "grande"], "ligature oe developpee, pas coupee");
+  assertEqual(tokenizeQuery("Vandœuvre-lès-Nancy"), ["vandoeuvre", "les", "nancy"], "idem Vandoeuvre");
+  assertEqual(tokenizeQuery("Tær"), ["taer"], "ligature ae developpee");
+  // Alias pose sur l'ENTREE, dans les deux sens : la base ecrit les deux
+  // formes (13 542 adresses "saint...", 24 "st...").
+  assertEqual(buildSearchTokens({ r: "Rue Notre Dame", c: "Saint-Mihiel", cp: "55300" }).includes("st"), true, '"saint" de la base porte aussi l\'alias "st"');
+  assertEqual(buildSearchTokens({ r: "Rue St Claude", c: "Toul", cp: "54200" }).includes("saint"), true, '"st" de la base porte aussi l\'alias "saint"');
+  assertEqual(buildSearchTokens({ r: "Rue Sainte Claire", c: "Villerupt", cp: "54190" }).includes("ste"), true, '"sainte" porte l\'alias "ste"');
+
+  const fixtureSaint = [
+    { n: "4", rep: "", r: "Rue Notre Dame", c: "Saint-Mihiel", cp: "55300" },
+    { n: "2", rep: "", r: "Rue de l'Orme", c: "Kœur-la-Grande", cp: "55300" },
+    { n: "9", rep: "", r: "Rue des Iris", c: "Stenay", cp: "55700" },
+    { n: "6", rep: "", r: "Rue du College St Claude", c: "Toul", cp: "54200" },
+  ].map((e) => ({ ...e, _searchTokens: buildSearchTokens(e) }));
+  const villes = (q) => matchAdresseEntries(fixtureSaint, q, 5).map((e) => e.c);
+
+  assertEqual(villes("4 Notre dame St mihiel"), ["Saint-Mihiel"], "la saisie exacte du terrain propose enfin l'adresse");
+  assertEqual(villes("4 notre dame saint mihiel"), ["Saint-Mihiel"], "la forme en toutes lettres marche toujours");
+  assertEqual(villes("2 orme koeur"), ["Kœur-la-Grande"], '"koeur" tape a plat trouve "Kœur"');
+  assertEqual(villes("2 orme kœur"), ["Kœur-la-Grande"], "et la ligature tapee aussi");
+  assertEqual(villes("college saint claude"), ["Toul"], '"saint" tape trouve une rue ecrite "St" dans la base');
+  // Garde-fou : le mot tape n'est JAMAIS reecrit, sinon "ste" deviendrait
+  // "sainte" et Stenay disparaitrait en cours de frappe.
+  assertEqual(villes("stenay"), ["Stenay"], "Stenay reste trouvable");
+  assertEqual(villes("ste"), ["Stenay"], '"ste" en cours de frappe propose encore Stenay');
+}
+
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);
 process.exit(failures === 0 ? 0 : 1);

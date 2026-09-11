@@ -260,6 +260,18 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   accepte aussi un **mot entier au milieu du nom** (« mihiel » → Saint-Mihiel), après les
   correspondances par le début. Toute nouvelle tolérance sur les noms de commune va ICI, pas
   dans un appelant : `normalizeCity` doit rester le miroir exact des `cn` déjà indexés.
+- **Recherche d'adresse sur une ligne : « st » = « saint », ligatures développées** (build
+  144). Le champ Adresse (`matchAdresseEntries`, `ban-index.js`) est un moteur DIFFÉRENT de
+  l'autocomplétion Ville : il exige que chaque mot tapé soit le **préfixe** d'un mot de
+  l'adresse. « 4 Notre dame St mihiel » ne proposait donc rien — « saint » ne commence pas
+  par « st ». Et « œ » n'étant ni une lettre a-z ni un accent décomposable, il servait de
+  **séparateur** : « Kœur-la-Grande » se découpait en `k`/`ur`, donc « koeur » ne trouvait
+  rien (388 adresses de la zone concernées). Deux correctifs : `tokenizeQuery` développe
+  `œ`/`æ` avant le découpage (des deux côtés), et `buildSearchTokens` ajoute un **alias**
+  `saint`↔`st`, `sainte`↔`ste` sur l'ENTRÉE — la base écrit les deux formes (13 542 adresses
+  « saint… », 24 « st… »). L'alias est posé sur l'entrée et **jamais** en réécrivant le mot
+  tapé : réécrire casserait la frappe en cours (« ste » deviendrait « sainte » et Stenay
+  disparaîtrait). Testé dans `ban-index.test.mjs`.
 - **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
   `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
   vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE
