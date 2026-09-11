@@ -6,7 +6,7 @@
 // villages). Corrige dans scoreCandidates() : voir le commentaire dans
 // match-address.js pour le detail du bug (plafond de score qui ecrasait le
 // bonus commune).
-import { scoreCandidates } from "./match-address.js";
+import { scoreCandidates, looseCommune } from "./match-address.js";
 import { normalizeStreet, normalizeCity } from "./normalize-address.js";
 
 let failures = 0;
@@ -142,6 +142,33 @@ assert(
     lieutenant[0].entry.r === "Rue du Lt Roland Excoffier",
     `la rue du Lt (lieutenant) reste trouvable telle quelle (obtenu: ${lieutenant[0].entry.r})`
   );
+}
+
+// Regression (retour terrain 2026-09-11) : "il prend pas la ville s'il y a st
+// au lieu de saint, et s'il n'y a pas le tiret ; et kœur il a du mal si je
+// mets juste koeur". looseCommune est le point de comparaison UNIQUE des
+// communes (bonus du geocodage, autocompletion de la fiche, dedoublonnage,
+// communes connues du parser) : l'expansion "ST" -> "SAINT" y vit maintenant,
+// au lieu du seul parser de liste.
+{
+  const memeCommune = (a, b) => looseCommune(a) === looseCommune(b);
+  assert(memeCommune("st mihiel", "saint-mihiel"), '"st mihiel" = "saint-mihiel"');
+  assert(memeCommune("saint mihiel", "saint-mihiel"), '"saint mihiel" (sans tiret) = "saint-mihiel"');
+  assert(memeCommune("st-mihiel", "saint-mihiel"), '"st-mihiel" = "saint-mihiel"');
+  assert(memeCommune("ste marie", "sainte-marie"), '"ste marie" = "sainte-marie"');
+  assert(memeCommune("koeur-la-grande", "kœur-la-grande"), '"koeur" tape a plat = "kœur" de la base');
+  assert(memeCommune("vandoeuvre les nancy", "vandœuvre-les-nancy"), "Vandoeuvre sans ligature ni tirets");
+  // Jamais une sous-chaine : "st" doit rester un mot entier.
+  assert(!memeCommune("stenay", "saintenay"), '"stenay" n\'est pas "saintenay" (st doit etre un mot entier)');
+  assert(looseCommune("stenay") === "stenay", "une commune qui COMMENCE par st n'est pas touchee");
+
+  // Effet reel : la commune tapee "st mihiel" redonne son bonus au bon
+  // village. Sans elle, seul le CP tranchait -- et "Rue de Saint Mihiel"
+  // existe a Ranzieres, aux Paroches et a Dompcevrin (bug du build 142).
+  const p = (n, r, c, cn) => ({ n, rep: "", r, rn: normalizeStreet(r), cp: "55300", c, cn });
+  const pool = [p("8", "Rue de Saint Mihiel", "Ranzières", "ranzieres"), p("8", "Rue du Temple", "Saint-Mihiel", "saint-mihiel")];
+  const scored = scoreCandidates(pool, { normRue: normalizeStreet("TEMPLE RUE"), normCommune: normalizeCity("st mihiel"), numero: "8" });
+  assert(scored[0].entry.c === "Saint-Mihiel", `"st mihiel" tape a la main donne bien Saint-Mihiel (obtenu: ${scored[0].entry.c})`);
 }
 
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);

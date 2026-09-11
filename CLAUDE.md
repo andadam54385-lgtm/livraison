@@ -248,6 +248,18 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   commune, aucune fiche perdue. `MIN_PREFIXE_COMMUNE_AVEC_CP` renommé
   `MIN_PREFIXE_COMMUNE_CORROBORE` : la corroboration est soit le CP sur la ligne, soit ce
   type de voie final.
+- **`looseCommune` = le point de comparaison UNIQUE des communes** (build 143, « il prend pas
+  la ville s'il y a st au lieu de saint, et s'il n'y a pas le tiret ; et kœur il a du mal si
+  je mets juste koeur »). Il applique, des DEUX côtés : tirets/apostrophes → espaces,
+  ligatures `œ`/`æ` → `oe`/`ae`, et `ST`/`STE` → `SAINT`/`SAINTE` (mot entier — « Stenay »
+  n'est pas touché). L'expansion Saint ne vivait que dans `parse-address-list.js`, donc seul
+  le scan de liste en profitait : une commune **tapée à la main** n'était reconnue ni par
+  l'autocomplétion de la fiche, ni par le bonus commune du géocodage, et l'adresse repartait
+  sur le seul code postal — la cause même du « Ranzières au lieu de Saint-Mihiel ».
+  L'autocomplétion `#f-ville` compare désormais la forme `looseCommune` des deux côtés et
+  accepte aussi un **mot entier au milieu du nom** (« mihiel » → Saint-Mihiel), après les
+  correspondances par le début. Toute nouvelle tolérance sur les noms de commune va ICI, pas
+  dans un appelant : `normalizeCity` doit rester le miroir exact des `cn` déjà indexés.
 - **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
   `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
   vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE

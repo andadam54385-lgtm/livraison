@@ -5,7 +5,7 @@ import { recognizeCanvas } from "./ocr.js";
 import { parseUpsLabel } from "./parse-ups-label.js";
 import { saveColis, isDuplicateTracking } from "./colis-store.js";
 import { recordCorrectionIfNeeded } from "./ocr-corrections-store.js";
-import { matchAddress } from "../geocode/match-address.js";
+import { matchAddress, looseCommune } from "../geocode/match-address.js";
 import { renderCandidatePicker, renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
 import { listDistinctCities, searchAdresses, preloadBanEntries } from "../geocode/ban-index.js";
 import { normalizeCity } from "../geocode/normalize-address.js";
@@ -341,9 +341,23 @@ function bindVilleAutocomplete(container) {
     list.innerHTML = "";
   }
 
+  // Comparaison TOLERANTE des deux cotes (voir looseCommune) : tirets et
+  // apostrophes en espaces, ligature "œ" developpee, "ST" -> "SAINT". Sans
+  // ca, la liste restait vide des que le livreur tapait la forme naturelle --
+  // "st mihiel" (la base ecrit "saint-mihiel"), "saint mihiel" sans le tiret,
+  // ou "koeur" (la base ecrit "kœur-la-grande"). Retour terrain 2026-09-11.
+  // Un mot ENTIER en milieu de nom compte aussi ("mihiel" trouve
+  // Saint-Mihiel), apres les correspondances par le debut.
   async function showMatches(prefix) {
     const cities = await listDistinctCities();
-    const matches = cities.filter((c) => c.cn.startsWith(prefix)).slice(0, 6);
+    const debut = [];
+    const dansLeNom = [];
+    for (const c of cities) {
+      const cn = looseCommune(c.cn);
+      if (cn.startsWith(prefix)) debut.push(c);
+      else if (cn.includes(` ${prefix}`)) dansLeNom.push(c);
+    }
+    const matches = [...debut, ...dansLeNom].slice(0, 6);
     if (matches.length === 0) {
       hide();
       return;
@@ -363,7 +377,7 @@ function bindVilleAutocomplete(container) {
 
   input.addEventListener("input", () => {
     clearTimeout(debounceTimer);
-    const prefix = normalizeCity(input.value.trim());
+    const prefix = looseCommune(normalizeCity(input.value.trim()));
     if (prefix.length < 2) {
       hide();
       return;

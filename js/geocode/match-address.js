@@ -165,13 +165,25 @@ function normalizeRep(rep) {
 // GRANDE" : sans expansion des DEUX cotes au moment de comparer, la commune
 // n'etait jamais reconnue, elle finissait collee a la rue et l'arret partait
 // sans ville (terrain 2026-09-09, Kœur-la-Grande et Kœur-la-Petite).
+// "ST"/"STE" -> "SAINT"/"SAINTE" : le terminal l'abrege ("SORCY ST MARTIN"),
+// et le livreur le tape pareil ("st mihiel"). Cette expansion vivait
+// uniquement dans parse-address-list.js, donc SEUL le scan de liste en
+// profitait : une commune tapee a la main dans la fiche colis n'etait pas
+// reconnue (ni par l'autocompletion, ni par le bonus commune du geocodage),
+// et l'adresse repartait sur le seul code postal -- exactement ce qui a
+// envoye deux arrets dans le mauvais village (retour terrain 2026-09-11 :
+// "il prend pas la ville s'il y a st au lieu de saint").
+// Mot ENTIER seulement : aucune commune francaise ne commence par un mot
+// "st"/"ste" qui ne soit pas "saint"/"sainte".
 export function looseCommune(s) {
   return String(s || "")
     .replace(/œ/g, "oe")
     .replace(/æ/g, "ae")
     .replace(/[-']/g, " ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(/\bste\b/gi, "sainte")
+    .replace(/\bst\b/gi, "saint");
 }
 
 // Extrait de matchAddress() pour rester testable sans IndexedDB (voir
