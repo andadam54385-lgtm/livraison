@@ -418,7 +418,7 @@ export function renderReviewForm(container, colis, { isNew, duplicate = false, o
       ${onCancel ? `<button type="button" id="f-cancel">${icon("arrow-left")}Retour</button>` : `<button type="button" id="f-rescan">Rescanner</button>`}
       <button type="button" class="primary btn-lg" id="f-valider">Valider</button>
     </div>
-    <button type="button" id="f-gps-direct" style="width:100%;margin-bottom:10px;">${icon("navigation")}Entreprise / lieu-dit : placer le point GPS directement</button>
+    <button type="button" id="f-gps-direct" class="btn-gps-direct">${icon("navigation")}Placer le point GPS (entreprise, lieu-dit)</button>
     <div class="field">
       <label>Adresse</label>
       <input type="text" id="f-adresse-complete" class="field-lg" placeholder="ex: 12 rue de la Liberté" autocomplete="off" value="${escapeAttr(initialAdresseQuery)}">
