@@ -146,7 +146,17 @@ const NOISE_TOKEN_PATTERNS = [
   // chiffres SEULEMENT : avec 5, "55140 |" (un vrai code postal suivi d'une
   // barre parasite) passait pour un badge et le CP disparaissait.
   // La barre du badge est parfois lue "}" ou "]" ("8000} 041").
-  /\b\d{3,4}\s*[|}\]]\s*[o0-9]{0,3}\s*[+: ]?\s*\d{0,3}/gi, // badge "8000 | 0+1", "8000 | 0:", "4000 | 140 87"
+  // ... suivi du glyphe de l'icone que l'OCR lit comme 1-2 lettres ("8000 |
+  // 0+1 QD", "8000 | 0+1 RD", "8000 | 0+1 v") : mange avec le badge, sinon
+  // ce residu restait colle au nom ou a la rue ("10 DOCTEUR QD", "Samuel
+  // FERRI vw" -- terrain 2026-09-09 et 2026-09-14). La barre est parfois lue
+  // "/" ("8000/0185").
+  /\b\d{3,4}\s*[|}\]\/]\s*[o0-9]{0,3}\s*[+: ]?\s*\d{0,3}(?:\s*[A-Za-z0-9@©®]{1,2}(?=[\s|,.)]|$))?/gi, // badge "8000 | 0+1", "8000 | 0:", "4000 | 140 87"
+  // Badge dont la barre ET le plus ont ete perdus, chiffres colles :
+  // "8000101." / "800101." pour "8000 | 0+1" ; ou le "+" lu "H" : "8000
+  // 10H08" (terrain 2026-09-14).
+  /\b[1-9]000?[01]\d{1,3}\.?(?=\s|$)/g,
+  /\b[1-9]000\s+\d{1,2}H\d{1,2}\b/gi,
   // Badge dont la barre n'a pas ete lue du tout ("8000 0+1", terrain
   // 2026-09-09 "GARAGE CHAUV UONCOURT 8000 0+1 wo") : la forme
   // <3-4 chiffres> <n>+<n> reste sans ambiguite meme sans separateur.
@@ -262,6 +272,7 @@ function stripTrailingNoise(text) {
 function stripInterfaceNoise(ocrLines) {
   const kept = [];
   let insideBanner = false;
+  const departsBadge = departsParBadge(ocrLines);
   let bannerLinesConsumed = 0;
 
   for (const l of ocrLines) {
@@ -321,7 +332,7 @@ function stripInterfaceNoise(ocrLines) {
     // garde que l'icone de navigation ("a", "A", "A9", "As") -- observee entre
     // presque toutes les fiches d'une video reelle. Elle vaut separateur, et
     // n'est jamais un contenu (elle devenait un faux nom : "ar 1.16kr Q").
-    const isClientStart = DISTANCE_MARKER_RE.test(text) || ICON_ROW_RE.test(text);
+    const isClientStart = DISTANCE_MARKER_RE.test(text) || ICON_ROW_RE.test(text) || departsBadge.has(l);
     let cleaned = ICON_ROW_RE.test(text) ? "" : stripTrailingNoise(stripNoiseTokens(text));
     // Ce qui reste d'un badge apres nettoyage ("8000 | 0+2 3" -> "3") n'est
     // jamais un contenu : un chiffre isole devenait le debut de la rue
@@ -363,6 +374,10 @@ const STREET_KEYWORDS = [
   // L'expansion vers "lotissement" pour le geocodage est faite ailleurs, et
   // conditionnee ("Lt" = lieutenant dans la BAN) : voir normalize-address.js.
   "LT",
+  // "RUEL" = ruelle sur ce terminal ("9 VAUX RUEL ST MIHIEL", "4 FOUR RUEL",
+  // terrain 2026-09-14) : sans lui, la rue ne se terminait par aucun type de
+  // voie et la commune collee derriere n'etait jamais detachee.
+  "RUEL",
 ];
 
 // Un mot-cle COURT seul sur sa ligne n'ouvre pas une adresse : c'est presque
@@ -596,7 +611,11 @@ function splitEmbeddedCpVille(line, knownCities, knownCps) {
   }
   // Sans base (ou commune inconnue) : forme "<reste> <CP> <ville>" par regex.
   const m = trimmed.match(CP_VILLE_TRAILING_RE);
-  if (m && isPlausibleCp(m[2], knownCps)) return [m[1].trim(), `${m[2]} ${m[3]}`.trim()];
+  // Au moins 3 lettres pour une ville devinee par la seule forme : "MIHIEL
+  // 55300 Va" (terrain 2026-09-14) donnait ville="Va" -- un residu d'icone --
+  // et cette fausse ville bloquait ensuite le detachement de la vraie
+  // commune ("ST MIHIEL") restee dans la rue.
+  if (m && isPlausibleCp(m[2], knownCps) && m[3].replace(/[^a-zà-ÿ]/gi, "").length >= 3) return [m[1].trim(), `${m[2]} ${m[3]}`.trim()];
   if (!found || /\d$/.test(found.before)) return [trimmed];
   return found.before ? [found.before, found.cp] : [found.cp];
 }
@@ -733,7 +752,10 @@ function mergeHyphenWraps(rawLines, knownCities) {
       !suivanteEstUneRue &&
       FRAGMENT_AVEC_TIRET_RE.test(line) &&
       /[a-zà-ÿ]$/i.test(precedente) &&
-      isKnownCity(looseCommune(normalizeCity(expandSaint(precedente + line))), knownCities);
+      // Sur la FIN du texte recolle, pas sur la ligne entiere : "RUE
+      // MANDRES-AU" + "X-QUATRE-TOURS" (terrain 2026-09-14) porte le type de
+      // voie devant la commune, la ligne entiere n'est jamais une commune.
+      peelKnownVille(precedente + line, knownCities) != null;
     if (recolleSurTiret || recolleEnPleinMot) {
       out[out.length - 1] = precedente + line;
     } else {
@@ -764,7 +786,24 @@ function peelVilleEnFinDeRue(rue, knownCities) {
   for (let drop = 0; drop <= MAX_RESIDUS_FIN_DE_RUE && drop < mots.length; drop++) {
     const candidat = mots.slice(0, mots.length - drop).join(" ");
     const peeled = peelKnownVille(candidat, knownCities, MIN_PREFIXE_COMMUNE_CORROBORE);
-    if (peeled && peeled.rest && finitParMotDeVoie(peeled.rest)) return peeled;
+    if (!peeled || !peeled.rest) continue;
+    // "ST"/"SAINT" seul n'est jamais une commune, meme si la base n'en
+    // connait qu'une qui commence ainsi : c'est le debut d'un nom coupe.
+    const normalisee = looseCommune(normalizeCity(expandSaint(peeled.ville)));
+    if (normalisee === "saint" || normalisee === "sainte") continue;
+    // (a) La rue se termine par son type de voie : forme de ce terminal.
+    if (finitParMotDeVoie(peeled.rest)) return peeled;
+    // (b) Commune EXACTE (jamais un prefixe) derriere une rue SANS type de
+    // voie : "1 BASSE" / "KOEUR LA PETITE", "1 REBUS QUR" / "LEROUVILLE"
+    // (terrain 2026-09-14, le terminal omet parfois le type). Le reste doit
+    // ressembler a une adresse (un numero) et ne pas finir par un mot de
+    // liaison -- "Route de" + "Bar le Duc" est une rue qui porte un nom de
+    // commune, pas une commune. N'intervient que si aucune ville n'a ete lue
+    // ailleurs : l'alternative etait un geocodage sur le seul code postal.
+    const exacte = knownCities.has(looseCommune(normalizeCity(expandSaint(peeled.ville))));
+    const reste = peeled.rest.trim();
+    const dernierMot = reste.split(/\s+/).pop().toUpperCase();
+    if (exacte && /^\d/.test(reste) && !MOTS_DE_LIAISON_FIN.has(dernierMot)) return peeled;
   }
   return null;
 }
@@ -828,6 +867,30 @@ export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps
     // raison sociale qui contient le nom de la ville, pas la commune.
     const apresLaRue = lastCategory === "street" || lastCategory === "ville" || lastCategory === "cp";
     const villeEnFin = apresLaRue ? peelKnownVille(line, knownCities) : null;
+    // Commune coupee par le retour a la ligne AU MILIEU de son nom : "4 CHAMPS
+    // RUE RUPT" / "DEVANT SAINT MIHIEL" / "55260" (terrain 2026-09-14). Sur la
+    // ligne seule, "SAINT MIHIEL" est reconnue et "DEVANT" jete : l'arret
+    // partait a SAINT-MIHIEL, et cpParCommune ecrasait meme le vrai 55260 par
+    // 55300. On essaie d'abord avec les 1-2 derniers mots de la rue devant la
+    // ligne : si une commune PLUS LONGUE apparait ("RUPT DEVANT SAINT
+    // MIHIEL"), c'est elle, et la rue rend les mots empruntes.
+    if (apresLaRue && result.streets.length > 0) {
+      const derniereRue = result.streets[result.streets.length - 1];
+      const motsRue = derniereRue.split(/\s+/).filter(Boolean);
+      const emprunt = Math.min(2, motsRue.length);
+      const motsLigne = countWords(line);
+      if (emprunt > 0 && motsLigne > 0) {
+        const longue = peelKnownVille(`${motsRue.slice(-emprunt).join(" ")} ${line}`, knownCities);
+        const nbLongue = longue ? countWords(longue.ville) : 0;
+        if (longue && nbLongue > motsLigne && nbLongue > (villeEnFin ? countWords(villeEnFin.ville) : 0)) {
+          const empruntes = nbLongue - motsLigne;
+          result.streets[result.streets.length - 1] = motsRue.slice(0, motsRue.length - empruntes).join(" ");
+          result.ville = longue.ville;
+          lastCategory = "ville";
+          continue;
+        }
+      }
+    }
     if (villeEnFin && countWords(villeEnFin.rest) <= 2 && !lineHasStreetWord(villeEnFin.rest)) {
       result.ville = villeEnFin.ville;
       lastCategory = "ville";
@@ -887,15 +950,80 @@ export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps
   // Fait ici, sur la rue ASSEMBLEE, et pas ligne par ligne : le terminal
   // replie souvent la commune sur la ligne d'apres ("RUE APREMONT LA" /
   // "FORET").
-  if (!result.ville && result.streets.length > 0) {
-    const peeled = peelVilleEnFinDeRue(result.streets.join(" "), knownCities);
-    if (peeled) {
-      result.ville = peeled.ville;
-      result.streets = [peeled.rest];
-    }
+  // Une ville deja posee mais INCONNUE de la base ("Va", residu d'icone pris
+  // pour une ville par la forme seule) ne doit pas bloquer le detachement
+  // d'une vraie commune restee dans la rue.
+  if (result.streets.length > 0) {
+    const villeConnue = result.ville && isKnownCity(looseCommune(normalizeCity(expandSaint(result.ville))), knownCities);
+    const { rue, ville } = finaliserRue(result.streets.join(" "), knownCities, { chercherVille: !villeConnue });
+    result.streets = [rue];
+    if (ville && !villeConnue) result.ville = ville;
   }
 
   return result;
+}
+
+// Mots courts qui font partie d'une rue ou d'une commune : jamais un residu.
+const MOTS_UTILES_COURTS = new Set(["LA", "LE", "LES", "DE", "DU", "DES", "ST", "STE", "EN", "AU", "AUX", "ET", "SUR", "SOUS"]);
+// Un reste de rue qui se termine ainsi n'est pas une rue complete : "Route
+// de" + "Bar le Duc" est une rue qui PORTE un nom de commune.
+const MOTS_DE_LIAISON_FIN = new Set(["DE", "DU", "DES", "LA", "LE", "LES", "A", "AU", "AUX", "SUR", "SOUS", "EN", "ET", "D", "L"]);
+
+// Residu d'icone/badge en QUEUE de rue, apres le type de voie : "MS", "ME,",
+// "QD", "RD", "T5", "GDR", "PTR", "Lo", "z", ou un "8000" esseule (terrain
+// 2026-09-14, une fiche sur trois). Au plus 3 caracteres, jamais un mot
+// utile, jamais un nombre (un numero en fin de rue existe sur d'autres
+// terminaux).
+function estResiduDeQueue(tok) {
+  const nu = tok.replace(/[^A-Za-zÀ-ÿ0-9]/g, "");
+  if (nu.length === 0) return true;
+  if (/^[1-9]000$/.test(nu)) return true;
+  if (nu.length > 3) return false;
+  const up = nu.toUpperCase();
+  if (MOTS_UTILES_COURTS.has(up) || STREET_KEYWORDS.includes(up)) return false;
+  if (/^\d+$/.test(nu)) return false;
+  return true;
+}
+
+function nettoyerQueueDeRue(rue) {
+  const mots = String(rue || "").trim().split(/\s+/).filter(Boolean);
+  let dernierType = -1;
+  mots.forEach((m, i) => {
+    if (STREET_KEYWORDS.includes(m.toUpperCase())) dernierType = i;
+  });
+  if (dernierType < 0) return mots.join(" ");
+  const brute = mots.slice(dernierType + 1);
+  // Un chiffre SEUL au milieu de la queue est l'icone lue comme un chiffre
+  // ("VOIE LES" / "5 TROIS-DOMAINES", terrain 2026-09-14) -- jamais quand il
+  // termine la rue (numero en fin, autres terminaux).
+  const queue = brute.filter((m, i) => !estResiduDeQueue(m) && !(/^\d$/.test(m) && i < brute.length - 1));
+  return [...mots.slice(0, dernierType + 1), ...queue].join(" ");
+}
+
+// Rue assemblee -> rue propre (+ commune detachee de sa fin si demandee).
+// Ordre : detachement sur le texte brut d'abord (une commune peut contenir
+// un mot court, "BAR LE DUC"), nettoyage des residus ensuite, puis un second
+// essai de detachement sur le texte nettoye ("CHMN ST MS MiHIEL" -> "CHMN ST
+// MiHIEL" -> Saint-Mihiel).
+function finaliserRue(rueAssemblee, knownCities, { chercherVille }) {
+  let rue = rueAssemblee;
+  let ville = null;
+  if (chercherVille) {
+    const brut = peelVilleEnFinDeRue(rue, knownCities);
+    if (brut) {
+      rue = brut.rest;
+      ville = brut.ville;
+    }
+  }
+  rue = nettoyerQueueDeRue(rue);
+  if (chercherVille && !ville) {
+    const nettoye = peelVilleEnFinDeRue(rue, knownCities);
+    if (nettoye) {
+      rue = nettoyerQueueDeRue(nettoye.rest);
+      ville = nettoye.ville;
+    }
+  }
+  return { rue, ville };
 }
 
 function bboxUnion(boxes) {
@@ -963,6 +1091,52 @@ export function groupLinesIntoBlocks(lines) {
 // entiere partait dans le nom du client ("fÂA° '6.12KMm EMILIE MICHEL uw").
 const DISTANCE_MARKER_RE = /(^|\s)\d+[.,]?\d*\s?(?:km|kr|ki|k|m)[a-z]?\b/i;
 const ICON_ROW_RE = /^[#@]?[aAÀ][sSrRiI9°]?$/;
+
+// Le badge de colis ("8000 | 0+1", "4000 | 1+0", "999X99" pour une ramasse)
+// est sur la PREMIERE ligne de chaque carte du terminal : c'est un
+// separateur de fiche aussi sur que la distance -- et le seul disponible en
+// mode LISTE, ou le terminal n'affiche aucune distance (terrain 2026-09-14 :
+// sans lui, deux fiches consecutives fusionnaient des que le CP de la
+// premiere manquait ou etait illisible -- "9 VAUX RUEL ST MIHIEL / ME 55:00
+// / 10 DOCTEUR ..." donnait UN arret au lieu de deux, un client perdu).
+// Quand l'OCR met le badge sur sa propre ligne, c'est la ligne de texte qui
+// lui fait FACE (meme hauteur) qui ouvre la fiche, jamais le badge seul --
+// sinon le nom se retrouvait isole dans un bloc, separe de sa rue.
+const BADGE_RE = /\b[1-9]000\s*(?:[|}\]\/]|\s[o0-9]{1,2}\s*\+|[01]\d{1,3}\b)|\b999X99\b/i;
+
+function estBadgeSeul(text) {
+  return BADGE_RE.test(text) && text.replace(BADGE_RE, " ").replace(/[^a-zà-ÿ]/gi, "").length < 3;
+}
+
+// Part de la hauteur de `l` couverte par la zone (0..1).
+function chevauchement(l, zone) {
+  const h = (l.bbox?.y1 ?? 0) - (l.bbox?.y0 ?? 0);
+  if (h <= 0) return 0;
+  return Math.max(0, Math.min(l.bbox.y1, zone.y1) - Math.max(l.bbox.y0, zone.y0)) / h;
+}
+
+// Lignes qui OUVRENT une fiche d'apres son badge : pour chaque ligne qui
+// porte un badge, la ligne la plus HAUTE de sa rangee (elle-meme si elle a
+// du texte, ou toute ligne qui la chevauche a moitie -- l'OCR met souvent le
+// nom et la rue d'une meme rangee sur deux lignes, le badge colle a l'une ou
+// l'autre : "Sidoli thibaut Toner" / "2 MOULIN CHMN 8000 | 0+1 3"). Ouvrir la
+// fiche sur la ligne du badge elle-meme aurait separe ce nom de sa rue.
+function departsParBadge(ocrLines) {
+  const lignes = ocrLines.filter((l) => l.bbox && String(l.text || "").trim()).sort((a, b) => a.bbox.y0 - b.bbox.y0);
+  const departs = new Set();
+  lignes.forEach((l, i) => {
+    const text = String(l.text || "").trim();
+    if (!BADGE_RE.test(text)) return;
+    const candidats = estBadgeSeul(text) ? [] : [l];
+    for (let j = Math.max(0, i - 2); j <= Math.min(lignes.length - 1, i + 2); j++) {
+      if (j !== i && chevauchement(lignes[j], l.bbox) >= 0.5) candidats.push(lignes[j]);
+    }
+    if (candidats.length === 0) return;
+    candidats.sort((a, b) => a.bbox.y0 - b.bbox.y0);
+    departs.add(candidats[0]);
+  });
+  return departs;
+}
 
 function splitOnDistanceMarkers(blockLines) {
   const starts = blockLines.map((l, i) => (l.isClientStart ? i : -1)).filter((i) => i >= 0);

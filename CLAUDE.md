@@ -272,6 +272,47 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   « saint… », 24 « st… »). L'alias est posé sur l'entrée et **jamais** en réécrivant le mot
   tapé : réécrire casserait la frappe en cours (« ste » deviendrait « sainte » et Stenay
   disparaîtrait). Testé dans `ban-index.test.mjs`.
+- **Compte rendu photos du 2026-09-14 (6 images, 54 arrêts, mode LISTE sans distances)** —
+  build 147, cas 25 des tests. Rejeu : 44 → **49 fiches**, plus aucune ville manquante sauf
+  « CREUE » (ancienne commune fusionnée, absente de la base — voir « données » ci-dessous).
+  1. **Le badge de colis est un séparateur de fiche** (`BADGE_RE`, `departsParBadge`) : en
+     mode LISTE le terminal n'affiche aucune distance, et deux fiches fusionnaient dès que le
+     CP de la première manquait ou était illisible (« 55:00 ») — un client perdu à chaque
+     fois. La fiche s'ouvre sur la ligne **la plus haute de la rangée** du badge (l'OCR met
+     souvent nom et rue d'une même rangée sur deux lignes, le badge collé à l'une ou
+     l'autre) — jamais sur le badge lui-même, sinon un nom se retrouvait isolé de sa rue.
+  2. **Commune coupée au milieu de son nom** (« 4 CHAMPS RUE RUPT » / « DEVANT SAINT
+     MIHIEL » / « 55260 ») : sur la ligne seule « SAINT MIHIEL » gagnait, « DEVANT » était
+     jeté, et `cpParCommune` écrasait le vrai 55260 par 55300 — **mauvais village**. La
+     branche `villeEnFin` essaie d'abord avec les 1–2 derniers mots de la rue : une commune
+     plus longue l'emporte et la rue rend les mots empruntés.
+  3. **Fin de rue nettoyée puis détachée** (`finaliserRue`, `nettoyerQueueDeRue`,
+     `estResiduDeQueue`) : résidus d'icône après le type de voie (« MS », « ME, », « QD »,
+     « T5 », « GDR », « PTR », « 8000 » esseulé, un chiffre seul non final) retirés ; le
+     détachement essaie le texte brut d'abord (une commune peut contenir un mot court, « BAR
+     LE DUC »), puis le texte nettoyé (« CHMN ST MS MiHIEL »). Règle (b) : une commune
+     **exacte** derrière une rue sans type de voie mais avec un numéro (« 1 BASSE » / « KOEUR
+     LA PETITE », « 1 REBUS QUR » / « LEROUVILLE ») est détachée, jamais derrière un mot de
+     liaison (« Route de » + « Bar le Duc »). « SAINT »/« ST » seul n'est jamais une commune.
+     Une ville déjà posée mais **inconnue** de la base (« Va », résidu pris pour une ville par
+     la forme) ne bloque plus le détachement ; la forme-seule exige désormais ≥ 3 lettres.
+  4. Le glyphe d'icône qui suit le badge (« 8000 | 0+1 QD », « … 87 ») est mangé avec lui ;
+     badge « 8000 10H08 » et « 8000101. » reconnus ; « RUEL » = ruelle ajouté aux types ;
+     `mergeHyphenWraps` teste la **fin** du texte recollé (« RUE MANDRES-AU » +
+     « X-QUATRE-TOURS »), pas la ligne entière.
+  **Liste de révision** (`batch-scan-ui.js`, retour terrain « il met des adresses vérifiées
+  alors qu'il se trompe — il faudrait noter la vraie rue et ville qu'il a choisie ») :
+  `computeGeocodePreview` renvoie `{status, choix}` ; la ligne « → adresse » montre ce que
+  le géocodeur a **réellement choisi** ; commune non lue ou différente de celle choisie →
+  « Commune à confirmer » (`communeCoherente`), et `bulkGeocodeAndSave` enregistre alors le
+  colis **« à vérifier »** avec son point (navigable) — un « Valider » sur la fiche le passe
+  « prêt ». C'est exactement le cas où le géocodage n'avait que le CP pour choisir entre des
+  dizaines de communes. `renderReviewList`/`computeGeocodePreview` exportées pour la
+  vérification en navigateur.
+  **Données** : le terminal écrit parfois une **ancienne commune** (« CREUE », fusionnée dans
+  Vigneulles-lès-Hattonchâtel) que la base ne connaît pas. L'export BAN a une colonne
+  `nom_ancienne_commune` non importée : à la prochaine régénération de `ban.json.gz`, l'ajouter
+  comme alias de commune (`knownCities` + bonus commune) réglerait ce cas.
 - **Compte rendu de scan de LISTE** (`js/scan/scan-reports-store.js`, store IndexedDB
   `scanReports`, ajouté 2026-09-01 — « l'OCR devrait faire un compte rendu quand c'est une
   vidéo, là j'ai rien »). Le journal des corrections ci-dessus ne couvre que le scan d'UNE

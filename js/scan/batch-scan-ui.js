@@ -2,6 +2,7 @@ import { recognizeCanvasWithLines } from "./ocr.js";
 import { parseAddressList } from "./parse-address-list.js";
 import { matchAddress, looseCommune } from "../geocode/match-address.js";
 import { formatEntry } from "../geocode/geocode-ui.js";
+import { normalizeCity } from "../geocode/normalize-address.js";
 import { listDistinctCities } from "../geocode/ban-index.js";
 import { saveColis } from "./colis-store.js";
 import { splitNumeroRue, renderReviewForm } from "./scan-ui.js";
@@ -495,16 +496,33 @@ function analyzePhotoFiles(files, container) {
 // signaler d'emblee dans la liste de revision LESQUELLES sont deja
 // reconnues (l'oeil peut les survoler) et LESQUELLES ont vraiment besoin
 // d'attention concentre le temps de revision sur ce qui le merite.
-async function computeGeocodePreview(draft) {
+// Retour terrain 2026-09-14 : "il met des adresses verifiees alors qu'il se
+// trompe -- il prend une autre rue et une autre ville, mais ecrit celle
+// qu'il a lue, donc on ne peut pas savoir". La liste affichait le texte OCR
+// avec une pastille verte ; l'adresse que le geocodeur avait REELLEMENT
+// choisie n'apparaissait nulle part. Desormais : (1) le choix est affiche
+// sous la ligne, (2) une commune non lue ou differente de celle choisie fait
+// passer la ligne en "a confirmer" -- c'est exactement le cas ou le
+// geocodage n'a eu que le code postal pour trancher entre des dizaines de
+// communes, et ou il s'est trompe de village.
+function communeCoherente(draft, entry) {
+  if (!draft.ville) return false;
+  return looseCommune(normalizeCity(draft.ville)) === looseCommune(entry.cn || "");
+}
+
+export async function computeGeocodePreview(draft) {
   try {
     const { numero, rue: rueSansNumero } = splitNumeroRue(draft.rue || "");
     const { best, candidates } = await matchAddress({ rue: rueSansNumero, cp: draft.cp, commune: draft.ville, numero });
-    if (best) return "ok";
-    if (candidates.length > 0) return "ambigu";
-    return "non_geocode";
+    if (best) {
+      const sure = communeCoherente(draft, best.entry);
+      return { status: sure ? "ok" : "a_confirmer", choix: formatEntry(best.entry) };
+    }
+    if (candidates.length > 0) return { status: "ambigu", choix: null };
+    return { status: "non_geocode", choix: null };
   } catch (err) {
     console.error("[batch-scan] Erreur de verification d'adresse:", err);
-    return "non_geocode";
+    return { status: "non_geocode", choix: null };
   }
 }
 
@@ -545,7 +563,11 @@ async function bulkGeocodeAndSave(colis) {
   if (best) {
     colis.geocode = { status: "ok", lat: best.entry.lat, lon: best.entry.lon, candidates: [] };
     colis.adresseAffichage = formatEntry(best.entry);
-    colis.statut = "pret";
+    // Commune non lue ou differente de celle choisie : le point est pose (on
+    // peut y naviguer) mais le colis reste "a verifier" -- un "Valider" sur
+    // sa fiche le passera "pret" (voir statutApresGeocodage). Avant, il
+    // partait "pret" avec, parfois, le mauvais village.
+    colis.statut = communeCoherente(colis.adresseRaw, best.entry) ? "pret" : "a_verifier";
   } else if (candidates.length > 0) {
     colis.geocode = { status: "ambigu", lat: null, lon: null, candidates: candidates.map((c) => ({ ...c.entry, score: c.score })) };
     colis.statut = "a_verifier";
@@ -782,7 +804,8 @@ export function startBatchScan(container) {
       container.innerHTML = loadingHtml("Vérification des adresses…");
       const previews = await Promise.all(drafts.map((d) => computeGeocodePreview(d)));
       drafts.forEach((d, i) => {
-        d.geocodePreview = previews[i];
+        d.geocodePreview = previews[i].status;
+        d.geocodeChoix = previews[i].choix;
         // Retour terrain : "au pire on oublie les noms, il prend que rue/CP/
         // ville deja connus" -- si l'adresse elle-meme ne correspond a RIEN
         // de connu dans la BAN (non_geocode), le nom capture au meme moment,
@@ -812,7 +835,9 @@ export function startBatchScan(container) {
 // l'utilisateur n'a pas valide "Enregistrer" (ou corrige une ligne
 // individuellement, qui s'enregistre alors immediatement, meme
 // comportement que "Corriger ce colis" dans le debug OCR).
-function renderReviewList(container, drafts) {
+// Exportee pour la verification en navigateur (fixtures) : l'ecran ne
+// s'atteint sinon qu'au bout d'un vrai scan de photos.
+export function renderReviewList(container, drafts) {
   return new Promise((resolve) => {
     const state = drafts.map((d) => ({ draft: d, status: "pending", savedColis: null }));
     // Ligne a remettre sous les yeux au prochain rendu (retour terrain : "on
@@ -872,12 +897,22 @@ function renderReviewList(container, drafts) {
           // Badge de reconnaissance BAN (voir computeGeocodePreview) : jamais
           // un motif d'ecarter la ligne, seulement d'orienter l'oeil vers
           // celles qui meritent vraiment d'etre ouvertes/corrigees.
+          const preview = item.status === "pending" ? item.draft.geocodePreview : null;
           const previewBadge =
-            item.status === "pending" && item.draft.geocodePreview === "ok"
+            preview === "ok"
               ? `<span class="badge badge-ok">${icon("check", { spaced: false })} Reconnue</span>`
-              : item.status === "pending" && item.draft.geocodePreview
-                ? `<span class="badge badge-warn">À vérifier</span>`
-                : "";
+              : preview === "a_confirmer"
+                ? `<span class="badge badge-pending">Commune à confirmer</span>`
+                : preview
+                  ? `<span class="badge badge-warn">À vérifier</span>`
+                  : "";
+          // L'adresse que le geocodeur a CHOISIE (voir computeGeocodePreview) :
+          // c'est elle qui sera livree, pas le texte lu. Toujours visible des
+          // qu'elle existe, pour qu'un mauvais village saute aux yeux.
+          const choixHtml =
+            item.status === "pending" && item.draft.geocodeChoix
+              ? `<div class="muted" style="font-size:0.85rem;${preview === "a_confirmer" ? "color:var(--warn);" : ""}">→ ${escapeHtml(item.draft.geocodeChoix)}</div>`
+              : "";
           return `
             <div class="card-row" data-review-row="${idx}" style="padding:10px 0;border-bottom:1px solid var(--border);align-items:flex-start;">
               <div style="flex:1;min-width:0;">
@@ -885,6 +920,7 @@ function renderReviewList(container, drafts) {
                   ${item.status === "saved" ? `${icon("check", { spaced: false })} ` : ""}${escapeHtml(label)} ${previewBadge}
                 </div>
                 <div class="muted" style="font-size:0.85rem;">${escapeHtml(sub || "(adresse incomplète)")}</div>
+                ${choixHtml}
               </div>
               ${
                 item.status === "pending"
@@ -901,14 +937,15 @@ function renderReviewList(container, drafts) {
 
       const pendingCount = state.filter((s) => s.status === "pending").length;
       const reconnues = visible.filter((s) => s.status === "pending" && s.draft.geocodePreview === "ok").length;
-      const aVerifier = visible.filter((s) => s.status === "pending").length - reconnues;
+      const aConfirmer = visible.filter((s) => s.status === "pending" && s.draft.geocodePreview === "a_confirmer").length;
+      const aVerifier = visible.filter((s) => s.status === "pending").length - reconnues - aConfirmer;
 
       container.innerHTML = `
         <div class="import-screen" style="text-align:left;">
           <h1>Vérifie les adresses (${visible.length})</h1>
           <p class="muted">
-            ${reconnues} reconnue${reconnues > 1 ? "s" : ""} automatiquement, ${aVerifier} à vérifier —
-            corrige ou supprime celles qui ne sont pas bonnes, les autres seront enregistrées telles quelles.
+            ${reconnues} reconnue${reconnues > 1 ? "s" : ""} automatiquement${aConfirmer > 0 ? `, ${aConfirmer} dont la commune est à confirmer` : ""}, ${aVerifier} à vérifier —
+            la ligne « → » est l'adresse qui sera livrée. Corrige ou supprime celles qui ne sont pas bonnes.
           </p>
           <div>${rows || `<p class="muted">Plus rien à enregistrer.</p>`}</div>
           <button type="button" id="batch-review-add" style="width:100%;margin-top:12px;">${icon("plus")}Ajouter une adresse manquante</button>
