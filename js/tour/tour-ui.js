@@ -1,9 +1,9 @@
-import { getActiveTour, markStopDelivered, markStopFailed, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec, finDeJournee, listSecteursConnus, startPause, endPause } from "../routing/tour-store.js";
+import { getActiveTour, markStopDelivered, markStopFailed, remettreArretALivrer, archiveTour, moveStop, reverseRemainingStops, getTodayStats, reporterColisEchec, finDeJournee, listSecteursConnus, startPause, endPause } from "../routing/tour-store.js";
 import { getColis, saveColis, listAllColis, deleteColis, formatAdresseAffichage, formatAdresseForNav, verbeAction } from "../scan/colis-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { buildNavUrl } from "./deep-links.js";
 import { buildSmsOptions } from "./sms-template.js";
-import { computeEtas, formatRythme, normalisePauses } from "./eta.js";
+import { computeEtas, normalisePauses } from "./eta.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
 import { runSort, runRecalculate } from "../routing/routing-ui.js";
 import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
@@ -710,9 +710,9 @@ function heureConnue(date) {
   return date instanceof Date && !Number.isNaN(date.getTime());
 }
 
-// Heure d'arrivee estimee par arret : voir js/tour/eta.js (computeEtas,
-// apprentissage du rythme reel, marge sur les trajets) -- sorti d'ici pour
-// etre teste hors navigateur.
+// Heure d'arrivee estimee par arret : voir js/tour/eta.js (computeEtas, marge
+// fixe de 10 % sur les trajets) -- sorti d'ici pour etre teste hors
+// navigateur.
 
 // Heure de fin de tournee estimee, affichee en haut de l'ecran (retour
 // terrain : "on ne voit pas comment on avance") -- avec retour au depot,
@@ -878,7 +878,7 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
         ${colis.typeClient === "pro" && colis.geocode?.lat != null ? `<button type="button" data-pro-hours="${escapeAttr(colis.id)}" aria-label="Horaires de fermeture">${icon("clock", { spaced: false })}</button>` : ""}
         ${
           done
-            ? `<button type="button" disabled aria-label="${delivered ? "Livré" : "Échec"}">${delivered ? icon("check", { spaced: false }) : icon("x", { spaced: false })}</button>`
+            ? `<button type="button" data-undo-colis="${escapeAttr(colis.id)}" aria-label="Remettre à livrer">${icon("rotate-ccw", { spaced: false })}</button>`
             : `<button type="button" class="ok" data-deliver-ordre="${stop.ordre}" aria-label="Livré">${icon("check", { spaced: false })}</button>`
         }
         ${!done ? `<button type="button" class="hero-fail-btn" data-fail-ordre="${stop.ordre}" aria-label="Échec">${icon("x", { spaced: false })}</button>` : ""}
@@ -966,6 +966,21 @@ function bindActionEvents(tourId) {
 
   containerRef.querySelectorAll("[data-fail-ordre]").forEach((btn) => {
     btn.addEventListener("click", () => promptAndMarkFailed(tourId, Number(btn.dataset.failOrdre)));
+  });
+
+  // "Livre"/"Echec" appuye par erreur (retour terrain 2026-09-15) : confirmation
+  // demandee, le bouton est a la place exacte de "Livre" -- un deuxieme appui
+  // reflexe ne doit pas defaire une vraie livraison.
+  containerRef.querySelectorAll("[data-undo-colis]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const entry = lastStopsWithColis.find(({ colis }) => colis && colis.id === btn.dataset.undoColis);
+      const label = entry?.colis ? entry.colis.nom || formatAdresseAffichage(entry.colis) : "ce colis";
+      if (!confirm(`Remettre « ${label} » à livrer ?`)) return;
+      await remettreArretALivrer(tourId, btn.dataset.undoColis);
+      showToast("Remis à livrer.");
+      render();
+    });
   });
 
   containerRef.querySelectorAll("[data-move-ordre]").forEach((btn) => {
@@ -1149,12 +1164,9 @@ async function renderEtatB(tour) {
   lastTour = tour;
   lastStopsWithColis = stopsWithColis;
   lastNavApp = navApp;
-  const etaResult = computeEtas(tour, stopsWithColis, (settings.dureeArretMinutes || 0) * 60, { margeTrajetPct: settings.margeTrajetPct });
+  const etaResult = computeEtas(tour, stopsWithColis, (settings.dureeArretMinutes || 0) * 60);
   lastEtas = etaResult.etas;
   lastDepotEta = etaResult.depotEta;
-  // Rythme reel mesure sur les livraisons du jour (voir eta.js) : affiche a
-  // cote de la fin estimee, pour que le livreur voie POURQUOI l'heure a bouge.
-  const rythmeLabel = formatRythme(etaResult.rythme);
 
   const delivered = stopsWithColis.filter((s) => s.stop.statutLivraison === "livre").length;
   const failed = stopsWithColis.filter((s) => s.stop.statutLivraison === "echec").length;
@@ -1164,8 +1176,7 @@ async function renderEtatB(tour) {
   updateHeader({
     title: "Ma tournée",
     statsHtml:
-      (heureConnue(finEstimee) ? `<span class="stat-pill">${icon("clock", { spaced: false })} Fin ≈ ${formatHeure(finEstimee)}</span>` : "") +
-      (rythmeLabel ? `<span class="stat-pill" title="Écart mesuré entre le temps prévu et le temps réel sur les livraisons du jour">${escapeHtml(rythmeLabel)}</span>` : ""),
+      (heureConnue(finEstimee) ? `<span class="stat-pill">${icon("clock", { spaced: false })} Fin ≈ ${formatHeure(finEstimee)}</span>` : ""),
     showProgress: true,
     progressPercent: total === 0 ? 0 : Math.round(((delivered + failed) / total) * 100),
   });

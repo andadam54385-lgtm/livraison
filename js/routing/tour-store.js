@@ -2,6 +2,7 @@ import { getDb } from "../db/schema.js";
 import { put, del, getAllFromIndex, tx } from "../lib/idb.js";
 import { uuid } from "../lib/id.js";
 import { getColis, saveColis } from "../scan/colis-store.js";
+import { remettreArretALivrer as appliquerRemiseALivrer } from "./remettre-a-livrer.js";
 
 // Lit, modifie et reecrit une tournee dans UNE SEULE transaction readwrite
 // IndexedDB (stores "tours" + "colis") -- correctif d'audit : les mutations
@@ -121,13 +122,23 @@ export async function markStopFailed(tourId, ordre, raison) {
   });
 }
 
+// Annule un "Livre" ou un "Echec" appuye par erreur -- voir
+// remettre-a-livrer.js (logique pure, testee). Par colisId plutot que par
+// ordre : couvre aussi le "Livre" pose depuis la carte
+// (markColisDeliveredDirect), qui ne connait pas l'ordre.
+export async function remettreArretALivrer(tourId, colisId) {
+  const db = await getDb();
+  return updateTourAtomic(db, tourId, (tour, setColisStatut) => {
+    appliquerRemiseALivrer(tour, colisId, setColisStatut);
+  });
+}
+
 // Pauses declarees par le livreur (repas, chargement, imprevu) -- retour
 // terrain 2026-09-10 : "faudrait debut, fin et le temps pris". Stockees sur la
 // tournee sous forme [{debut, fin}], la derniere sans `fin` etant celle en
-// cours. Elles servent a deux choses (voir js/tour/eta.js) : repousser les
-// heures d'arrivee estimees pendant et apres la pause, et retirer ce temps du
-// rythme mesure au lieu de jeter l'intervalle. Rien n'est jamais efface : la
-// journee archivee garde la trace de ses pauses.
+// cours. Elles repoussent les heures d'arrivee estimees pendant et apres la
+// pause (voir js/tour/eta.js). Rien n'est jamais efface : la journee archivee
+// garde la trace de ses pauses.
 export async function startPause(tourId) {
   const db = await getDb();
   return updateTourAtomic(db, tourId, (tour) => {

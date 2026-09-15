@@ -13,7 +13,7 @@ import { segmentedHtml, bindSegmented, readSegmented } from "../ui/segmented.js"
 import { addFavori, updateFavori, deleteFavori, findNearbyFavori } from "../favoris/favoris-store.js";
 import { horairesOf, horairesSontVides } from "../favoris/horaires.js";
 import { renderHorairesEditor } from "../favoris/horaires-ui.js";
-import { getActiveTour, markStopDelivered, markStopFailed } from "../routing/tour-store.js";
+import { getActiveTour, markStopDelivered, markStopFailed, remettreArretALivrer } from "../routing/tour-store.js";
 import { getSetting } from "../settings/settings-store.js";
 import { buildNavUrl } from "../tour/deep-links.js";
 import { buildSmsOptions } from "../tour/sms-template.js";
@@ -76,6 +76,9 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
   // effectivement un arret de la tournee en cours pas encore traite --
   // jamais au depot (Etat A, pas de tournee active -> pas de stop).
   const showDeliveryActions = stop && stop.statutLivraison !== "livre" && stop.statutLivraison !== "echec";
+  // Arret deja traite de la tournee en cours : "Livre"/"Echec" a pu etre
+  // appuye par erreur (retour terrain 2026-09-15), on peut le remettre a livrer.
+  const peutRemettreALivrer = stop && (stop.statutLivraison === "livre" || stop.statutLivraison === "echec");
 
   const adresse = formatAdresseAffichage(colis);
   const navUrl = colis.geocode?.lat != null ? buildNavUrl(await getSetting("navApp"), { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse: formatAdresseForNav(colis) }) : null;
@@ -144,6 +147,15 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
         <button type="button" class="ok btn-lg" id="detail-deliver">${icon("check")}${verbeAction(colis)}</button>
       </div>
       <button type="button" class="hero-fail-btn" id="detail-fail">Marquer en échec</button>
+    `
+        : ""
+    }
+    ${
+      peutRemettreALivrer
+        ? `
+      <div class="button-row">
+        <button type="button" id="detail-undo">${icon("rotate-ccw")}Remettre à livrer</button>
+      </div>
     `
         : ""
     }
@@ -249,6 +261,15 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       const raison = prompt("Motif de l'échec (absent, accès impossible...) :", "");
       if (raison === null) return;
       await markStopFailed(activeTour.id, stop.ordre, raison);
+      onChange?.();
+      onBack?.();
+    });
+  }
+
+  if (peutRemettreALivrer) {
+    container.querySelector("#detail-undo").addEventListener("click", async () => {
+      await remettreArretALivrer(activeTour.id, colisId);
+      showToast("Remis à livrer.");
       onChange?.();
       onBack?.();
     });

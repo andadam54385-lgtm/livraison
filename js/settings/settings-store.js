@@ -17,10 +17,6 @@ export const DEFAULTS = {
   // tournee, meme quand il restait des heures avant l'echeance.
   heureLimiteAvant12h: "12:00",
   dureeArretMinutes: 3, // temps moyen passe a chaque arret (sonnette, remise en main propre...), utilise pour l'heure d'arrivee estimee
-  // Marge sur les temps de trajet du graphe (vitesses legales a vide, donc
-  // optimistes -- voir js/tour/eta.js), tant que la journee n'a pas assez de
-  // livraisons pour mesurer le rythme reel, qui prend ensuite le relais.
-  margeTrajetPct: 15,
   autoNavAfterDeliver: false, // ouvre automatiquement le GPS vers l'arret suivant juste apres "Livre" (chantier B, enchainement sans tap)
   storagePersisted: false,
   // 3 modeles prets a l'emploi mais librement modifiables (titre ET texte,

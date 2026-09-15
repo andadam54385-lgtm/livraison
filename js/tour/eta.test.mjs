@@ -1,7 +1,8 @@
-// Tests de l'heure d'arrivee estimee et de l'apprentissage du rythme reel
-// (retour terrain 2026-09-10 : "plus j'avance, plus je perds de temps").
+// Tests de l'heure d'arrivee estimee : marge FIXE de 10 % sur les trajets et
+// pauses declarees. L'apprentissage du rythme reel a ete retire le 2026-09-15
+// (voir l'en-tete de eta.js) ; le cas 2 verifie qu'il ne revient pas.
 // Execute via `node js/tour/eta.test.mjs`.
-import { computeEtas, apprendreRythme, formatRythme, pauseTotalSec, pauseOverlapSec, pauseEnCours } from "./eta.js";
+import { computeEtas, MARGE_TRAJET, pauseTotalSec, pauseEnCours } from "./eta.js";
 
 let failures = 0;
 function assert(cond, label) {
@@ -18,7 +19,7 @@ const T0 = Date.parse("2026-09-10T08:00:00Z");
 const min = (n) => n * 60 * 1000;
 const DWELL = 180; // 3 min
 const tour = (extra = {}) => ({ dateCreation: new Date(T0).toISOString(), returnToDepot: false, totalDureeSec: 0, ...extra });
-// 6 arrets, 10 min de trajet chacun (prevu par arret : 10 + 3 = 13 min).
+// 6 arrets, 10 min de trajet chacun -> 11 min une fois la marge de 10 % posee.
 const stops = (traites) =>
   [1, 2, 3, 4, 5, 6].map((ordre) => {
     const t = traites[ordre];
@@ -28,121 +29,49 @@ const stops = (traites) =>
     };
   });
 
-console.log("=== Sans arret traite : depart de la creation, marge sur les trajets seulement ===");
+console.log("=== Marge fixe de 10 % sur les trajets, pas sur la duree d'arret ===");
 {
-  const { etas, rythme, facteurTrajet } = computeEtas(tour(), stops({}), DWELL, { margeTrajetPct: 20 });
-  assert(rythme === null, "aucun rythme mesurable sans livraison");
-  assert(Math.abs(facteurTrajet - 1.2) < 1e-9, "la marge de 20 % s'applique aux trajets");
-  assertClose(etas.get("C1").getTime(), T0 + min(12), "arret 1 : 10 min x 1,2");
-  assertClose(etas.get("C2").getTime(), T0 + min(12) + min(3) + min(12), "arret 2 : + 3 min d'arret (non majores) + 12 min");
+  assert(MARGE_TRAJET === 0.1, "la marge vaut 10 %");
+  const { etas, facteurTrajet } = computeEtas(tour(), stops({}), DWELL);
+  assert(Math.abs(facteurTrajet - 1.1) < 1e-9, "facteur de trajet 1,1");
+  assertClose(etas.get("C1").getTime(), T0 + min(11), "arret 1 : 10 min x 1,1");
+  assertClose(etas.get("C2").getTime(), T0 + min(11) + min(3) + min(11), "arret 2 : + 3 min d'arret (non majores) + 11 min");
 }
 
-console.log("\n=== Rythme reel 25 % plus lent sur 3 livraisons : applique a la suite ===");
+console.log("\n=== Livreur 25 % plus lent : AUCUN apprentissage, la marge reste 10 % ===");
 {
-  // Prevu entre deux "Livre" : 13 min ; reel : 16,25 min (x 1,25).
   const t1 = T0 + min(12);
   const t2 = t1 + min(16.25);
   const t3 = t2 + min(16.25);
   const t4 = t3 + min(16.25);
-  const s = stops({ 1: t1, 2: t2, 3: t3, 4: t4 });
-  const rythme = apprendreRythme(s, DWELL);
-  assert(rythme && rythme.paires === 3, `3 intervalles mesures (obtenu: ${rythme && rythme.paires})`);
-  assert(rythme && Math.abs(rythme.ratio - 1.25) < 0.01, `ratio 1,25 (obtenu: ${rythme && rythme.ratio.toFixed(3)})`);
-  const { etas, depotEta } = computeEtas(tour(), s, DWELL, { margeTrajetPct: 20 });
-  // Ancre = dernier "Livre" (arret 4) ; la marge fixe est remplacee par le rythme mesure.
-  assertClose(etas.get("C5").getTime(), t4 + min(10 * 1.25), "arret 5 : trajet x 1,25 depuis le dernier Livre");
-  assertClose(etas.get("C6").getTime(), t4 + min(10 * 1.25) + min(3 * 1.25) + min(10 * 1.25), "arret 6 : l'arret intermediaire est aussi majore");
-  assert(depotEta === null, "pas de retour depot demande");
-  assert(formatRythme(rythme) === "rythme +25 %", `libelle d'en-tete (obtenu: ${formatRythme(rythme)})`);
+  const r = computeEtas(tour(), stops({ 1: t1, 2: t2, 3: t3, 4: t4 }), DWELL);
+  assert(Math.abs(r.facteurTrajet - 1.1) < 1e-9, "le facteur ne suit plus le rythme mesure");
+  assert(!("rythme" in r), "plus aucun rythme renvoye a l'ecran");
+  assertClose(r.etas.get("C5").getTime(), t4 + min(11), "arret 5 : repart du dernier Livre, trajet x 1,1");
+  assertClose(r.etas.get("C6").getTime(), t4 + min(11) + min(3) + min(11), "arret 6 : duree d'arret non majoree");
+  assert(r.depotEta === null, "pas de retour depot demande");
 }
 
-console.log("\n=== Moins de 3 livraisons : pas de rythme, la marge fixe reste ===");
+console.log("\n=== Retour au depot : le trajet retour est majore de 10 % aussi ===");
 {
-  const s = stops({ 1: T0 + min(12), 2: T0 + min(30) });
-  assert(apprendreRythme(s, DWELL) === null, "1 seul intervalle : pas de rythme");
-  const { facteurTrajet } = computeEtas(tour(), s, DWELL, { margeTrajetPct: 15 });
-  assert(Math.abs(facteurTrajet - 1.15) < 1e-9, "repli sur la marge de 15 %");
-}
-
-console.log("\n=== Pause repas au milieu : l'intervalle aberrant est ecarte ===");
-{
-  const t1 = T0 + min(12);
-  const t2 = t1 + min(13);
-  const t3 = t2 + min(13);
-  const t4 = t3 + min(13) + min(75); // 75 min de pause
-  const t5 = t4 + min(13);
-  const s = stops({ 1: t1, 2: t2, 3: t3, 4: t4, 5: t5 });
-  const rythme = apprendreRythme(s, DWELL);
-  assert(rythme && rythme.paires === 3, `la pause n'est pas comptee (obtenu: ${rythme && rythme.paires} paires)`);
-  assert(rythme && Math.abs(rythme.ratio - 1) < 0.01, `rythme = prevu (obtenu: ${rythme && rythme.ratio.toFixed(3)})`);
-}
-
-console.log("\n=== Arret valide hors ordre : l'intervalle negatif est ignore ===");
-{
-  const t1 = T0 + min(12);
-  const t3 = t1 + min(13);
-  const t2 = t3 + min(5); // le 2 est valide APRES le 3
-  const t4 = t2 + min(13);
-  const s = stops({ 1: t1, 2: t2, 3: t3, 4: t4 });
-  const rythme = apprendreRythme(s, DWELL);
-  // Paires valables : (1,2) 18 min, (3,4) 13 min ; (2,3) negative.
-  assert(rythme === null, "2 paires seulement une fois la paire inversee ecartee : pas de rythme");
-}
-
-console.log("\n=== Fourchette : 5 fois plus lent est plafonne a 2,5 ===");
-{
-  const t1 = T0 + min(12);
-  const t2 = t1 + min(65);
-  const t3 = t2 + min(65);
-  const t4 = t3 + min(65);
-  // 65 min reel pour 13 prevu = x5 : au-dessus du seuil de pause (3 x 13 + 15 = 54) -> ecarte.
-  assert(apprendreRythme(stops({ 1: t1, 2: t2, 3: t3, 4: t4 }), DWELL) === null, "x5 passe pour une pause, pas un rythme");
-  // 40 min reel pour 13 prevu = x3,08 : sous le seuil de pause, mais plafonne a 2,5.
-  const u2 = t1 + min(40);
-  const u3 = u2 + min(40);
-  const u4 = u3 + min(40);
-  const rythme = apprendreRythme(stops({ 1: t1, 2: u2, 3: u3, 4: u4 }), DWELL);
-  assert(rythme && rythme.ratio === 2.5, `plafond 2,5 (obtenu: ${rythme && rythme.ratio})`);
-}
-
-console.log("\n=== Retour au depot : le trajet retour est majore comme les autres ===");
-{
-  const s = stops({});
   // 6 tronçons de 600 s + retour de 900 s.
-  const { depotEta, etas } = computeEtas(tour({ returnToDepot: true, totalDureeSec: 6 * 600 + 900 }), s, DWELL, { margeTrajetPct: 10 });
+  const { depotEta, etas } = computeEtas(tour({ returnToDepot: true, totalDureeSec: 6 * 600 + 900 }), stops({}), DWELL);
   const dernier = etas.get("C6").getTime();
   assertClose(depotEta.getTime(), dernier + min(3) + 900 * 1.1 * 1000, "depot = dernier arret + 3 min + retour x 1,1");
 }
 
-console.log("\n=== Pause DECLAREE : repousse les heures et ne fausse pas le rythme ===");
+console.log("\n=== Pause DECLAREE terminee : l'arret suivant repart de l'heure de reprise ===");
 {
   const t1 = T0 + min(12);
   const t2 = t1 + min(13);
   const t3 = t2 + min(13);
-  // Repas de 45 min entre l'arret 3 et l'arret 4, declare par le livreur :
-  // 2 min de route, le repas, puis les 11 min restantes -> 13 min utiles,
-  // exactement le prevu.
   const pauseDebut = t3 + min(2);
   const pauseFin = pauseDebut + min(45);
-  const t4 = pauseFin + min(11);
-  const s = stops({ 1: t1, 2: t2, 3: t3, 4: t4 });
   const pauses = [{ debut: new Date(pauseDebut).toISOString(), fin: new Date(pauseFin).toISOString() }];
-
-  // Le repas est retire de l'intervalle : l'intervalle reste EXPLOITABLE
-  // (avant, il etait purement jete par le garde-fou des pauses non declarees).
-  const rythme = apprendreRythme(s, DWELL, { pauses, maintenant: t4 + min(1) });
-  assert(rythme && rythme.paires === 3, `les 3 intervalles comptent, repas retire (obtenu: ${rythme && rythme.paires})`);
-  assert(rythme && Math.abs(rythme.ratio - 1) < 0.01, `rythme = prevu malgre le repas (obtenu: ${rythme && rythme.ratio.toFixed(3)})`);
-
-  assert(Math.abs(pauseTotalSec(pauses, t4) - 45 * 60) < 1, "duree totale de pause = 45 min");
-  assert(Math.abs(pauseOverlapSec(pauses, t3, t4, t4) - 45 * 60) < 1, "le chevauchement couvre tout le repas");
+  assert(Math.abs(pauseTotalSec(pauses, pauseFin + min(5)) - 45 * 60) < 1, "duree totale de pause = 45 min");
   assert(pauseEnCours(pauses) === null, "aucune pause en cours une fois terminee");
-
-  // Pause terminee APRES la derniere livraison : c'est l'heure de REPRISE qui
-  // sert d'ancre, pas la livraison d'avant.
-  const s3 = stops({ 1: t1, 2: t2, 3: t3 });
-  const r = computeEtas(tour({ pauses }), s3, DWELL, { maintenant: pauseFin + min(1) });
-  assertClose(r.etas.get("C4").getTime(), pauseFin + min(10), "l'arret suivant repart de l'heure de reprise");
+  const r = computeEtas(tour({ pauses }), stops({ 1: t1, 2: t2, 3: t3 }), DWELL, { maintenant: pauseFin + min(1) });
+  assertClose(r.etas.get("C4").getTime(), pauseFin + min(11), "arret 4 : reprise + 11 min");
   assert(Math.abs(r.pauseTotalSec - 45 * 60) < 1, "le total de pause est remonte a l'ecran");
 }
 
@@ -155,10 +84,9 @@ console.log("\n=== Pause EN COURS : les heures reculent avec l'horloge ===");
   const maintenant = pauseDebut + min(20);
   const r = computeEtas(tour({ pauses }), s, DWELL, { maintenant });
   assert(r.pauseEnCours != null, "la pause en cours est signalee a l'ecran");
-  assertClose(r.etas.get("C2").getTime(), maintenant + min(10), "l'arret suivant est repousse a maintenant + trajet");
-  // 10 min plus tard sans avoir repris : l'heure a recule d'autant.
+  assertClose(r.etas.get("C2").getTime(), maintenant + min(11), "l'arret suivant est repousse a maintenant + trajet x 1,1");
   const plusTard = computeEtas(tour({ pauses }), s, DWELL, { maintenant: maintenant + min(10) });
-  assertClose(plusTard.etas.get("C2").getTime(), maintenant + min(20), "elle recule tant que le livreur n'a pas repris");
+  assertClose(plusTard.etas.get("C2").getTime(), maintenant + min(21), "elle recule tant que le livreur n'a pas repris");
   assert(Math.abs(plusTard.pauseTotalSec - 30 * 60) < 1, "le compteur de pause tourne (30 min)");
 }
 
