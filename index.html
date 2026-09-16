@@ -37,6 +37,10 @@
     <div class="progress-bar" id="tour-header-progress" hidden><div id="tour-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
   </header>
   <div id="tour-map-slot" hidden></div>
+  <!-- Petit cadre de selection d'un point sur la carte (voir
+       showMapStopPopover dans tour-ui.js) : statique comme le slot carte,
+       jamais reecrit par les renders de la feuille. -->
+  <div id="map-stop-popover" class="map-stop-popover" hidden></div>
   <div id="tour-sheet">
     <button type="button" id="tour-sheet-handle" class="stop-panel-handle" hidden>
       <span class="stop-panel-bar"></span>

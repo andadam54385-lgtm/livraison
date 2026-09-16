@@ -120,6 +120,17 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   qu'on vient de corriger/ajouter/supprimer (`focusIdx` + `flash-target`) au lieu du haut de la
   liste. `renderReviewForm` accepte `onCancel` (bouton « Retour » à la place de « Rescanner ») ;
   une ligne enregistrée s'affiche avec les valeurs enregistrées, pas le brouillon OCR.
+- **Tap sur un point de la carte = petit cadre en HAUT** (build 149, retour terrain
+  2026-09-16 : « remettre le petit cadre en haut au lieu de le visualiser en bas — par
+  contre pouvoir demander à le voir en bas »). `#map-stop-popover` (statique dans
+  `index.html`, comme le slot carte), rempli par `showMapStopPopover` (tour-ui.js) sur
+  `map:stop-tap` : nom/adresse, « Arrêt N », statut, boutons « Ouvrir la fiche » et « Voir
+  dans la liste » (l'ancien comportement `focusColisInSheet`, à la demande). Positionné
+  sous le header (`top` posé en JS, hauteur de header variable), sans reflow de la carte.
+  Fermé par X, remplacé par un tap sur un autre point, et **fermé par tout `render()`**
+  (une livraison le rendrait périmé). C'est le 3e aller-retour sur ce sujet (cadre supprimé
+  sur retour terrain d'alors, voir le commentaire dans map-ui.js) : cette version garde les
+  DEUX chemins.
 - **`js/scan/colis-detail-ui.js`** = fiche colis consolidée (seul endroit avec
   Corriger/Favori/Supprimer — jamais sur les cartes de liste).
 - **`js/scan/scan-ui.js`** = fonctions de flux (pas de vue auto-montée), paramétrées par

@@ -434,6 +434,21 @@ a { color: var(--accent-strong); }
    est une colonne flex non-scrollable, .map-canvas-wrap prend tout. */
 #tour-map-slot[data-map-variant] { display: flex; flex-direction: column; }
 #tour-map-slot[hidden] { display: none !important; }
+/* Petit cadre de selection d'un point (retour terrain 2026-09-16 : "remettre
+   le petit cadre en haut quand on selectionne un point au lieu de le
+   visualiser en bas") : flotte en HAUT de la zone carte, sous le header --
+   `top` pose en JS a l'affichage (la hauteur du header varie avec ses
+   pastilles). Ne deplace jamais la carte (pas de reflow, pas de resize
+   MapLibre a gerer). */
+.map-stop-popover {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  z-index: 9;
+}
+.map-stop-popover[hidden] { display: none; }
+.map-stop-popover .card { margin: 0; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); }
+
 .map-canvas-wrap { position: relative; flex: 1; min-height: 0; }
 #maplibre-map { position: absolute; inset: 0; }
 /* Grille de controles MapLibre par defaut (~29px) agrandie pour rester

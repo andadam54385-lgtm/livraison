@@ -93,10 +93,13 @@ export async function mount(container) {
       });
     });
     sheetControl = setupTourSheet();
-    // Tap sur un point de la carte -> la feuille s'ouvre et defile jusqu'a
-    // la carte du colis (voir l'emit dans map-ui.js). Bind unique, comme le
-    // FAB : l'ecouteur survit a tous les renders.
-    on("map:stop-tap", (e) => focusColisInSheet(e.detail?.colisId));
+    // Tap sur un point de la carte -> petit cadre en HAUT de la carte
+    // (retour terrain 2026-09-16 : "remettre le petit cadre en haut au lieu
+    // de le visualiser en bas -- par contre pouvoir demander a le voir en
+    // bas"). L'ancien comportement (feuille ouverte + defilement jusqu'a la
+    // carte du colis) reste accessible par le bouton "Voir dans la liste"
+    // du cadre. Bind unique, comme le FAB : l'ecouteur survit aux renders.
+    on("map:stop-tap", (e) => showMapStopPopover(e.detail?.colisId));
     fabBound = true;
   }
   view = "list";
@@ -121,6 +124,65 @@ function applyMapChrome() {
   document.getElementById("tour-view").classList.add("map-backdrop");
   document.getElementById("tour-map-slot").hidden = false;
   document.getElementById("tour-sheet-handle").hidden = false;
+}
+
+// Petit cadre flottant en haut de la carte pour le point qu'on vient de
+// taper : nom/adresse + statut, "Ouvrir la fiche" et "Voir dans la liste"
+// (l'ancien comportement, a la demande). Ferme par X, remplace par un tap
+// sur un autre point, et ferme par tout re-rendu de la feuille (une
+// livraison le rendrait perime).
+async function showMapStopPopover(colisId) {
+  if (!colisId) return;
+  const popover = document.getElementById("map-stop-popover");
+  const mapSlot = document.getElementById("tour-map-slot");
+  if (!popover || !mapSlot) return;
+  const colis = await getColis(colisId);
+  if (!colis) return;
+  const stop = lastTour?.stops.find((s) => s.colisId === colisId) || null;
+  const adresse = formatAdresseAffichage(colis);
+  const badge = stop
+    ? stop.statutLivraison === "livre"
+      ? `<span class="badge badge-ok">${verbeAction(colis)}</span>`
+      : stop.statutLivraison === "echec"
+        ? `<span class="badge badge-warn">Échec</span>`
+        : `<span class="badge badge-info">À ${colis.operation === "ramasse" ? "ramasser" : "livrer"}</span>`
+    : badgeForStatut(colis.statut);
+
+  popover.innerHTML = `
+    <div class="card">
+      <div class="card-row" style="align-items:flex-start;">
+        <div class="card-title" style="flex:1;min-width:0;margin-bottom:0;">${stop ? `Arrêt ${stop.ordre} — ` : ""}${escapeHtml(colis.nom || adresse)}</div>
+        ${badge}
+        <button type="button" class="icon-btn" id="map-popover-close" aria-label="Fermer" style="flex-shrink:0;">${icon("x", { spaced: false })}</button>
+      </div>
+      ${colis.nom ? `<p class="muted" style="margin:2px 0 0;">${escapeHtml(adresse)}</p>` : ""}
+      <div class="button-row" style="margin-top:10px;">
+        <button type="button" class="btn-compact" id="map-popover-fiche">${icon("pencil", { spaced: false })} Ouvrir la fiche</button>
+        <button type="button" class="btn-compact" id="map-popover-list">${icon("move-vertical", { spaced: false })} Voir dans la liste</button>
+      </div>
+    </div>
+  `;
+  // Sous le header, dont la hauteur varie (pastilles, barre de progression).
+  popover.style.top = `${mapSlot.offsetTop + 10}px`;
+  popover.hidden = false;
+
+  popover.querySelector("#map-popover-close").addEventListener("click", () => hideMapStopPopover());
+  popover.querySelector("#map-popover-fiche").addEventListener("click", () => {
+    hideMapStopPopover();
+    openDetail(colisId);
+  });
+  popover.querySelector("#map-popover-list").addEventListener("click", () => {
+    hideMapStopPopover();
+    focusColisInSheet(colisId);
+  });
+}
+
+function hideMapStopPopover() {
+  const popover = document.getElementById("map-stop-popover");
+  if (popover) {
+    popover.hidden = true;
+    popover.innerHTML = "";
+  }
 }
 
 // Ouvre la feuille (si repliee) et met la carte du colis en evidence --
@@ -353,6 +415,9 @@ function closeDetail() {
 // de la laisser invisible dans la console.
 async function render() {
   try {
+    // Le petit cadre carte fige un instantane du colis : tout re-rendu
+    // (livraison, recalcul, changement de vue) le rendrait perime.
+    hideMapStopPopover();
     if (view === "detail" && currentDetailColisId) {
       // La fiche s'ouvre dans la feuille : la deplier, sinon le detail se
       // lit par le trou d'une feuille a mi-course.
