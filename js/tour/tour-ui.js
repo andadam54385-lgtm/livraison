@@ -127,10 +127,13 @@ function applyMapChrome() {
 }
 
 // Petit cadre flottant en haut de la carte pour le point qu'on vient de
-// taper : nom/adresse + statut, "Ouvrir la fiche" et "Voir dans la liste"
-// (l'ancien comportement, a la demande). Ferme par X, remplace par un tap
-// sur un autre point, et ferme par tout re-rendu de la feuille (une
-// livraison le rendrait perime).
+// taper. Volontairement COMPACT (retour terrain 2026-09-17 : "mets-le plus
+// petit") : une ligne de titre, une d'adresse, une rangee d'actions --
+// "Y aller" (GPS) et "Livré" d'abord, puis fiche et liste en icones seules.
+// "Y aller"/"Livré" evitent l'aller-retour par la fiche pour l'action la
+// plus courante depuis la carte ; "Voir dans la liste" garde l'ancien
+// comportement a la demande. Ferme par X, remplace par un tap sur un autre
+// point, et ferme par tout re-rendu (une livraison le rendrait perime).
 async function showMapStopPopover(colisId) {
   if (!colisId) return;
   const popover = document.getElementById("map-stop-popover");
@@ -140,30 +143,39 @@ async function showMapStopPopover(colisId) {
   if (!colis) return;
   const stop = lastTour?.stops.find((s) => s.colisId === colisId) || null;
   const adresse = formatAdresseAffichage(colis);
+  const traite = stop && (stop.statutLivraison === "livre" || stop.statutLivraison === "echec");
   const badge = stop
     ? stop.statutLivraison === "livre"
       ? `<span class="badge badge-ok">${verbeAction(colis)}</span>`
       : stop.statutLivraison === "echec"
         ? `<span class="badge badge-warn">Échec</span>`
-        : `<span class="badge badge-info">À ${colis.operation === "ramasse" ? "ramasser" : "livrer"}</span>`
+        : ""
     : badgeForStatut(colis.statut);
+  // Meme destination que partout ailleurs : le POINT GPS, jamais le texte de
+  // l'adresse (voir deep-links.js).
+  const navUrl =
+    colis.geocode?.lat != null
+      ? buildNavUrl(lastNavApp, { lat: colis.geocode.lat, lon: colis.geocode.lon, label: colis.nom, adresse: formatAdresseForNav(colis) })
+      : null;
 
   popover.innerHTML = `
-    <div class="card">
-      <div class="card-row" style="align-items:flex-start;">
-        <div class="card-title" style="flex:1;min-width:0;margin-bottom:0;">${stop ? `Arrêt ${stop.ordre} — ` : ""}${escapeHtml(colis.nom || adresse)}</div>
+    <div class="card map-popover-card">
+      <div class="map-popover-head">
+        <div class="map-popover-titre">${stop ? `<b>${stop.ordre}.</b> ` : ""}${escapeHtml(colis.nom || adresse)}</div>
         ${badge}
-        <button type="button" class="icon-btn" id="map-popover-close" aria-label="Fermer" style="flex-shrink:0;">${icon("x", { spaced: false })}</button>
+        <button type="button" class="map-popover-x" id="map-popover-close" aria-label="Fermer">${icon("x", { spaced: false })}</button>
       </div>
-      ${colis.nom ? `<p class="muted" style="margin:2px 0 0;">${escapeHtml(adresse)}</p>` : ""}
-      <div class="button-row" style="margin-top:10px;">
-        <button type="button" class="btn-compact" id="map-popover-fiche">${icon("pencil", { spaced: false })} Ouvrir la fiche</button>
-        <button type="button" class="btn-compact" id="map-popover-list">${icon("move-vertical", { spaced: false })} Voir dans la liste</button>
+      ${colis.nom ? `<div class="map-popover-adresse">${escapeHtml(adresse)}</div>` : ""}
+      <div class="map-popover-actions">
+        ${navUrl ? `<a class="btn-link primary" id="map-popover-nav" href="${navUrl}" target="_blank" rel="noopener">${icon("navigation", { spaced: false })} Y aller</a>` : ""}
+        ${stop && !traite ? `<button type="button" class="ok" id="map-popover-livre">${icon("check", { spaced: false })} ${verbeAction(colis)}</button>` : ""}
+        <button type="button" id="map-popover-fiche" aria-label="Ouvrir la fiche">${icon("pencil", { spaced: false })}</button>
+        <button type="button" id="map-popover-list" aria-label="Voir dans la liste">${icon("move-vertical", { spaced: false })}</button>
       </div>
     </div>
   `;
   // Sous le header, dont la hauteur varie (pastilles, barre de progression).
-  popover.style.top = `${mapSlot.offsetTop + 10}px`;
+  popover.style.top = `${mapSlot.offsetTop + 8}px`;
   popover.hidden = false;
 
   popover.querySelector("#map-popover-close").addEventListener("click", () => hideMapStopPopover());
@@ -175,6 +187,18 @@ async function showMapStopPopover(colisId) {
     hideMapStopPopover();
     focusColisInSheet(colisId);
   });
+  // Livrer depuis la carte : meme chemin que le bouton de la liste (jamais
+  // l'enchainement du hero, voir afterHeroDelivered) -- render() ferme le
+  // cadre au passage.
+  popover.querySelector("#map-popover-livre")?.addEventListener("click", async () => {
+    if (!lastTour) return;
+    await markStopDelivered(lastTour.id, stop.ordre);
+    await render();
+    showToast(`${verbeAction(colis)} : ${colis.nom || adresse}`);
+  });
+  // Le lien GPS ferme le cadre, mais SANS preventDefault : la navigation doit
+  // partir normalement.
+  popover.querySelector("#map-popover-nav")?.addEventListener("click", () => hideMapStopPopover());
 }
 
 function hideMapStopPopover() {

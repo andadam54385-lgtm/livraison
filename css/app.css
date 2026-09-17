@@ -447,7 +447,42 @@ a { color: var(--accent-strong); }
   z-index: 9;
 }
 .map-stop-popover[hidden] { display: none; }
-.map-stop-popover .card { margin: 0; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); }
+/* Compact (retour terrain 2026-09-17 : "mets-le plus petit") : il flotte
+   au-dessus de la carte, il ne doit pas en manger la moitie. */
+.map-popover-card { margin: 0; padding: 8px 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); }
+.map-popover-head { display: flex; align-items: center; gap: 6px; }
+.map-popover-titre {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.map-popover-adresse {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.map-popover-x {
+  flex-shrink: 0;
+  min-height: 0;
+  padding: 4px;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+}
+/* "Y aller" et "Livré" portent le texte, les deux autres restent des icones
+   carrees : quatre libelles ne tiendraient pas sur une ligne de telephone. */
+.map-popover-actions { display: flex; gap: 6px; margin-top: 8px; }
+.map-popover-actions > * { flex: 1; min-height: 40px; font-size: 0.85rem; padding: 6px 8px; }
+.map-popover-actions > #map-popover-fiche,
+.map-popover-actions > #map-popover-list { flex: 0 0 40px; padding: 6px; }
 
 .map-canvas-wrap { position: relative; flex: 1; min-height: 0; }
 #maplibre-map { position: absolute; inset: 0; }

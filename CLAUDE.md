@@ -131,6 +131,15 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   (une livraison le rendrait périmé). C'est le 3e aller-retour sur ce sujet (cadre supprimé
   sur retour terrain d'alors, voir le commentaire dans map-ui.js) : cette version garde les
   DEUX chemins.
+  **Compact + actions directes** (build 150, « mets-le plus petit et rajoute y aller et
+  valider ») : 112 px de haut (94 sans nom de client), titre et adresse sur une ligne chacun
+  avec ellipse. Rangée d'actions : « Y aller » (lien GPS, même `buildNavUrl` que partout —
+  destination = point GPS) et « Livré » (`markStopDelivered`, puis `render()` qui ferme le
+  cadre, + toast de confirmation) portent le texte ; fiche et liste sont réduites à leur
+  icône, sinon quatre libellés ne tiennent pas sur une ligne de téléphone. « Livré »
+  n'apparaît que sur un arrêt de la tournée pas encore traité (un arrêt déjà fait affiche
+  son badge) et ne déclenche **jamais** l'enchaînement `afterHeroDelivered` — livrer un
+  point choisi sur la carte n'a pas la sémantique « je viens de livrer ici, où ensuite ? ».
 - **`js/scan/colis-detail-ui.js`** = fiche colis consolidée (seul endroit avec
   Corriger/Favori/Supprimer — jamais sur les cartes de liste).
 - **`js/scan/scan-ui.js`** = fonctions de flux (pas de vue auto-montée), paramétrées par
