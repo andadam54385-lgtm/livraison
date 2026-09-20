@@ -530,6 +530,24 @@ choix évite explicitement -- discrepancy signalée à l'utilisateur, tranchée 
   si l'utilisateur tape "📷 Prendre une photo à la place" (ou si la caméra live/zxing est
   indisponible — repli silencieux, jamais bloquant), rejette si "Annuler" (même contrat que
   `capture.js`'s `openCamera()`, filtré pareil côté appelant).
+  **Écran noir au viseur = trois verrous** (build 151, retour terrain récurrent « toujours
+  un bug quand on veut prendre une photo », symptôme confirmé « écran noir / caméra ne
+  s'affiche pas » — le `video.play()` explicite d'un signalement antérieur n'avait pas
+  suffi) : sur iOS en PWA standalone, `getUserMedia` peut réussir **sans jamais livrer
+  d'image** (flux muet après retour d'arrière-plan, ou caméra restée occupée par un flux
+  fuité) et la boucle attendait pour toujours. 1. **Chien de garde** : pas de première
+  image en 2,5 s → couper et redemander la caméra une fois ; 2. toujours rien → **bascule
+  automatique sur la photo native** (`resolve(null)` + toast « Caméra indisponible —
+  passage direct à la photo ») — le livreur ne reste jamais devant un écran noir ;
+  3. **anti-fuite** : `activeStream` de module (toute ouverture coupe le flux précédent)
+  + `video.isConnected` testé à chaque tick (un rendu extérieur qui remplace le DOM du
+  viseur sans `cleanup()` laissait boucle et caméra tourner en zombie — cause plausible
+  des viseurs noirs suivants). Vérifié en navigateur avec des caméras factices (flux sans
+  image → 2 tentatives puis photo ; flux normal → aucun déclenchement ; DOM effacé →
+  flux coupé seul). **Piège de vérification locale : le SW se réinstalle au premier
+  chargement après un `unregister` — re-purger SW + caches avant CHAQUE série de tests,
+  sinon on teste l'ancienne version (`ignoreSearch: true`, le cache-bust d'URL ne
+  protège pas).**
 - **`js/scan/barcode.js`** (nouveau) : charge `lib/zxing/zxing-reader.js` (build IIFE
   vendorisée de `zxing-wasm`, `readBarcodes`/`prepareZXingModule` exposés sur
   `window.ZXingWASM`) en différé, seulement à l'ouverture du viewfinder. `locateFile`
