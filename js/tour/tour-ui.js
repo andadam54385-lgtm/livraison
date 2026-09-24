@@ -590,6 +590,19 @@ async function renderEtatA() {
   // que le compteur de selection ne mente jamais.
   const visibleIds = new Set(prepColis.map((c) => c.id));
   selectedIds = new Set([...selectedIds].filter((id) => visibleIds.has(id)));
+  // Bug reel (retour terrain "la reinitialisation des colis selectionnes ne
+  // se fait pas correctement") : le libelle du bouton comparait
+  // selectedIds.size AU TOTAL a visible.length, alors que le clic ne
+  // (de)selectionnait que les ids VISIBLES (apres filtre recherche). Deux
+  // criteres differents pour la meme action -- ils divergent dès qu'une
+  // recherche est tapee APRES avoir tout selectionne sans filtre : les N
+  // colis visibles sont tous deja coches, mais selectedIds.size (le total,
+  // hors filtre) ne vaut plus visible.length, donc le bouton affichait
+  // "Tout cocher" alors qu'un clic decochait en realite les colis visibles
+  // (cas reel reproduit : 10 selectionnes, filtre sur 4 -> "Tout cocher"
+  // affiche, le clic fait tomber a 6). Un seul critere desormais, partage
+  // par le libelle ET le clic : "tous les colis VISIBLES sont-ils coches ?".
+  const toutVisibleCoche = visible.length > 0 && visible.every((c) => selectedIds.has(c.id));
   const listHtml =
     prepColis.length === 0
       ? `<div class="empty-state">Aucun colis pour l'instant. Scanne une étiquette ou ajoute une adresse à la main.</div>`
@@ -638,7 +651,7 @@ async function renderEtatA() {
       <div class="card" style="margin-bottom:8px;">
         <div class="card-row">
           <span class="muted">${selectedIds.size} sélectionné${selectedIds.size > 1 ? "s" : ""}</span>
-          <button type="button" class="btn-compact" id="etatA-select-all" style="flex:0 0 auto;">${selectedIds.size === visible.length && visible.length > 0 ? "Tout décocher" : "Tout cocher"}</button>
+          <button type="button" class="btn-compact" id="etatA-select-all" style="flex:0 0 auto;">${toutVisibleCoche ? "Tout décocher" : "Tout cocher"}</button>
         </div>
         <div class="button-row" style="margin-top:8px;">
           <button type="button" class="danger" id="etatA-delete-selected" ${selectedIds.size === 0 ? "disabled" : ""}>${icon("trash-2")}Supprimer (${selectedIds.size})</button>
@@ -681,9 +694,11 @@ async function renderEtatA() {
   });
 
   containerRef.querySelector("#etatA-select-all")?.addEventListener("click", async () => {
-    const ids = [...containerRef.querySelectorAll("[data-select-colis]")].map((el) => el.dataset.selectColis);
-    const toutCoche = ids.length > 0 && ids.every((id) => selectedIds.has(id));
-    if (toutCoche) ids.forEach((id) => selectedIds.delete(id));
+    // Meme critere que le libelle (toutVisibleCoche ci-dessus) : agit
+    // uniquement sur les colis VISIBLES (apres filtre recherche), jamais sur
+    // toute la selection -- sinon le clic peut contredire son propre libelle.
+    const ids = visible.map((c) => c.id);
+    if (toutVisibleCoche) ids.forEach((id) => selectedIds.delete(id));
     else ids.forEach((id) => selectedIds.add(id));
     await renderEtatA();
   });

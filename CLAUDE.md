@@ -109,6 +109,18 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   doigt, bug terrain) DÉPLIE d'un cran ; un glissement franc (≥ 24px) va toujours au
   cran suivant dans le sens du geste, jamais de retour élastique. Réglages : engrenage
   du header + lien du menu carte. L'ancien hash `#map` retombe sur `#tour`.
+- **Sélection multiple de l'État A** (`selectionMode`/`selectedIds` dans `tour-ui.js`, cases à
+  cocher sur les cartes de préparation, bouton « Supprimer (N) ») : le bouton « Tout
+  cocher/décocher » doit utiliser le **même critère** pour son libellé et pour l'action du clic
+  — build 152, retour terrain « la réinitialisation des colis sélectionnés ne se fait pas
+  correctement ». Bug réel reproduit : sélectionner tous les colis (aucun filtre), puis taper
+  une recherche qui n'en affiche qu'une partie (tous déjà cochés) — le libellé comparait
+  `selectedIds.size` (le total, hors filtre) à `visible.length`, alors que le clic ne
+  (dé)sélectionnait que les ids VISIBLES ; les deux critères divergent dès que le filtre change
+  après une sélection plus large. Résultat observé : bouton affichant « Tout cocher » qui
+  **décochait** en réalité les colis visibles (10 sélectionnés → 6 au clic). Un seul critère
+  désormais, `toutVisibleCoche = visible.every(c => selectedIds.has(c.id))`, partagé par le
+  libellé et par le clic — qui n'agit plus que sur `visible`, jamais sur toute la sélection.
 - **Liste d'arrêts de l'État B = deux sections repliables** (`<details>`, build 129, « la liste
   des points doit être un menu déroulant qui reste sur le dernier point à faire ») : « Arrêts
   suivants (N) — prochain : … » puis « Déjà traités (M) », repliées par défaut et mémorisées
