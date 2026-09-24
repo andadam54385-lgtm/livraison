@@ -391,6 +391,18 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   (`js/routing/recalc-eligibles.js`, testé) ne retrie que les arrêts `a_livrer` de la
   tournée courante plus les `pret` scannés entre-temps — jamais les orphelins
   `en_tournee` hors tournée ; la carte repart du point GPS du retri.
+  **Réordonnancement manuel (▲▼) : `moveStop` ne doit jamais toucher un arrêt déjà
+  traité** (build 153, retour terrain « des colis marqués livré sont encore mis dans
+  l'ordre »). Le swap portait sur le voisin BRUT du tableau trié par `ordre`, sans
+  exclure `livre`/`echec` — un arrêt livré **hors ordre** (traité avant son tour, cas
+  réel documenté juste au-dessus pour `runRecalculate`) pouvait alors être déplacé
+  comme simple effet de bord du réordonnancement d'un arrêt `a_livrer` voisin, alors
+  que ses propres boutons ▲▼ sont déjà désactivés (`canMoveUp`/`canMoveDown` dans
+  `tour-ui.js` ne comptent que les arrêts `a_livrer`) — contradiction invisible pour
+  l'utilisateur, qui n'avait pourtant rien touché sur ce colis. `moveStop` échange
+  désormais deux arrêts au sein du seul sous-ensemble `a_livrer`, en sautant par-dessus
+  les arrêts traités plutôt que d'échanger avec eux — même principe que
+  `reverseRemainingStops`, qui filtrait déjà correctement.
 - **Géocodage : mots porteurs** (build 135, `match-address.js`). Retour terrain Onville :
   « 33 GORZE RUE » (ordre du terminal, type de voie en fin) sortait « 33 Grande Rue » —
   même longueur, même fin, la distance d'édition préférait la mauvaise voie. Un candidat

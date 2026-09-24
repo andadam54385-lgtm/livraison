@@ -164,16 +164,29 @@ export async function endPause(tourId) {
 // Les temps de trajet (legDureeSec) restent ceux calcules pour l'ordre
 // d'origine : apres un deplacement manuel, l'heure d'arrivee estimee est donc
 // approximative tant que la tournee n'est pas recalculee.
+//
+// Bug reel corrige ici (retour terrain : "des colis marques livre sont
+// encore mis dans l'ordre") : le swap operait sur le voisin BRUT du tableau
+// trie par ordre, sans exclure les arrets deja livres/en echec. Un arret
+// livre "hors ordre" (traite avant son tour -- cas reel, voir le commentaire
+// de runRecalculate sur les collisions d'ordre) pouvait alors se retrouver
+// deplace comme simple effet de bord du reordonnancement d'un arret PENDING
+// voisin, alors que ses propres boutons ▲▼ sont deja desactives (canMoveUp/
+// canMoveDown dans tour-ui.js ne considerent que les arrets pending) --
+// contradiction invisible pour l'utilisateur, qui n'a jamais touche a ce
+// colis. Desormais : le swap ne porte QUE sur le sous-ensemble des arrets
+// pas encore traites, jamais sur un arret livre/en echec, meme comme voisin.
 export async function moveStop(tourId, ordre, direction) {
   const db = await getDb();
   return updateTourAtomic(db, tourId, (tour) => {
     const stops = tour.stops.slice().sort((a, b) => a.ordre - b.ordre);
-    const idx = stops.findIndex((s) => s.ordre === ordre);
+    const pending = stops.filter((s) => s.statutLivraison !== "livre" && s.statutLivraison !== "echec");
+    const idx = pending.findIndex((s) => s.ordre === ordre);
     const swapIdx = idx + direction;
-    if (idx === -1 || swapIdx < 0 || swapIdx >= stops.length) return;
-    const tmp = stops[idx].ordre;
-    stops[idx].ordre = stops[swapIdx].ordre;
-    stops[swapIdx].ordre = tmp;
+    if (idx === -1 || swapIdx < 0 || swapIdx >= pending.length) return;
+    const tmp = pending[idx].ordre;
+    pending[idx].ordre = pending[swapIdx].ordre;
+    pending[swapIdx].ordre = tmp;
     tour.stops = stops;
   });
 }
