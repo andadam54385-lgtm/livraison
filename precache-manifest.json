@@ -1,6 +1,6 @@
 {
-  "version": "f856c3b077de",
-  "generatedAt": "2026-09-24T08:33:52.108Z",
+  "version": "0f744b4497ab",
+  "generatedAt": "2026-09-24T16:41:31.728Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -81,6 +81,7 @@
     "./js/tour/sms-template.js",
     "./js/tour/tour-ui.js",
     "./js/ui/icons.js",
+    "./js/ui/photo-viewer.js",
     "./js/ui/segmented.js",
     "./js/version.js",
     "./lib/maplibre/LICENSE-maplibre-gl.txt",

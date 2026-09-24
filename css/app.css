@@ -967,6 +967,41 @@ button .spinner-inline,
   border-top-color: currentColor;
 }
 
+/* Photo du colis (colis.photoColis, "pour le retrouver dans le camion") :
+   vignette sur la fiche et la hero card, visionneuse plein ecran au tap (un
+   tap n'importe ou referme -- voir js/ui/photo-viewer.js). */
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.photo-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
+}
+.colis-photo-thumb {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.hero-photo-thumb {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
 .viewfinder-wrap {
   position: relative;
   aspect-ratio: 3 / 4;

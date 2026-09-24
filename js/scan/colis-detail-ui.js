@@ -18,6 +18,8 @@ import { getSetting } from "../settings/settings-store.js";
 import { buildNavUrl } from "../tour/deep-links.js";
 import { buildSmsOptions } from "../tour/sms-template.js";
 import { renderReviewForm } from "./scan-ui.js";
+import { openCamera } from "./capture.js";
+import { objectUrlFor, showPhotoViewer } from "../ui/photo-viewer.js";
 import { showToast } from "../lib/toast.js";
 import { icon } from "../ui/icons.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
@@ -118,6 +120,22 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       }
       ${colis.quantite > 1 ? `<span class="badge badge-pending" style="margin-top:6px;">${colis.quantite} colis à cette adresse</span>` : ""}
     </div>
+    ${
+      colis.photoColis
+        ? `
+      <div class="field">
+        <label>${icon("camera")}Photo du colis</label>
+        <img class="colis-photo-thumb" id="detail-photo-thumb" src="${objectUrlFor(colis.photoColis)}" alt="Photo du colis — tap pour agrandir">
+        <div class="button-row" style="margin-top:8px;">
+          <button type="button" id="detail-photo-retake">${icon("camera")}Reprendre</button>
+          <button type="button" class="danger" id="detail-photo-remove">${icon("trash-2")}Retirer</button>
+        </div>
+      </div>`
+        : `
+      <div class="button-row">
+        <button type="button" id="detail-photo-take" style="width:100%;">${icon("camera")}Photographier le colis (pour le retrouver)</button>
+      </div>`
+    }
     <div class="segmented-stack">
       ${segmentedHtml("typeClient", TYPE_CLIENT_OPTIONS, colis.typeClient || "particulier")}
       ${segmentedHtml("operation", OPERATION_OPTIONS, colis.operation || "livraison")}
@@ -187,6 +205,33 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
 
   container.querySelector("#detail-sms-toggle")?.addEventListener("click", () => {
     container.querySelector("#detail-sms-options")?.toggleAttribute("hidden");
+  });
+
+  // Photo du colis (retour terrain : "prendre le colis en photo pour le
+  // retrouver" -- dans le camion, au moment d'arriver a l'arret). Champ
+  // colis.photoColis, DISTINCT de la photo de preuve (colis.preuvePhoto,
+  // bouton camera des cartes d'arret) : l'une decrit le colis avant
+  // livraison, l'autre prouve la remise. Meme capture native que partout
+  // (openCamera, une photo, jamais de flux video), annulation silencieuse.
+  const prendrePhotoColis = async () => {
+    try {
+      const file = await openCamera();
+      colis.photoColis = file;
+      await saveColis(colis);
+      showToast("Photo du colis enregistrée.");
+      await renderColisDetail(container, colisId, { onBack, onChange });
+    } catch (err) {
+      if (err.message !== "Aucune photo sélectionnée.") console.error(err);
+    }
+  };
+  container.querySelector("#detail-photo-take")?.addEventListener("click", prendrePhotoColis);
+  container.querySelector("#detail-photo-retake")?.addEventListener("click", prendrePhotoColis);
+  container.querySelector("#detail-photo-thumb")?.addEventListener("click", () => showPhotoViewer(colis.photoColis));
+  container.querySelector("#detail-photo-remove")?.addEventListener("click", async () => {
+    if (!confirm("Retirer la photo du colis ?")) return;
+    delete colis.photoColis;
+    await saveColis(colis);
+    await renderColisDetail(container, colisId, { onBack, onChange });
   });
 
   // Enregistrement silencieux en quittant le champ (pas de bouton dedie, pas

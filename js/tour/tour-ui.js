@@ -16,6 +16,7 @@ import { insertStopCheapest } from "../routing/insert-stop.js";
 import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { icon } from "../ui/icons.js";
+import { objectUrlFor, showPhotoViewer } from "../ui/photo-viewer.js";
 import { ensureMap, refreshMapData, isMapMounted } from "../map/map-ui.js";
 import { on } from "../lib/event-bus.js";
 import { reportBug } from "../debug/bug-reports-store.js";
@@ -919,6 +920,7 @@ function renderHeroCard(stop, colis, { navApp, eta, smsTemplates }) {
           <div class="hero-name">${escapeHtml(colis.nom || "(nom inconnu — tap pour corriger)")}</div>
           <div class="hero-sub">${colis.quantite > 1 ? `${colis.quantite} colis` : "1 colis"}</div>
         </div>
+        ${colis.photoColis ? `<img class="hero-photo-thumb" src="${objectUrlFor(colis.photoColis)}" data-photo-view="${escapeAttr(colis.id)}" alt="Photo du colis — tap pour agrandir">` : ""}
       </div>
       <div class="hero-actions">
         <div class="button-row">
@@ -1096,6 +1098,17 @@ function bindActionEvents(tourId) {
 
   containerRef.querySelectorAll("[data-open-detail]").forEach((el) => {
     el.addEventListener("click", () => openDetail(el.dataset.colisId));
+  });
+
+  // Vignette "photo du colis" (hero card) : tap = visionneuse plein ecran,
+  // jamais l'ouverture de la fiche (stopPropagation -- la vignette vit dans
+  // .hero-meta a cote d'une zone data-open-detail).
+  containerRef.querySelectorAll("[data-photo-view]").forEach((el) => {
+    el.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const c = await getColis(el.dataset.photoView);
+      if (c?.photoColis) showPhotoViewer(c.photoColis);
+    });
   });
 
   containerRef.querySelectorAll("[data-photo-colis]").forEach((btn) => {

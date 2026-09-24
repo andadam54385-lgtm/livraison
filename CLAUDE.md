@@ -154,6 +154,19 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   point choisi sur la carte n'a pas la sémantique « je viens de livrer ici, où ensuite ? ».
 - **`js/scan/colis-detail-ui.js`** = fiche colis consolidée (seul endroit avec
   Corriger/Favori/Supprimer — jamais sur les cartes de liste).
+  **Photo du colis** (build 154, « prendre le colis en photo pour le retrouver ») :
+  `colis.photoColis` (Blob IndexedDB), **distinct de `colis.preuvePhoto`** (preuve de
+  remise, bouton caméra des cartes d'arrêt) — l'une décrit le colis avant livraison,
+  l'autre prouve la remise, ne jamais fusionner les deux champs. Prise/reprise/retrait
+  depuis la fiche (même `openCamera()` natif que partout), vignette 56 px sur la hero
+  card de l'arrêt courant, visionneuse plein écran au tap (`js/ui/photo-viewer.js` :
+  object URLs partagées par WeakMap de Blob, un tap referme). **La visionneuse est
+  idempotente** (une seule à la fois) : `bindActionEvents` tourne deux fois sur le même
+  DOM (hero + liste), donc tout déclencheur `[data-photo-view]` est lié deux fois —
+  sans ce verrou, deux visionneuses s'empilaient et le premier tap semblait ne pas
+  refermer. Idées concurrence du 2026-09-24 (mode chargement camion, retrouver par
+  code-barres, signature, stats secteurs, départements à la demande) : **notées pour
+  tourneo** sur la page d'actions du vault, pas à construire ici sans demande.
 - **`js/scan/scan-ui.js`** = fonctions de flux (pas de vue auto-montée), paramétrées par
   `container` : `startScanFlow`, `startManualEntry`, `renderReviewForm`,
   `runGeocodeAndSave` — réutilisées par le FAB et par "Corriger".
