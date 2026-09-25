@@ -1,4 +1,4 @@
-import { listAllColis, saveColis, formatAdresseAffichage, formatAdresseForNav } from "../scan/colis-store.js";
+import { listAllColis, getColis, saveColis, formatAdresseAffichage, formatAdresseForNav } from "../scan/colis-store.js";
 import { getActiveTour, markColisDeliveredDirect } from "../routing/tour-store.js";
 import { getAllSettings } from "../settings/settings-store.js";
 import { listFavoris } from "../favoris/favoris-store.js";
@@ -653,6 +653,23 @@ function zoneEligibleColis(geocoded) {
   return geocoded.filter((c) => c.statut === "pret" || c.statut === "en_tournee");
 }
 
+// Colis zonables relus en base A CHAQUE geste -- jamais une liste gardee en
+// memoire. Bug reel (retour terrain : "assigner des zones fait bugger, des
+// points disparaissent") : setupZoneMode recevait la liste des colis du
+// PREMIER affichage de la carte et la gardait pour toujours. Depuis que la
+// carte est persistante (refreshMapData met a jour les points sans jamais
+// rappeler setupZoneMode), cette liste vieillissait : un colis scanne apres
+// l'ouverture de l'appli n'etait pas pris par le lasso, puis le redessin
+// d'apres zone (setData sur cette vieille liste) le FAISAIT DISPARAITRE de
+// la carte (reproduit : 7 points, "6 arrets entoures", 6 apres Valider). Et
+// l'enregistrement ecrivait ces vieux objets par-dessus la base : statut,
+// adresse corrigee, voire un colis supprime entre-temps, tout revenait a
+// l'etat du premier affichage.
+async function colisZonables() {
+  const all = await listAllColis();
+  return zoneEligibleColis(all.filter((c) => c.geocode?.lat != null && c.geocode?.lon != null));
+}
+
 // Mode "selection par zones" (lasso) : le livreur trace un contour a main
 // levee autour d'un groupe d'arrets, lui donne un numero de zone, recommence
 // pour un autre groupe -- computeOptimizedStops (routing-ui.js) respecte
@@ -669,7 +686,7 @@ function zoneEligibleColis(geocoded) {
 // testable sur toute sa boite, meme transparent) capture desormais les
 // evenements ; le <svg> imbrique ne sert plus qu'a l'affichage (pointer-
 // events:none, voir CSS), jamais a la detection du geste.
-function setupZoneMode(map, geocoded, ordreParColisId) {
+function setupZoneMode(map) {
   const toggleBtn = containerRef.querySelector("#zone-mode-toggle");
   const overlay = containerRef.querySelector("#zone-draw-overlay");
   const drawSvg = overlay?.querySelector(".zone-draw-svg");
@@ -715,20 +732,19 @@ function setupZoneMode(map, geocoded, ordreParColisId) {
 
   toggleBtn.addEventListener("click", () => applyZoneMode(!zoneMode));
 
-  function nextZoneNumber() {
-    const zones = zoneEligibleColis(geocoded)
-      .map((c) => c.zone)
-      .filter((z) => z != null);
+  function nextZoneNumber(zonables) {
+    const zones = zonables.map((c) => c.zone).filter((z) => z != null);
     return zones.length ? Math.max(...zones) + 1 : 1;
   }
 
+  // Redessin complet depuis la base (points, trajet, liste) -- le meme
+  // chemin que toute autre mise a jour de la carte.
   async function refreshZoneVisuals() {
-    if (!layersReady) return;
-    mapInstance?.getSource("stops")?.setData(buildStopsGeoJson(geocoded, ordreParColisId));
+    await refreshMapData();
   }
 
-  function showZoneConfirmPanel(selectedColis) {
-    const suggested = nextZoneNumber();
+  function showZoneConfirmPanel(selectedColis, zonables) {
+    const suggested = nextZoneNumber(zonables);
     confirmPanel.innerHTML = `
       <div class="zone-confirm-card">
         <div class="card-title">${selectedColis.length} arrêt${selectedColis.length > 1 ? "s" : ""} entouré${selectedColis.length > 1 ? "s" : ""}</div>
@@ -749,11 +765,18 @@ function setupZoneMode(map, geocoded, ordreParColisId) {
       const n = parseInt(confirmPanel.querySelector("#zone-number-input").value, 10);
       confirmPanel.innerHTML = "";
       if (!Number.isFinite(n) || n < 1) return;
-      for (const c of selectedColis) {
-        c.zone = n;
-        await saveColis(c);
+      // Relu en base juste avant l'ecriture : le panneau a pu rester ouvert
+      // pendant une livraison ou une correction -- on ne pose que le numero
+      // de zone, jamais une vieille copie du colis par-dessus la base.
+      let nb = 0;
+      for (const { id } of selectedColis) {
+        const frais = await getColis(id);
+        if (!frais || (frais.statut !== "pret" && frais.statut !== "en_tournee")) continue;
+        frais.zone = n;
+        await saveColis(frais);
+        nb++;
       }
-      showToast(`Zone ${n} enregistrée (${selectedColis.length} arrêt${selectedColis.length > 1 ? "s" : ""}).`);
+      showToast(`Zone ${n} enregistrée (${nb} arrêt${nb > 1 ? "s" : ""}).`);
       await refreshZoneVisuals();
     });
   }
@@ -848,16 +871,24 @@ function setupZoneMode(map, geocoded, ordreParColisId) {
     renderDrawPath();
     // <3 points (simple tap, pas un vrai tracé) : rien a selectionner.
     if (points.length < 3) return;
-    const candidates = zoneEligibleColis(geocoded);
+    // Le contour est fige en coordonnees geographiques AVANT la lecture en
+    // base (asynchrone) : si la carte bouge pendant ce temps, contour et
+    // colis sont reprojetes avec la MEME camera -- le test reste exact.
+    const contourGeo = points.map(([x, y]) => map.unproject([x, y]));
+    const candidates = await colisZonables();
+    const contour = contourGeo.map((ll) => {
+      const p = map.project(ll);
+      return [p.x, p.y];
+    });
     const selected = candidates.filter((c) => {
       const pt = map.project([c.geocode.lon, c.geocode.lat]);
-      return pointInPolygon([pt.x, pt.y], points);
+      return pointInPolygon([pt.x, pt.y], contour);
     });
     if (selected.length === 0) {
       showToast("Aucun arrêt dans cette zone.");
       return;
     }
-    showZoneConfirmPanel(selected);
+    showZoneConfirmPanel(selected, candidates);
   });
   overlay.addEventListener("pointercancel", (e) => {
     liftPointer(e);
@@ -868,7 +899,7 @@ function setupZoneMode(map, geocoded, ordreParColisId) {
   });
 
   containerRef.querySelector("#zone-reset-btn")?.addEventListener("click", async () => {
-    const withZone = zoneEligibleColis(geocoded).filter((c) => c.zone != null);
+    const withZone = (await colisZonables()).filter((c) => c.zone != null);
     if (withZone.length === 0) {
       showToast("Aucune zone à réinitialiser.");
       return;
@@ -1048,7 +1079,7 @@ async function render() {
     return;
   }
   mapInstance = map;
-  setupZoneMode(map, geocoded, ordreParColisId);
+  setupZoneMode(map);
   map.addControl(new window.maplibregl.AttributionControl({ compact: true }), "top-left");
   map.addControl(new window.maplibregl.NavigationControl({ showCompass: false }), "top-right");
   // SEUL consommateur de la geolocalisation dans toute l'appli. Bug reel

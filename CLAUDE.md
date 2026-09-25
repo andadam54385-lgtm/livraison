@@ -109,6 +109,26 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   doigt, bug terrain) DÉPLIE d'un cran ; un glissement franc (≥ 24px) va toujours au
   cran suivant dans le sens du geste, jamais de retour élastique. Réglages : engrenage
   du header + lien du menu carte. L'ancien hash `#map` retombe sur `#tour`.
+  **Carte persistante = aucune liste de colis gardée en mémoire par un mode de la
+  carte** (build 155, retour terrain « assigner des zones fait bugger, des points
+  disparaissent »). `setupZoneMode` n'est appelé qu'à la création de l'instance
+  MapLibre, et recevait la liste des colis de ce PREMIER affichage — `refreshMapData`
+  met ensuite les points à jour sans jamais le rappeler. Reproduit avec la vraie carte :
+  colis ajouté après l'ouverture → lasso « 6 arrêts entourés » sur 7 visibles, puis
+  redessin d'après zone (`setData` sur la vieille liste) → **le 7e disparaît de la
+  carte** ; et l'enregistrement écrivait les vieilles copies par-dessus la base (nom,
+  statut, adresse corrigés entre-temps : perdus ; colis supprimé : ressuscité).
+  Désormais `colisZonables()` relit la base à chaque geste (lasso, numéro suggéré,
+  réinitialisation), la sauvegarde relit chaque colis (`getColis`) et n'y pose que
+  `zone`, et le redessin passe par `refreshMapData`. Le contour est converti en
+  lat/lon avant la lecture asynchrone puis reprojeté avec la même caméra (test exact
+  même si la carte bouge entre-temps). **Règle pour tout futur mode de la carte :
+  relire les données au moment du geste, jamais les capturer à `setupX(map, data)`.**
+  Vérification en navigateur : poser `assets/map.pmtiles` dans `mapMeta` (clé `key`)
+  pour avoir une vraie instance ; dans le panneau caché, le `load` MapLibre n'arrive
+  qu'après une capture d'écran (le rendu est suspendu) — et ne jamais appeler
+  `refreshMapData` en boucle avant `load` (chaque appel repasse par `render()` et
+  détruit l'instance en cours de chargement).
 - **Sélection multiple de l'État A** (`selectionMode`/`selectedIds` dans `tour-ui.js`, cases à
   cocher sur les cartes de préparation, bouton « Supprimer (N) ») : le bouton « Tout
   cocher/décocher » doit utiliser le **même critère** pour son libellé et pour l'action du clic
