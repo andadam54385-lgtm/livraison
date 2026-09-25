@@ -129,6 +129,12 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   qu'après une capture d'écran (le rendu est suspendu) — et ne jamais appeler
   `refreshMapData` en boucle avant `load` (chaque appel repasse par `render()` et
   détruit l'instance en cours de chargement).
+  **Choix du numéro de zone en HAUT de la carte** (build 156, « met le choix du numéro
+  de zone en haut pas en bas ») : `#zone-confirm-panel` était ancré à 76 px du bas du
+  slot carte, qui descend sous la feuille — mesuré à 375 px, le panneau tombait vers
+  736 px alors que la feuille commence à 422 px (caché), et le clavier numérique l'aurait
+  recouvert de toute façon. Il est désormais à `top: 12px` (juste sous l'en-tête), par-
+  dessus la barre d'aide et les boutons du haut le temps du choix. Ne pas le redescendre.
 - **Sélection multiple de l'État A** (`selectionMode`/`selectedIds` dans `tour-ui.js`, cases à
   cocher sur les cartes de préparation, bouton « Supprimer (N) ») : le bouton « Tout
   cocher/décocher » doit utiliser le **même critère** pour son libellé et pour l'action du clic

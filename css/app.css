@@ -595,11 +595,16 @@ a { color: var(--accent-strong); }
 }
 .zone-hint-bar[hidden] { display: none; }
 .zone-hint-bar button { flex-shrink: 0; padding: 6px 10px; min-height: 0; font-size: 0.78rem; }
+/* Choix du numero de zone EN HAUT (build 156, retour terrain "met le choix
+   du numero de zone en haut pas en bas") : en bas, le clavier numerique de
+   l'iPhone le recouvrait des qu'on touchait le champ, et il tombait sur la
+   feuille des colis. Il recouvre la barre d'aide et les boutons du haut le
+   temps du choix -- ils ne servent a rien pendant ce temps. */
 #zone-confirm-panel:not(:empty) {
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: 76px;
+  top: 12px;
   z-index: 7;
 }
 .zone-confirm-card {
