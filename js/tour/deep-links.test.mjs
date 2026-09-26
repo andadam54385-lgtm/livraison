@@ -13,22 +13,22 @@ function assert(cond, label) {
 
 // Cas reel du bug : "Grande Rue" existe dans des dizaines de communes du
 // secteur, Waze en choisissait une autre que Rigny-la-Salle.
-const arret = { lat: 48.5731, lon: 5.6842, label: "THIERRY LANTOINE", adresse: "11 Grande Rue, 55140 Rigny-la-Salle" };
+const arret = { lat: 48.5688, lon: 5.6911, label: "PATRICK MASSON", adresse: "4 Grande Rue, 55140 Rigny-la-Salle" };
 
 console.log("=== La destination est le point GPS, jamais le texte de l'adresse ===");
 {
   const waze = wazeUrl(arret);
-  assertEqual(waze, "https://waze.com/ul?ll=48.5731,5.6842&navigate=yes", "Waze : coordonnees");
+  assertEqual(waze, "https://waze.com/ul?ll=48.5688,5.6911&navigate=yes", "Waze : coordonnees");
   assert(!waze.includes("Grande"), "Waze : le nom de rue n'est pas transmis (pas de re-geocodage)");
   assert(!waze.includes("q="), "Waze : jamais de recherche texte quand on a le point");
 
   const google = googleMapsUrl(arret);
-  assert(google.includes("destination=48.5731%2C5.6842"), "Google : coordonnees en destination");
+  assert(google.includes("destination=48.5688%2C5.6911"), "Google : coordonnees en destination");
   assert(!google.includes("Grande"), "Google : le nom de rue n'est pas transmis");
 
   const apple = appleMapsUrl(arret);
-  assert(apple.includes("daddr=48.5731%2C5.6842"), "Apple : coordonnees en destination");
-  assert(apple.includes("dname=THIERRY+LANTOINE"), "Apple : le nom reste comme etiquette");
+  assert(apple.includes("daddr=48.5688%2C5.6911"), "Apple : coordonnees en destination");
+  assert(apple.includes("dname=PATRICK+MASSON"), "Apple : le nom reste comme etiquette");
   assert(!apple.includes("Grande"), "Apple : le nom de rue n'est pas transmis");
 }
 

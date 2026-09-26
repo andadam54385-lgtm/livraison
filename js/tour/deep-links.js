@@ -4,7 +4,7 @@
 //
 // Bug reel corrige ici (retour terrain : "le transfert a Waze amenait dans un
 // mauvais village") : on envoyait le TEXTE de l'adresse canonique BAN
-// ("11 Grande Rue, 55140 Rigny-la-Salle") et l'appli de navigation la
+// ("4 Grande Rue, 55140 Rigny-la-Salle") et l'appli de navigation la
 // re-geocodait de son cote. Un nom de voie tres repandu -- "Grande Rue",
 // "Rue de l'Eglise", "Route Nationale" -- existe dans des dizaines de
 // communes du secteur : le moteur de Waze en choisit une, pas forcement la

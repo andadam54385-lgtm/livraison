@@ -44,7 +44,7 @@ const CP_ONLY_RE = /^(\d{5})$/;
 // dans l'ecart vertical qui separe deux clients, elles le decoupaient en
 // DEUX ecarts plus petits dont NI L'UN NI L'AUTRE ne depassait le seuil de
 // groupLinesIntoBlocks -- deux adresses entieres fusionnaient alors en une
-// seule (bloc "JEANNE D'ARC RUE 22.34km AKHRAZ HASSAN 14 GENERAL LECLERC
+// seule (bloc "JEANNE D'ARC RUE 22.34km BENALI KARIM 9 MARECHAL FOCH
 // AVE 22.83km" observe en test). Filtrees ICI, avant meme le decoupage en
 // blocs, pour ne jamais entrer dans le calcul des ecarts.
 const NOISE_LINE_PATTERNS = [
@@ -64,7 +64,7 @@ const NOISE_LINE_PATTERNS = [
   /^\d{1,2}[:.]\d{2}$/, // heure seule (pas une plage) : "11:45"
   // Terminal "Itineraire" (retour terrain 2026-09-01, "138 points au lieu de
   // 60") : reference de tournee "999X99", telephone brut sur sa propre ligne
-  // ("33630369559", "0821233877" -- 9 a 12 chiffres, jamais un CP qui en fait
+  // ("33639980006", "0639980007" -- 9 a 12 chiffres, jamais un CP qui en fait
   // 5 ni un numero de voie), residu d'icone ("#9", "9" seul sous le
   // pictogramme maison).
   /^\d{3,4}x\d{2,}$/i, // reference type "999X99"
@@ -100,7 +100,7 @@ const MAX_BANNER_LINES = 6;
 // Repli d'un token de bruit ISOLE en fin de chaine (pas ancre en fin absolue
 // de ligne comme NOISE_LINE_PATTERNS -- ici on nettoie la fin d'une ligne plus
 // longue, ex: l'OCR a fusionne rue + distance + debut de bandeau en UNE seule
-// ligne detectee : "14 GENERAL LECLERC AVE 42 km Attention consigne...").
+// ligne detectee : "9 MARECHAL FOCH AVE 42 km Attention consigne...").
 // Applique en boucle (plusieurs tokens de bruit peuvent s'empiler en fin de
 // ligne) jusqu'a stabilisation.
 const TRAILING_NOISE_RE =
@@ -110,7 +110,7 @@ const TRAILING_NOISE_RE =
 // en fin (bug reel, retour terrain "beaucoup de donnees parasites" sur un
 // terminal "Itineraire" : l'OCR d'un ecran filme fusionne les colonnes, et
 // le bruit se retrouve AU MILIEU du texte utile -- "12.61km Q OPTICIENS
-// KRYS 8000 jo v VANBERTEN", "us 14 ANDRE MAGINOTRUE 8000 | 0+13 ©".
+// KRYS 8000 jo v VANDERMEL", "us 14 ANDRE MAGINOTRUE 8000 | 0+13 ©".
 // stripTrailingNoise (ancre en fin) ne pouvait rien contre ca, et chaque
 // residu devenait un faux nom, une rue polluee ou un faux client entier.
 //
@@ -142,14 +142,14 @@ const NOISE_TOKEN_PATTERNS = [
   /\b\d{4}\s*[-\u2013]\s*\d{4}\b/g,
   // Badge de colis : "8000 | 0+1" mais aussi ses formes TRONQUEES par le
   // bord du cadre ou par l'OCR ("8000 | 0:", "2000 |o+1", "8000|0+2") --
-  // observees collees a de vrais noms ("ckael Caillon 8000 | 0:"). 3 ou 4
+  // observees collees a de vrais noms ("nnick Perrot 8000 | 0:"). 3 ou 4
   // chiffres SEULEMENT : avec 5, "55140 |" (un vrai code postal suivi d'une
   // barre parasite) passait pour un badge et le CP disparaissait.
   // La barre du badge est parfois lue "}" ou "]" ("8000} 041").
   // ... suivi du glyphe de l'icone que l'OCR lit comme 1-2 lettres ("8000 |
   // 0+1 QD", "8000 | 0+1 RD", "8000 | 0+1 v") : mange avec le badge, sinon
-  // ce residu restait colle au nom ou a la rue ("10 DOCTEUR QD", "Samuel
-  // FERRI vw" -- terrain 2026-09-09 et 2026-09-14). La barre est parfois lue
+  // ce residu restait colle au nom ou a la rue ("10 DOCTEUR QD", "Loris
+  // BENEDETTI vw" -- terrain 2026-09-09 et 2026-09-14). La barre est parfois lue
   // "/" ("8000/0185").
   /\b\d{3,4}\s*[|}\]\/]\s*[o0-9]{0,3}\s*[+: ]?\s*\d{0,3}(?:\s*[A-Za-z0-9@©®]{1,2}(?=[\s|,.)]|$))?/gi, // badge "8000 | 0+1", "8000 | 0:", "4000 | 140 87"
   // Badge dont la barre ET le plus ont ete perdus, chiffres colles :
@@ -199,16 +199,16 @@ function stripNoiseTokens(text) {
     .trim();
   // Residus d'icones colles au texte, aux deux bouts :
   // - en tete, un jeton court commencant par une minuscule devant un mot en
-  //   capitales ou un nombre ("s ERICFRASIAK", "eus FARGE FREDERIC", "nG
+  //   capitales ou un nombre ("s MARCTHIRION", "eus MOUGEL FABRICE", "nG
   //   CHEMIN DES VERPILLERES", "y 52 ANDRE THEURIET RUE") -- jamais "Mme
-  //   regnier" (majuscule en tete) ni un chiffre (numero de voie) ;
+  //   vautrin" (majuscule en tete) ni un chiffre (numero de voie) ;
   // - en tete, un chiffre SEUL devant un vrai nombre ("4 7 ROSIERE RUE" :
   //   l'icone de ramasse lue "4") -- mais pas "4 9EME RI AVE", ou "9EME"
   //   n'est pas un nombre ;
-  // - en fin, une minuscule ou un chiffre isole ("Thieriot Kevin v", "2 MOULIN
+  // - en fin, une minuscule ou un chiffre isole ("Gerardin Loic v", "2 SAULES
   //   CHMN 3", "COMMERCY 55200 q" -- ce "q" passait pour la commune), un jeton
   //   de 3 caracteres au plus contenant un symbole ("@p", "9#)"), ou un
-  //   fragment de badge en milliers ronds ("19 BOIS RUE 3000").
+  //   fragment de badge en milliers ronds ("19 NOYERS RUE 3000").
   // Jamais une MAJUSCULE isolee en fin : "BAT B", "ALLEE A" sont des adresses.
   out = out.replace(/^[a-zà-ÿ][a-zà-ÿA-ZÀ-Ü]{0,2}\s+(?=[A-ZÀ-Ü0-9])/, "");
   out = out.replace(/^\d\s+(?=\d+\s)/, "");
@@ -229,7 +229,7 @@ function stripNoiseTokens(text) {
     out = out
       // Un chiffre seul (comportement historique), ou 1 a 2 caracteres
       // commencant par une MINUSCULE : l'icone du badge lue comme des lettres
-      // ("Samuel FERRI vw", "CHRISTOPHE DAHBI mn", "EMILIE MICHEL uw" --
+      // ("Loris BENEDETTI vw", "FABIEN LAHMER mn", "SANDRA MULLER uw" --
       // terrain 2026-09-09). Jamais une majuscule en tete ("BAT B" reste une
       // adresse), et jamais un mot de liaison ("RUE DU GENERAL DE" +
       // "GAULLE" : le "de" fait partie de la rue repliee).
@@ -319,7 +319,7 @@ function stripInterfaceNoise(ocrLines) {
     // Bruit COLLE en fin de ligne reelle (terminal "Itineraire" : la colonne
     // de droite -- badge "8000 | 0+1", creneau "15:10 - 17:10", "999X99",
     // telephone -- fusionne souvent avec la ligne de gauche a l'OCR :
-    // "THOMAS ANTHONY 8000 | 0+1", "LONGEVILLE EN BARROIS 15:10 - 17:10").
+    // "MARCHAL KEVIN 8000 | 0+1", "LONGEVILLE EN BARROIS 15:10 - 17:10").
     // Sans ce nettoyage, le nom/la ville emportent le bruit, la commune
     // n'est plus reconnue, et la classification derive -- source directe du
     // sur-decoupage "138 points au lieu de 60". Ligne videe par le
@@ -349,8 +349,8 @@ function stripInterfaceNoise(ocrLines) {
     // "74 A" (residu de badge/icone entre deux fiches, terrain 2026-09-09) :
     // meme famille -- un chiffre suivi d'une lettre isolee, sans le moindre
     // mot. Classe en rue (elle commence par un chiffre), la ligne avalait
-    // ensuite le nom du client et la vraie rue : "74 A MANSION NICOLAS 61
-    // SAINT PAUL RUE", geocodee au 74 au lieu du 61.
+    // ensuite le nom du client et la vraie rue : "74 A COLIN YANN 61
+    // TILLEULS RUE", geocodee au 74 au lieu du 61.
     if (/^\d{1,4}\s*[.,;:]?\s*[a-zà-ÿ]?$/i.test(cleaned) || /^\d{1,2}\s*\+\s*\d{1,2}$/.test(cleaned)) cleaned = "";
     kept.push({ ...l, text: cleaned, isClientStart });
   }
@@ -383,7 +383,7 @@ const STREET_KEYWORDS = [
 // Un mot-cle COURT seul sur sa ligne n'ouvre pas une adresse : c'est presque
 // toujours un residu d'icone du terminal ("Qu", la loupe, terrain
 // 2026-09-08). Classe en rue, il avalait ensuite le nom du client ET la vraie
-// rue en continuation ("Qu Adrien Harelle 7 HAUTE RUE", nom perdu). En
+// rue en continuation ("Qu Florian Cordier 7 PUITS RUE", nom perdu). En
 // CONTINUATION d'une rue deja ouverte la meme ligne reste legitime et le
 // repli de fin de boucle la rattache normalement ("3 GEORGES BEAUMONT" /
 // "ALL" pour une allee).
@@ -472,7 +472,7 @@ function expandSaint(text) {
 // le nettoyage ne le reconnait pas, le CP n'est plus le dernier jeton et
 // n'etait plus lu du tout. Avec le filtre "fiche localisable", c'etait alors
 // la fiche ENTIERE qui disparaissait -- six arrets perdus sur une video reelle
-// de 66 (Sidoli, Noelyne CANDAS, SAFRAN, GUARRACINO, Gazon Philippe, "maison
+// de 66 (Morelli, Josiane BRETON, SAFRAN, SANTORO, Hanus Gerard, "maison
 // individuelle"), tous pour cette seule raison. On cherche donc le CP par sa
 // VALEUR : un jeton de 5 chiffres present dans la base (n'importe lequel sans
 // base), ou qu'il soit dans la ligne ; ce qui le precede porte la commune, ce
@@ -649,8 +649,8 @@ function looksLikeUiChrome(line) {
 // francais reste court (prenom + nom, parfois un 3e mot) ; un veritable
 // texte parasite est presque toujours plus long. MAX_NOM_WORDS compte les
 // mots de chaque cote d'un " - " separement plutot que la ligne entiere :
-// motif reel observe sur un terminal Chronopost ("SERGE CORCERET - SERGE
-// CORCERET", 2 noms accoles par un tiret) qu'un plafond global aurait
+// motif reel observe sur un terminal Chronopost ("ALAIN VUILLAUME - ALAIN
+// VUILLAUME", 2 noms accoles par un tiret) qu'un plafond global aurait
 // injustement rejete.
 const MAX_NOM_WORDS = 3;
 // Une raison sociale reelle depasse souvent 3 mots ("SYND MIXTE DES EAUX DU
@@ -664,7 +664,7 @@ function countWords(text) {
 }
 
 // Motifs qui disqualifient DEFINITIVEMENT un nom, quelle que soit sa
-// longueur (retour terrain : "n\u00b0 1.73km Q", "A9 9.73km Q", "0329783111 & *
+// longueur (retour terrain : "n\u00b0 1.73km Q", "A9 9.73km Q", "0639980008 & *
 // 2.24km Q" etaient retenus comme noms de clients). Un vrai nom ne contient
 // jamais d'unite de distance, d'heure, ni de longue suite de chiffres.
 const NON_NAME_RE = /(\d\s?km\b|\b\d{1,2}[:.]\d{2}\b|\d{6,}|\bitin[ée]raire\b|\bliste\b|\bcarte\b|\bsynth[èe]se\b|\bcr[ée]er\b)/i;
@@ -697,7 +697,7 @@ function looksLikeName(line) {
 //     des communes de la base BAN locale deja chargee -- voir
 //     listDistinctCities()/ban-index.js) -> ville, meme sans CP colle sur la
 //     meme ligne. Sans base de reference, une ligne "DOMMARTIN LES TOUL"
-//     est structurellement identique a une ligne "AKHRAZ HASSAN" (juste des
+//     est structurellement identique a une ligne "BENALI KARIM" (juste des
 //     mots, sans chiffre ni mot-cle) -- impossible a distinguer d'un nom de
 //     personne par la seule forme du texte. knownCities est optionnel
 //     (Set vide par defaut) : sans lui, ce cas de figure retombe sur
@@ -739,9 +739,9 @@ function mergeHyphenWraps(rawLines, knownCities) {
     const line = String(raw || "").trim();
     const precedente = out.length > 0 ? out[out.length - 1] : null;
     // Jamais devant un NUMERO de voie : un nom finissant par un tiret
-    // ("Denise Rossetti-", "Marie-Christine HOULIEZ-", tres frequent quand le
+    // ("Odette Marchetti-", "Marie-Claude DELVAUX-", tres frequent quand le
     // terminal coupe un nom compose) se recollait a la rue suivante --
-    // "Denise Rossetti-6 GRANDE RUE", nom perdu et rue inutilisable. Une
+    // "Odette Marchetti-6 LAVOIR RUE", nom perdu et rue inutilisable. Une
     // commune repliee ne commence jamais par un chiffre.
     const suivanteEstUneRue = /^\d/.test(line);
     const recolleSurTiret =
@@ -923,13 +923,13 @@ export function classifyBlockLines(rawLines, { knownCities = new Set(), knownCps
     // individuelle V", "BIJOUTERIE CENTRALE D"). Toleree sur une rue ("BAT
     // B"), jamais dans un nom.
     const nomPropre = line.replace(/\s+[A-ZÀ-Ü]$/, "");
-    // Nom sur DEUX lignes ("SYND MIXTE DES EAUX DU" / "TOULOIS", "Mme regnier
-    // massera" / "valerie", "DOMAINE CLAUDE" / "VOSGIEN") : deux lignes de nom
+    // Nom sur DEUX lignes ("SYND MIXTE DES EAUX DU" / "TOULOIS", "Mme vautrin
+    // massot" / "sylvie", "DOMAINE CLAUDE" / "VOSGIEN") : deux lignes de nom
     // consecutives sont un seul nom replie par le terminal, pas deux candidats
     // dont le dernier l'emporterait.
     // ... sauf si la ligne precedente est un mot SEUL : c'est la forme d'un
     // badge de transporteur inconnu ("XPRESSDEP" au-dessus de "Julie
-    // Renard", cas 12), et la le dernier l'emporte, comme avant.
+    // Perrin", cas 12), et la le dernier l'emporte, comme avant.
     const precedent = result.names.length > 0 ? result.names[result.names.length - 1] : null;
     if (lastCategory === "name" && precedent && countWords(precedent) >= 2) {
       result.names[result.names.length - 1] = `${precedent} ${nomPropre}`.trim();
@@ -1077,7 +1077,7 @@ export function groupLinesIntoBlocks(lines) {
 // Un bloc qui contient PLUSIEURS codes postaux est forcement une fusion de
 // plusieurs clients (bug reel : l'ecart vertical entre deux fiches disparait
 // quand l'OCR fusionne des lignes, et 3-4 clients se retrouvent dans un seul
-// bloc -- "OPTICIENS KRYS ... BAR-LE-DUC 55000 ... ROCHELLE BLVD ... 55000").
+// bloc -- "OPTICIENS KRYS ... BAR-LE-DUC 55000 ... PEUPLIERS BLVD ... 55000").
 // Dans ce terminal le CP TERMINE chaque fiche : on recoupe juste apres
 // chacun. Sans CP valide en double, le bloc est rendu tel quel.
 // Dans ce terminal, CHAQUE fiche client est precedee de sa distance
@@ -1088,7 +1088,7 @@ export function groupLinesIntoBlocks(lines) {
 // Une lettre parasite peut suivre l'unite ("6.12KMm", "39.1kmQ" colle) :
 // l'OCR recolle l'icone d'epingle a l'unite. Sans elle, ni le separateur de
 // fiche ni le nettoyage ne reconnaissaient le marqueur, et la distance
-// entiere partait dans le nom du client ("fÂA° '6.12KMm EMILIE MICHEL uw").
+// entiere partait dans le nom du client ("fÂA° '6.12KMm SANDRA MULLER uw").
 const DISTANCE_MARKER_RE = /(^|\s)\d+[.,]?\d*\s?(?:km|kr|ki|k|m)[a-z]?\b/i;
 const ICON_ROW_RE = /^[#@]?[aAÀ][sSrRiI9°]?$/;
 
@@ -1119,7 +1119,7 @@ function chevauchement(l, zone) {
 // porte un badge, la ligne la plus HAUTE de sa rangee (elle-meme si elle a
 // du texte, ou toute ligne qui la chevauche a moitie -- l'OCR met souvent le
 // nom et la rue d'une meme rangee sur deux lignes, le badge colle a l'une ou
-// l'autre : "Sidoli thibaut Toner" / "2 MOULIN CHMN 8000 | 0+1 3"). Ouvrir la
+// l'autre : "Morelli bastien Toner" / "2 SAULES CHMN 8000 | 0+1 3"). Ouvrir la
 // fiche sur la ligne du badge elle-meme aurait separe ce nom de sa rue.
 function departsParBadge(ocrLines) {
   const lignes = ocrLines.filter((l) => l.bbox && String(l.text || "").trim()).sort((a, b) => a.bbox.y0 - b.bbox.y0);
@@ -1158,7 +1158,7 @@ function splitFusedBlock(blockLines, knownCps) {
   // CP seul ou l'ordre "<CP> <VILLE>"). Quand le marqueur de distance qui
   // ouvre la fiche suivante a ete perdu par l'OCR (reduit a "a" ou "A9"),
   // cette coupure est la seule qui reste : sans elle, deux clients
-  // consecutifs fusionnaient ("Mme regnier massera" absorbee par "LHERITIER
+  // consecutifs fusionnaient ("Mme vautrin massot" absorbee par "LHERITIER
   // MAINTENANCE", "BIJOUTERIE CENTRALE" par "CDM COMMERCY").
   const cuts = [];
   blockLines.forEach((l, i) => {
@@ -1177,7 +1177,7 @@ function splitFusedBlock(blockLines, knownCps) {
 
 // Une SEULE ligne OCR peut contenir plusieurs fiches quand l'image a tout
 // fusionne ("12.61km Q OPTICIENS KRYS ... BAR-LE-DUC 55000 : A 12.6km Q vu,
-// PIED AURE ... 55000"). Le decoupage par index de ligne ne peut rien : on
+// PIERSON LEA ... 55000"). Le decoupage par index de ligne ne peut rien : on
 // recoupe donc le TEXTE lui-meme a chaque marqueur de distance, en pseudo-
 // lignes qui partagent la bbox d'origine (l'ecart vertical reste correct,
 // et isClientStart les separera ensuite).

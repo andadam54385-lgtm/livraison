@@ -90,7 +90,7 @@ function classifyShipToBlock(lines) {
         raw: line,
         phone: norm.phone,
         // Marqueur explicite (TEL/PHONE/GSM/+/00) = confiance haute ; une
-        // suite de chiffres nue (ex: reference client type "789331367") est
+        // suite de chiffres nue (ex: reference client type "639980002") est
         // ambigue -> confiance moyenne, jamais acceptee sans verification.
         confidence: hasMarker ? "haute" : "moyenne",
       });

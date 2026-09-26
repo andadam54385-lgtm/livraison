@@ -259,7 +259,7 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
      base BAN reconnaît le résultat — jamais sur la forme seule.
   3. **Résidu d'icône « Qu »** (la loupe) seul sur sa ligne : « QU » étant un mot-clé de voie
      (quai), la ligne passait pour une rue et avalait le nom du client puis la vraie rue
-     (« Qu Adrien Harelle 7 HAUTE RUE », nom perdu). Un mot-clé court SEUL n'ouvre plus une
+     (« Qu Florian Cordier 7 PUITS RUE », nom perdu). Un mot-clé court SEUL n'ouvre plus une
      adresse, mais reste une continuation valable (« 3 GEORGES BEAUMONT » / « ALL »).
   4. **« 2. » en tête de la photo suivante** : commençait par un chiffre → pris pour une rue
      et collé devant la vraie, fabriquant un faux doublon du même arrêt avec un autre numéro.
@@ -272,7 +272,7 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
      contiennent déjà la ligature, donc l'expansion est faite dans `looseCommune`
      (comparaison uniquement, comme les tirets), **jamais** dans `normalizeCity` — sinon les
      `cn` indexés ne correspondraient plus.
-  2. **Nom fini par un tiret** (« Denise Rossetti- », nom composé coupé) recollé à la rue
+  2. **Nom fini par un tiret** (« Odette Marchetti- », nom composé coupé) recollé à la rue
      suivante par la règle des communes repliées → `mergeHyphenWraps` ne recolle plus jamais
      devant une ligne qui commence par un chiffre.
   3. **CP dont un chiffre est lu comme une lettre** (« ST MIHIEL 5530C ») : la fiche perdait
@@ -303,7 +303,7 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   À l'arrivée : colis `a_verifier` sans rue, affiché « 55300 CHAUVONCOURT »
   (`formatAdresseAffichage` filtre la virgule orpheline), le livreur complète la rue à la
   main. Au passage : badge sans barre (« 8000 0+1 ») nettoyé, et résidu d'icône de 1–2
-  minuscules en fin de ligne retiré (« Samuel FERRI vw ») — jamais un mot de liaison
+  minuscules en fin de ligne retiré (« Loris BENEDETTI vw ») — jamais un mot de liaison
   (« RUE DU GENERAL DE » replié garde son « de »), jamais une majuscule (« BAT B »).
 - **Commune collée en FIN de ligne de rue** (build 142, terrain 2026-09-11 : « il m'a mis
   Ranzières au lieu de St-Mihiel »). Quand le CP est sur la ligne SUIVANTE, rien ne détachait

@@ -51,14 +51,14 @@ console.log("\n=== Clients reels SANS numero de voie (entreprises) : jamais abso
   // Retour terrain du build 121 ("il a trouve moins d'adresses qu'en
   // realite") : trois clients reels de la meme rue, dont un sans numero.
   const yzance = d("GRANDE TERRE ALL", "BAR-LE-DUC", "55000", "YZANCE");
-  const bridji = d("1 GRANDE TERRE ALL", "BAR LE DUC", "55000", "Kader Bridji");
+  const haddou = d("1 GRANDE TERRE ALL", "BAR LE DUC", "55000", "Nabil Haddou");
   const audition = d("6 GRANDE TERRE ALL MEUSE", "BAR-LE-DUC", "55000", "AUDITION MUTUALISTE");
-  assertEqual(isSameAddress(yzance, bridji), false, "YZANCE (sans numero) distinct de 1 GRANDE TERRE ALL");
+  assertEqual(isSameAddress(yzance, haddou), false, "YZANCE (sans numero) distinct de 1 GRANDE TERRE ALL");
   assertEqual(isSameAddress(yzance, audition), false, "YZANCE distinct de 6 GRANDE TERRE ALL MEUSE");
-  assertEqual(isSameAddress(bridji, audition), false, "les deux clients numerotes restent distincts");
+  assertEqual(isSameAddress(haddou, audition), false, "les deux clients numerotes restent distincts");
   const collected = [];
   ingestDrafts(collected, [yzance]);
-  ingestDrafts(collected, [bridji, audition]);
+  ingestDrafts(collected, [haddou, audition]);
   assertEqual(collected.length, 3, "trois arrets retenus pour trois clients");
 }
 

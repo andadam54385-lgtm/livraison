@@ -16,17 +16,17 @@ function assertEqual(actual, expected, label) {
 console.log("\n=== Cas 1 : nom duplique, tel propre ===");
 {
   const text = [
-    "JULIEN BUNIET",
-    "0607222071",
-    "JULIEN BUNIET",
-    "RUE DE L'EGLISE 6",
+    "LUCAS VERNIER",
+    "0639980001",
+    "LUCAS VERNIER",
+    "RUE DES JARDINS 14",
     "54470 ANSAUVILLE",
   ].join("\n");
   const r = parseUpsLabel(`SHIP TO:\n${text}`);
-  assertEqual(r.nom, "JULIEN BUNIET", "nom");
-  assertEqual(r.tel, "0607222071", "tel");
+  assertEqual(r.nom, "LUCAS VERNIER", "nom");
+  assertEqual(r.tel, "0639980001", "tel");
   assertEqual(r.telConfidence, "haute", "telConfidence");
-  assertEqual(r.rue, "RUE DE L'EGLISE 6", "rue");
+  assertEqual(r.rue, "RUE DES JARDINS 14", "rue");
   assertEqual(r.cp, "54470", "cp");
   assertEqual(r.ville, "ANSAUVILLE", "ville");
 }
@@ -36,16 +36,16 @@ console.log("\n=== Cas 2 : societe avant le nom, tel sans marqueur (ambigu) ==="
 {
   const text = [
     "NIKE DIGITAL",
-    "789331367",
-    "DOUCET BENOIT",
-    "2 RUE DE L EAU",
+    "639980002",
+    "GARNIER PASCAL",
+    "5 RUE DES VIGNES",
     "55260 RUPT DEVANT SAINT MIHIEL",
   ].join("\n");
   const r = parseUpsLabel(`SHIP TO:\n${text}`);
-  assertEqual(r.nom, "DOUCET BENOIT", "nom (pas NIKE DIGITAL)");
-  assertEqual(r.tel, "0789331367", "tel (9 derniers chiffres + 0)");
+  assertEqual(r.nom, "GARNIER PASCAL", "nom (pas NIKE DIGITAL)");
+  assertEqual(r.tel, "0639980002", "tel (9 derniers chiffres + 0)");
   assertEqual(r.telConfidence, "a_verifier", "telConfidence (aucun marqueur -> a verifier)");
-  assertEqual(r.rue, "2 RUE DE L EAU", "rue");
+  assertEqual(r.rue, "5 RUE DES VIGNES", "rue");
   assertEqual(r.cp, "55260", "cp");
   assertEqual(r.ville, "RUPT DEVANT SAINT MIHIEL", "ville");
 }
@@ -54,17 +54,17 @@ console.log("\n=== Cas 2 : societe avant le nom, tel sans marqueur (ambigu) ==="
 console.log("\n=== Cas 3 : nom abrege + complet, societe intercalee, rue sur 2 lignes ===");
 {
   const text = [
-    "M.PETITJEAN",
-    "+33675088974",
+    "M.CHAPUIS",
+    "+33639980003",
     "ROYAL CANIN CHAMPAGNE LORRAINE",
-    "JULIEN PETITJEAN",
+    "DAMIEN CHAPUIS",
     "ZONE D'ACTIVITE DES SOUHESMES",
     "ZI LIEU-DIT L'ATRIE",
     "55220 LES SOUHESMES RAMPONT",
   ].join("\n");
   const r = parseUpsLabel(`SHIP TO:\n${text}`);
-  assertEqual(r.nom, "JULIEN PETITJEAN", "nom (dernier candidat avant la rue)");
-  assertEqual(r.tel, "0675088974", "tel (prefixe +33 elimine)");
+  assertEqual(r.nom, "DAMIEN CHAPUIS", "nom (dernier candidat avant la rue)");
+  assertEqual(r.tel, "0639980003", "tel (prefixe +33 elimine)");
   assertEqual(r.telConfidence, "haute", "telConfidence (marqueur +)");
   assertEqual(r.rue, "ZONE D'ACTIVITE DES SOUHESMES ZI LIEU-DIT L'ATRIE", "rue (2 lignes concatenees)");
   assertEqual(r.cp, "55220", "cp");
@@ -80,16 +80,16 @@ console.log("\n=== Regression : expediteur ignore + tracking + Ref.1 TEL concord
     "54000 NANCY",
     "",
     "SHIP TO:",
-    "CLAIRE MOREAU",
+    "CLAIRE JACQUOT",
     "1 AVENUE DE L EUROPE",
     "55300 SAINT-MIHIEL",
     "",
     "1Z444XY50987654321",
     "",
-    "Ref.1: TEL 0329891234",
+    "Ref.1: TEL 0639980004",
   ].join("\n");
   const r = parseUpsLabel(text);
-  assertEqual(r.nom, "CLAIRE MOREAU", "nom (expediteur ignore)");
+  assertEqual(r.nom, "CLAIRE JACQUOT", "nom (expediteur ignore)");
   assertEqual(r.tracking, "1Z444XY50987654321", "tracking");
   assertEqual(r.rue, "1 AVENUE DE L EUROPE", "rue");
   assertEqual(r.cp, "55300", "cp");
@@ -104,10 +104,10 @@ console.log("\n=== Regression : expediteur ignore + tracking + Ref.1 TEL concord
 console.log("\n=== Regression : prefixes internationaux varies ===");
 {
   const cases = [
-    ["TEL 0642158790", "0642158790"],
-    ["TEL +33642158790", "0642158790"],
-    ["TEL 0033642158790", "0642158790"],
-    ["TEL 00336642158790", "0642158790"], // prefixe parasite double, toujours les 9 derniers chiffres
+    ["TEL 0639980005", "0639980005"],
+    ["TEL +33639980005", "0639980005"],
+    ["TEL 0033639980005", "0639980005"],
+    ["TEL 00336639980005", "0639980005"], // prefixe parasite double, toujours les 9 derniers chiffres
   ];
   for (const [line, expected] of cases) {
     const text = `SHIP TO:\nJEAN DUPONT\n${line}\n3 IMPASSE DES LILAS\n55300 SAINT MIHIEL`;
@@ -122,10 +122,10 @@ console.log("\n=== Regression : prefixes internationaux varies ===");
 // bug terrain "(nom inconnu)" systematique) ---
 console.log("\n=== Regression : bruit OCR O/0 dans le nom (ne doit plus le faire disparaitre) ===");
 {
-  const text = ["MARTIN S0PHIE", "0642158790", "6 RUE DE L EGLISE", "54470 ANSAUVILLE"].join("\n");
+  const text = ["MARTIN S0PHIE", "0639980005", "14 RUE DES JARDINS", "54470 ANSAUVILLE"].join("\n");
   const r = parseUpsLabel(`SHIP TO:\n${text}`);
   assertEqual(r.nom, "MARTIN S0PHIE", "nom (present malgre le chiffre parasite)");
-  assertEqual(r.rue, "6 RUE DE L EGLISE", "rue (pas contaminee par le nom)");
+  assertEqual(r.rue, "14 RUE DES JARDINS", "rue (pas contaminee par le nom)");
   assertEqual(r.cp, "54470", "cp");
   assertEqual(r.ville, "ANSAUVILLE", "ville");
 }
@@ -147,10 +147,10 @@ console.log("\n=== Regression : mots-cles de rue courts trouves par erreur DANS 
     ["STERN MARC", "TER dans STERN"],
   ];
   for (const [nomLigne, label] of cases) {
-    const text = [nomLigne, "0642158790", "6 RUE DE L EGLISE", "54470 ANSAUVILLE"].join("\n");
+    const text = [nomLigne, "0639980005", "14 RUE DES JARDINS", "54470 ANSAUVILLE"].join("\n");
     const r = parseUpsLabel(`SHIP TO:\n${text}`);
     assertEqual(r.nom, nomLigne, `nom present malgre ${label}`);
-    assertEqual(r.rue, "6 RUE DE L EGLISE", `rue non contaminee (${label})`);
+    assertEqual(r.rue, "14 RUE DES JARDINS", `rue non contaminee (${label})`);
   }
 }
 
@@ -165,7 +165,7 @@ console.log("\n=== Non-regression : mots-cles courts comme mot entier restent cl
     ["12 AV DE LA LIBERATION", "AV abrege"],
   ];
   for (const [rueLigne, label] of cases) {
-    const text = ["JEAN DUPONT", "0642158790", rueLigne, "54000 NANCY"].join("\n");
+    const text = ["JEAN DUPONT", "0639980005", rueLigne, "54000 NANCY"].join("\n");
     const r = parseUpsLabel(`SHIP TO:\n${text}`);
     assertEqual(r.rue, rueLigne, `rue toujours detectee (${label})`);
     assertEqual(r.nom, "JEAN DUPONT", `nom toujours correct (${label})`);
