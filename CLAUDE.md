@@ -530,6 +530,29 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   indéfiniment (les octets de `sw.js` sont le seul signal de mise à jour détecté par le
   navigateur).
 - Tests unitaires du parser : `node js/scan/parse-ups-label.test.mjs`.
+- **Mise à jour DIFFÉRENTIELLE** (build 161, retour terrain 2026-09-30 « le 160 arrive
+  pas » — serveur sain, les 115 fichiers en 200, tous les relais CDN au bon build).
+  Avant : `cache.addAll` retéléchargeait les ~17 Mo de l'appli à CHAQUE build (dont 13 Mo
+  de Tesseract immuables), en tout-ou-rien — en 4G en tournée, un seul fichier raté et
+  l'installation échouait sans rien dire. Désormais le manifeste porte `files` (empreinte
+  SHA-1/16 **des octets tels que GitHub les sert** : CRLF→LF pour les fichiers texte,
+  même détection que git, `core.autocrlf=true` ici) ; `sw.js` recopie depuis un cache
+  déjà installé tout fichier dont l'empreinte n'a pas changé (enregistrées dans
+  `./__empreintes.json`, écrit EN DERNIER = cache complet ; un vieux cache sans
+  empreintes est hashé sur place) et ne télécharge que le reste : 3 essais par fichier,
+  `cache: "reload"`, `?v=<version>` (clé CDN propre, jamais un fichier périmé du relais
+  max-age=600), 4 en parallèle. Manifeste lu avec `?b=<SW_BUILD>` pour la même raison.
+  Cache nommé `tournee-ups-b<SW_BUILD>` : l'activation ne relit plus le manifeste —
+  l'ancien repli « shell de secours 5 fichiers » pouvait faire effacer le cache complet
+  sur un réseau qui coupe. Un échec d'installation est consigné dans « Signaler un bug »
+  (base ouverte sans jamais la créer). Bouton « Vérifier les mises à jour » : suit l'état
+  réel (activated → recharge, redundant → message d'échec) au lieu d'un rechargement
+  aveugle à 6 s qui coupait le téléchargement. Vérifié en navigateur sur 4 cycles :
+  ancien cache sans empreintes → 2 fichiers téléchargés sur 115 ; cycle suivant → 2
+  (sw.js + version.js), contenu du cache = manifeste à 100 % ; fichier modifié en 404 →
+  worker abandonné, ancienne version intacte, raison au journal. **Toujours relancer
+  `gen-precache-manifest.js` APRÈS la dernière modification de fichier** (une empreinte
+  périmée n'est pas dangereuse, elle force juste un retéléchargement au cycle suivant).
 
 ## Roadmap (7 chantiers, un à la fois sauf exception notée, validation utilisateur entre chaque)
 

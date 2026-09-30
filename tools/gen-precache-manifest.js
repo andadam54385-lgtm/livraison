@@ -89,7 +89,27 @@ function main() {
 
   const assets = ["./", ...files.map((f) => `./${f}`)];
 
-  const manifest = { version, generatedAt: new Date().toISOString(), assets };
+  // Empreinte PAR FICHIER (16 premiers caracteres du SHA-1 des octets) : sw.js
+  // ne retelecharge que les fichiers dont l'empreinte a change et recopie les
+  // autres depuis le cache deja installe -- une mise a jour passe de ~17 Mo
+  // (dont 13 Mo de Tesseract qui ne changent jamais) a quelques Ko. Retour
+  // terrain 2026-09-30 "le 160 arrive pas" : en 4G, en tournee, l'ancien
+  // telechargement integral tout-ou-rien echouait au moindre rate.
+  // Hash des octets tels que GitHub Pages les SERT : core.autocrlf=true sur
+  // cette machine, donc un fichier texte peut etre en CRLF ici mais en LF dans
+  // le depot. Meme detection que git (un octet nul dans les 8000 premiers =
+  // binaire, jamais converti) -- sinon le premier passage d'un vieux cache sans
+  // empreintes retelechargerait ces fichiers pour rien.
+  const empreinte = (rel) => {
+    const octets = fs.readFileSync(path.join(ROOT, rel));
+    const texte = !octets.subarray(0, 8000).includes(0);
+    const servis = texte ? Buffer.from(octets.toString("latin1").replace(/\r\n/g, "\n"), "latin1") : octets;
+    return crypto.createHash("sha1").update(servis).digest("hex").slice(0, 16);
+  };
+  const empreintes = { "./": empreinte("index.html") };
+  for (const f of files) empreintes[`./${f}`] = empreinte(f);
+
+  const manifest = { version, generatedAt: new Date().toISOString(), assets, files: empreintes };
   const outPath = path.join(ROOT, "precache-manifest.json");
   fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2));
 

@@ -331,13 +331,26 @@ async function render() {
       // installing/waiting non nuls = une nouvelle version a ete trouvee.
       const nouvelle = reg.installing || reg.waiting;
       if (nouvelle) {
-        statut.textContent = "Nouvelle version trouvée — installation puis redémarrage…";
-        nouvelle.addEventListener("statechange", () => {
-          if (nouvelle.state === "activated") location.reload();
-        });
-        // Repli : si l'evenement n'arrive pas (iOS capricieux), on recharge
-        // quand meme apres un delai raisonnable.
-        setTimeout(() => location.reload(), 6000);
+        // Plus de rechargement "a l'aveugle" au bout de 6 s (retour terrain
+        // 2026-09-30 "le 160 arrive pas") : il pouvait couper le telechargement
+        // en cours sur une connexion lente. On suit l'installation reelle ; un
+        // echec est dit, avec la raison consignee dans "Signaler un bug".
+        statut.textContent = "Nouvelle version trouvée — téléchargement des fichiers modifiés…";
+        const suivre = () => {
+          if (nouvelle.state === "activated") {
+            location.reload();
+          } else if (nouvelle.state === "redundant") {
+            statut.textContent = "Installation échouée (réseau coupé ?). Réessaie, idéalement en wifi — la raison est notée dans « Signaler un bug ».";
+            btn.disabled = false;
+          }
+        };
+        nouvelle.addEventListener("statechange", suivre);
+        suivre();
+        setTimeout(() => {
+          if (nouvelle.state !== "activated" && nouvelle.state !== "redundant") {
+            statut.textContent = "Toujours en cours… garde l'appli ouverte, ça redémarre tout seul à la fin.";
+          }
+        }, 15000);
       } else {
         statut.textContent = `Aucune nouvelle version : tu es déjà sur le build ${APP_BUILD}.`;
         btn.disabled = false;
