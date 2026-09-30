@@ -12,6 +12,7 @@ import { formatDurationShort, hhmmToSec, secondsSinceMidnight } from "../lib/geo
 import { emit } from "../lib/event-bus.js";
 import { setInlineLoading } from "../lib/loading.js";
 import { pickRecalcEligibles } from "./recalc-eligibles.js";
+import { zonesEffectives } from "./zones-effectives.js";
 
 // Colis "eligibles" pour le calcul INITIAL d'une tournee (runSort, Etat A) :
 // exactement ce que la preparation affiche (tout sauf livre/echec, voir
@@ -154,15 +155,16 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   // par le livreur pour forcer un MACRO-ordre de visite -- toutes les zones 1
   // avant toutes les zones 2, etc. -- tandis que l'algo choisit librement le
   // meilleur ordre A L'INTERIEUR de chaque zone (nearestNeighbor + 2-opt,
-  // inchange). Les colis sans zone (undefined/null) forment un groupe
-  // implicite place APRES toutes les zones numerotees : le livreur entoure en
-  // priorite les secteurs dont il veut fixer l'ordre, le reste suit le tri
-  // automatique habituel. Sans aucune zone assignee (cas normal, feature non
-  // utilisee), un seul groupe couvre tous les arrets et le comportement est
-  // identique a l'ancien appel optimizeTourOrder() unique sur la totalite.
+  // inchange). Un colis sans zone rejoint la zone de son voisin zone le plus
+  // proche (zonesEffectives) -- il n'est plus jamais pousse en fin de tournee
+  // (bug 2026-09-30 : deux Pompey oubliees par le lasso, visitees apres
+  // Bouxieres). Sans aucune zone assignee (cas normal, feature non utilisee),
+  // un seul groupe couvre tous les arrets et le comportement est identique a
+  // l'ancien appel optimizeTourOrder() unique sur la totalite.
+  const zoneParColis = zonesEffectives(eligibles, matrix);
   const zoneGroups = new Map();
   eligibles.forEach((c, i) => {
-    const z = c.zone != null ? c.zone : Infinity;
+    const z = zoneParColis[i];
     if (!zoneGroups.has(z)) zoneGroups.set(z, []);
     zoneGroups.get(z).push(i + 1);
   });

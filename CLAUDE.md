@@ -135,6 +135,20 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   736 px alors que la feuille commence à 422 px (caché), et le clavier numérique l'aurait
   recouvert de toute façon. Il est désormais à `top: 12px` (juste sous l'en-tête), par-
   dessus la barre d'aide et les boutons du haut le temps du choix. Ne pas le redescendre.
+  **Colis sans zone = zone du voisin le plus proche, jamais en fin de tournée** (build
+  158, retour terrain 2026-09-30 « regarde l'ordre qu'il m'a fait, c'est bizarre »). La
+  tournée enchaînait Saizerais → Liverdun → Pompey → Frouard → Bouxières-aux-Dames, puis
+  **revenait à Pompey** pour les deux derniers arrêts (11 min en arrière) : l'ancienne
+  règle de `computeOptimizedStops` plaçait le groupe « sans zone » APRÈS toutes les zones
+  numérotées, donc deux adresses oubliées par le lasso (ou scannées après le tracé)
+  partaient en fin de tournée quelle que soit leur position. `zonesEffectives`
+  (`js/routing/zones-effectives.js`, pur, `zones-effectives.test.mjs`) rattache chaque
+  colis sans zone à la zone du colis **zoné** le plus proche en temps de trajet (min des
+  deux sens ; repli à vol d'oiseau si injoignable ; égalité → plus petite zone ; jamais
+  de chaînage entre sans-zone). Sans aucune zone posée : un seul groupe, comportement
+  inchangé. S'applique à « Optimiser » ET au recalcul en cours de tournée (même fonction).
+  Rejeu avec le vrai `tsp.js` sur le cas schématisé : 72 → 51 min de route, les deux
+  adresses visitées avec les autres de leur commune.
 - **Sélection multiple de l'État A** (`selectionMode`/`selectedIds` dans `tour-ui.js`, cases à
   cocher sur les cartes de préparation, bouton « Supprimer (N) ») : le bouton « Tout
   cocher/décocher » doit utiliser le **même critère** pour son libellé et pour l'action du clic

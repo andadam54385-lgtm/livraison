@@ -1,6 +1,6 @@
 {
-  "version": "8296dd11afd2",
-  "generatedAt": "2026-09-26T22:31:16.909Z",
+  "version": "d4a32e8254ee",
+  "generatedAt": "2026-09-30T11:09:24.290Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -53,6 +53,8 @@
     "./js/routing/tour-store.js",
     "./js/routing/tsp.js",
     "./js/routing/tsp.test.mjs",
+    "./js/routing/zones-effectives.js",
+    "./js/routing/zones-effectives.test.mjs",
     "./js/scan/barcode.js",
     "./js/scan/batch-scan-ui.js",
     "./js/scan/capture.js",
