@@ -6,7 +6,7 @@
 // c'est precisement ce que l'ancienne penalite de position ne savait pas
 // faire (elle poussait le colis marque en tete de tournee coute que coute).
 
-import { tourCost, optimizeTourOrder } from "./tsp.js";
+import { tourCost, optimizeTourOrder, orOpt, twoOpt, nearestNeighborOrder, ameliorerOrdre } from "./tsp.js";
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -194,6 +194,94 @@ console.log("\n=== Un arret inatteignable n aveugle plus le 2-opt ===");
   });
   checkTrue("le cout reste fini (comparable/optimisable)", Number.isFinite(cost));
   check("les arrets atteignables restent en ligne, l isole en dernier", order, [1, 2, 3, 4, 5, 6, 7]);
+}
+
+// --- Or-opt : deux arrets "oublies" ramenes au milieu de la tournee ---------
+// Cas du 2026-09-30 schematise (positions en km sur un plan, depart en 0,0) :
+// communes A (Saizerais), B (Liverdun), C (Pompey), D (Frouard), E (Bouxieres).
+// L'ordre de depart est celui qu'avait sorti l'appli : C visite, puis D, E...
+// et les deux adresses de C oubliees tout au bout. Le 2-opt seul ne sait pas
+// les deplacer ; l'Or-opt doit les remettre a cote des autres de C.
+{
+  const pts = [
+    [0, 0], // 0 depart
+    [1, 0], [1.2, 0.2], // 1-2 A
+    [4, -2], [4.2, -2.1], // 3-4 B
+    [7, -1], [7.2, -0.8], [7.1, -1.2], // 5-7 C
+    [8, -3], [8.3, -3.2], // 8-9 D
+    [10, -4], [10.2, -3.8], // 10-11 E
+    [7.3, -0.5], [6.9, -1.4], // 12-13 les deux C oubliees
+  ];
+  const m = pts.map(([ax, ay]) => pts.map(([bx, by]) => Math.hypot(ax - bx, ay - by) * 120));
+  const ordreAppli = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+  const timing = { departureSec: H(13), dwellSec: 180 };
+  const avant = tourCost(ordreAppli, m, 0, timing);
+  const blocDe = (order) => [5, 6, 7, 12, 13].map((i) => order.indexOf(i)).sort((a, b) => a - b);
+
+  // Or-opt seul : il regroupe au moins la commune C.
+  const seul = orOpt(ordreAppli, m, 0, { timing, timeBudgetMs: 500 });
+  const blocSeul = blocDe(seul.order);
+  checkTrue("Or-opt seul : trajet plus court", seul.cost < avant);
+  checkTrue("Or-opt seul : les 5 arrets de C sont consecutifs", blocSeul[4] - blocSeul[0] === 4);
+
+  // Alternance complete : C regroupee ET visitee entre B et D.
+  const { order, cost } = ameliorerOrdre(ordreAppli, m, 0, { timing, timeBudgetMs: 1000 });
+  const bloc = blocDe(order);
+  const ideal = tourCost([1, 2, 3, 4, 13, 5, 7, 6, 12, 8, 9, 10, 11], m, 0, timing);
+  checkTrue("alternance : les 5 arrets de C sont consecutifs", bloc[4] - bloc[0] === 4);
+  checkTrue("alternance : la tournee ne finit plus par C", ![5, 6, 7, 12, 13].includes(order[order.length - 1]));
+  checkTrue(`alternance : au moins aussi bon que A B C D E (${Math.round(cost)} <= ${Math.round(ideal)})`, cost <= ideal + 1e-6);
+}
+
+// --- Le 2-opt seul reste coince, l'alternance non ---------------------------
+// Petit cas trouve par recherche (9 arrets) : le plus-proche-voisin + 2-opt
+// finit par aller chercher le point 5, oublie pres du depart, tout au bout de
+// la tournee -- le schema exact du retour terrain. Aucune inversion de segment
+// ne l'en sort ; le deplacement de segment, si (25 % de trajet en moins).
+{
+  const pts = [[0, 0], [7.9, 6.7], [2.9, 6.5], [0.7, 4.1], [2.4, 3], [0.5, 7.4], [4.2, 7.1], [0.9, 4], [5.3, 6.4], [9.9, 9.6]];
+  const m = pts.map(([ax, ay]) => pts.map(([bx, by]) => Math.hypot(ax - bx, ay - by) * 120));
+  const idx = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const ancien = twoOpt(nearestNeighborOrder(m, 0, idx), m, 0, { timing: {}, timeBudgetMs: 500 });
+  check("2-opt seul : l'oublie (5) est ramasse en dernier", ancien.order[ancien.order.length - 1], 5);
+  const nouveau = optimizeTourOrder(m, 0, idx, { timing: {}, timeBudgetMs: 500 });
+  checkTrue("optimiseur complet : l'oublie n'est plus en dernier", nouveau.order[nouveau.order.length - 1] !== 5);
+  checkTrue(`optimiseur complet : >= 20 % de trajet en moins (${Math.round(ancien.cost)} -> ${Math.round(nouveau.cost)})`, nouveau.cost <= ancien.cost * 0.8);
+}
+
+// --- Or-opt : retour au depot fixe, jamais deplace --------------------------
+{
+  const pts = [[0, 0], [5, 0], [5.2, 0.3], [9, 0], [9.2, 0.2], [5.1, -0.2], [0, 0]];
+  const m = pts.map(([ax, ay]) => pts.map(([bx, by]) => Math.hypot(ax - bx, ay - by) * 120));
+  const { order } = orOpt([1, 2, 3, 4, 5, 6], m, 0, { timing: {}, lockTailCount: 1, timeBudgetMs: 500 });
+  check("Or-opt : le retour au depot reste en dernier", order[order.length - 1], 6);
+  check("Or-opt : aucun arret perdu ni duplique", order.slice().sort((a, b) => a - b), [1, 2, 3, 4, 5, 6]);
+}
+
+// --- Propriete : l'optimiseur complet n'est JAMAIS pire que l'ancien --------
+// (plus proche voisin + 2-opt seul), sur 50 tournees "villages" simulees.
+{
+  let seed = 4242;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  let pire = 0;
+  let meilleur = 0;
+  for (let k = 0; k < 50; k++) {
+    const villages = Array.from({ length: 6 }, () => [rnd() * 20, rnd() * 20]);
+    const pts = [[10, -2]];
+    for (let i = 0; i < 40; i++) {
+      const [vx, vy] = villages[Math.floor(rnd() * 6)];
+      pts.push([vx + (rnd() - 0.5) * 1.5, vy + (rnd() - 0.5) * 1.5]);
+    }
+    const m = pts.map(([ax, ay]) => pts.map(([bx, by]) => Math.hypot(ax - bx, ay - by) * 120 * (1 + rnd() * 0.1)));
+    const idx = pts.map((_, i) => i).slice(1);
+    const timing = { departureSec: H(8), dwellSec: 180 };
+    const ancien = twoOpt(nearestNeighborOrder(m, 0, idx), m, 0, { timing, timeBudgetMs: 2000 });
+    const nouveau = optimizeTourOrder(m, 0, idx, { timing, timeBudgetMs: 2000 });
+    if (nouveau.cost > ancien.cost + 1e-6) pire++;
+    if (nouveau.cost < ancien.cost - 1e-6) meilleur++;
+  }
+  check("propriete : 0 tournee pire qu'avec le 2-opt seul (sur 50)", pire, 0);
+  checkTrue(`propriete : l'Or-opt ameliore la plupart des tournees (${meilleur}/50)`, meilleur >= 25);
 }
 
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} TEST(S) EN ECHEC`);

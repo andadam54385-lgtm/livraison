@@ -149,6 +149,26 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   inchangé. S'applique à « Optimiser » ET au recalcul en cours de tournée (même fonction).
   Rejeu avec le vrai `tsp.js` sur le cas schématisé : 72 → 51 min de route, les deux
   adresses visitées avec les autres de leur commune.
+  **Correction du diagnostic (même jour)** : le livreur n'avait posé **aucune zone** —
+  la règle ci-dessus reste une amélioration, mais ce n'était pas la cause.
+  **Vraie cause : l'optimiseur n'avait aucun mouvement de déplacement** (build 159,
+  `tsp.js`). Plus-proche-voisin + 2-opt seulement : une inversion de segment ne sait pas
+  reprendre 1 à 3 arrêts « oubliés » par le plus-proche-voisin et les remettre au milieu
+  — défaut classique, ils finissent ramassés en fin de tournée. Ajout de `orOpt`
+  (déplacement de segments de 1 à 3 arrêts, dans les deux sens, même `tourCost` donc
+  contraintes horaires comprises, n'accepte qu'une baisse de coût) et `ameliorerOrdre`
+  (alternance 2-opt ⇄ Or-opt dans un budget de temps partagé ; l'Or-opt seul peut
+  s'arrêter sur un compromis local, c'est l'alternance qui l'en sort).
+  `optimizeTourOrder` = plus-proche-voisin + `ameliorerOrdre`. Mesures : 200 tournées
+  « villages » simulées (60 arrêts) → 184–189 améliorées, **0 pire**, gain moyen
+  1,2–1,6 min, max 10–13 min ; petit cas réel coincé (9 arrêts, l'oublié ramassé en
+  dernier) → −25 %. Coût : 63 arrêts ≈ 83 ms sur PC (~0,4 s iPhone), 100 arrêts ≈ 0,5 s
+  PC, toujours plafonné par le budget. Rejeu sur les 33 adresses restantes du jour
+  (géocodées dans la BAN, temps approchés) : depuis la position du moment, l'ordre passe
+  de ~54 à ~41 min de route, les deux Pompey rangées avec les autres. L'ordre bizarre
+  venait du calcul du MATIN (63 arrêts) — non rejouable sans l'export de la journée.
+  Tests : `tsp.test.mjs` (cas coincé, retour dépôt verrouillé, propriété « jamais pire »
+  sur 50 tournées).
 - **Sélection multiple de l'État A** (`selectionMode`/`selectedIds` dans `tour-ui.js`, cases à
   cocher sur les cartes de préparation, bouton « Supprimer (N) ») : le bouton « Tout
   cocher/décocher » doit utiliser le **même critère** pour son libellé et pour l'action du clic

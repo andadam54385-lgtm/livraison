@@ -158,11 +158,76 @@ export function twoOpt(initialOrder, matrix, startIdx, options = {}) {
   return { order, cost: bestCost };
 }
 
+// Deplacement de segments ("Or-opt") : retire 1 a 3 arrets consecutifs et les
+// reinsere ailleurs, dans un sens ou dans l'autre. C'est le mouvement qui
+// manquait au 2-opt : une inversion de segment ne sait pas prendre deux arrets
+// "oublies" par le plus-proche-voisin et les remettre au milieu de la tournee
+// -- defaut classique de cette methode, ils finissaient ramasses a la fin
+// (retour terrain 2026-09-30 : deux adresses de Pompey visitees apres
+// Bouxieres-aux-Dames, alors que Pompey etait deja traverse). Meme cout que
+// partout (tourCost, contraintes horaires comprises) : un deplacement n'est
+// garde que s'il baisse le cout, donc jamais pire que le 2-opt seul.
+export function orOpt(initialOrder, matrix, startIdx, options = {}) {
+  const { timing = {}, timeBudgetMs = 2000, lockTailCount = 0, maxSegment = 3 } = options;
+  let order = initialOrder.slice();
+  const limit = order.length - lockTailCount;
+  const tail = order.slice(limit);
+  let bestCost = tourCost(order, matrix, startIdx, timing);
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const deadline = now() + timeBudgetMs;
+
+  let improved = true;
+  while (improved && now() < deadline) {
+    improved = false;
+    for (let len = 1; len <= maxSegment && !improved; len++) {
+      for (let i = 0; i + len <= limit && !improved; i++) {
+        if (now() > deadline) break;
+        const seg = order.slice(i, i + len);
+        const rest = order.slice(0, i).concat(order.slice(i + len, limit));
+        const variantes = len > 1 ? [seg, seg.slice().reverse()] : [seg];
+        for (let j = 0; j <= rest.length && !improved; j++) {
+          for (let v = 0; v < variantes.length; v++) {
+            if (j === i && v === 0) continue; // position d'origine, sens d'origine
+            const candidat = rest.slice(0, j).concat(variantes[v], rest.slice(j), tail);
+            const cost = tourCost(candidat, matrix, startIdx, timing);
+            if (cost < bestCost - 1e-9) {
+              order = candidat;
+              bestCost = cost;
+              improved = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+  return { order, cost: bestCost };
+}
+
+// Amelioration d'un ordre donne : 2-opt et Or-opt alternent tant que l'un des
+// deux ameliore, dans le budget de temps (partage, pas cumule). L'Or-opt seul
+// peut s'arreter sur un compromis local (il regroupe les arrets d'une commune
+// mais laisse la commune au mauvais endroit) : c'est l'alternance qui le sort.
+export function ameliorerOrdre(initialOrder, matrix, startIdx, options = {}) {
+  const { timeBudgetMs = 4000, ...rest } = options;
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const fin = now() + timeBudgetMs;
+  const restant = () => Math.max(0, fin - now());
+
+  let res = twoOpt(initialOrder, matrix, startIdx, { ...rest, timeBudgetMs: restant() });
+  for (let passe = 0; passe < 20 && restant() > 0; passe++) {
+    const deplace = orOpt(res.order, matrix, startIdx, { ...rest, timeBudgetMs: restant() });
+    if (!(deplace.cost < res.cost - 1e-9)) break;
+    res = twoOpt(deplace.order, matrix, startIdx, { ...rest, timeBudgetMs: restant() });
+  }
+  return res;
+}
+
 // fixedEndIdx (optionnel) : cet index (ex: point "retour au depot") reste
 // toujours le dernier arret ; seul l'ordre des autres arrets est optimise.
 export function optimizeTourOrder(matrix, startIdx, stopIndices, options = {}) {
   const { fixedEndIdx = null, ...rest } = options;
   const nnOrder = nearestNeighborOrder(matrix, startIdx, stopIndices, { fixedEndIdx });
   const lockTailCount = fixedEndIdx != null ? 1 : 0;
-  return twoOpt(nnOrder, matrix, startIdx, { ...rest, lockTailCount });
+  return ameliorerOrdre(nnOrder, matrix, startIdx, { ...rest, lockTailCount });
 }
