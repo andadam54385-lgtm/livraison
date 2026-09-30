@@ -169,6 +169,24 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   venait du calcul du MATIN (63 arrêts) — non rejouable sans l'export de la journée.
   Tests : `tsp.test.mjs` (cas coincé, retour dépôt verrouillé, propriété « jamais pire »
   sur 50 tournées).
+  **« Dernier arrêt »** (build 160, « rajoute la possibilité de mettre un point comme le
+  dernier ») : `colis.dernier = true`, posé sur la fiche colis (sélecteur « Ordre normal /
+  Dernier arrêt », sous « Avant 12h », masqué pour un colis livré/en échec). **Un seul à
+  la fois** : `retirerDernierDesAutres` (colis-store) efface la marque ailleurs. Règles
+  pures dans `js/routing/dernier-arret.js` (testé) : `indexDernier` (le plus récemment
+  scanné si plusieurs), `deplacerEnDernier` (tournée en cours : l'arrêt passe après tous
+  les arrêts à faire, qui se répartissent leurs PROPRES numéros — un arrêt traité ne
+  change jamais de numéro), `dernierEnQueue`. Respecté partout : `computeOptimizedStops`
+  le sort des groupes et le fixe en fin de la dernière zone, **avant** le retour dépôt,
+  via `fixedTail` (nouveau dans `tsp.js`, plusieurs points fixés en fin dans l'ordre ;
+  `fixedEndIdx` reste accepté) — l'optimiseur construit le reste en sachant où la
+  tournée finit ; `insertStopCheapest` n'insère jamais après lui (emplacement interdit,
+  arrêts sans géocodage raccrochés AVANT lui) ; posé pendant une tournée → déplacé tout
+  de suite (`mettreArretEnDernier`), sinon toast « au calcul / au prochain recalcul ».
+  Effacé à la fin de journée comme les zones. Badge drapeau sur les cartes de
+  préparation et d'arrêt. Vérifié en navigateur : #2 → #4 dans une tournée en cours, un
+  second marquage retire le premier, et « Optimiser » met en dernier le colis le plus
+  proche du départ.
 - **Sélection multiple de l'État A** (`selectionMode`/`selectedIds` dans `tour-ui.js`, cases à
   cocher sur les cartes de préparation, bouton « Supprimer (N) ») : le bouton « Tout
   cocher/décocher » doit utiliser le **même critère** pour son libellé et pour l'action du clic

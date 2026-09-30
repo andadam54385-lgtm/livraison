@@ -102,6 +102,24 @@ export const AVANT12H_OPTIONS = [
   { value: "oui", label: "Avant 12h", icon: "clock" },
 ];
 
+// "Dernier arret" (voir routing/dernier-arret.js) : un seul colis a la fois.
+export const DERNIER_OPTIONS = [
+  { value: "non", label: "Ordre normal" },
+  { value: "oui", label: "Dernier arrêt", icon: "flag" },
+];
+
+// Pose la marque "dernier" sur ce colis et la retire de tous les autres encore
+// en jeu -- sinon deux "derniers" se disputeraient la fin de tournee.
+export async function retirerDernierDesAutres(colisId) {
+  const tous = await listAllColis();
+  for (const c of tous) {
+    if (c.id !== colisId && c.dernier) {
+      delete c.dernier;
+      await saveColis(c);
+    }
+  }
+}
+
 // Statut d'un colis APRES un (re)geocodage -- correction d'adresse, choix
 // d'un candidat, coordonnees collees. Bug reel corrige ici (retour terrain :
 // "des colis ne se sont pas enleves quand je les ai modifies apres avoir

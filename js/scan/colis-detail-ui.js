@@ -7,13 +7,15 @@ import {
   TYPE_CLIENT_OPTIONS,
   OPERATION_OPTIONS,
   AVANT12H_OPTIONS,
+  DERNIER_OPTIONS,
+  retirerDernierDesAutres,
   verbeAction,
 } from "./colis-store.js";
 import { segmentedHtml, bindSegmented, readSegmented } from "../ui/segmented.js";
 import { addFavori, updateFavori, deleteFavori, findNearbyFavori } from "../favoris/favoris-store.js";
 import { horairesOf, horairesSontVides } from "../favoris/horaires.js";
 import { renderHorairesEditor } from "../favoris/horaires-ui.js";
-import { getActiveTour, markStopDelivered, markStopFailed, remettreArretALivrer } from "../routing/tour-store.js";
+import { getActiveTour, markStopDelivered, markStopFailed, remettreArretALivrer, mettreArretEnDernier } from "../routing/tour-store.js";
 import { getSetting } from "../settings/settings-store.js";
 import { buildNavUrl } from "../tour/deep-links.js";
 import { buildSmsOptions } from "../tour/sms-template.js";
@@ -140,6 +142,7 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
       ${segmentedHtml("typeClient", TYPE_CLIENT_OPTIONS, colis.typeClient || "particulier")}
       ${segmentedHtml("operation", OPERATION_OPTIONS, colis.operation || "livraison")}
       ${segmentedHtml("avant12h", AVANT12H_OPTIONS, colis.avant12h ? "oui" : "non")}
+      ${colis.statut !== "livre" && colis.statut !== "echec" ? segmentedHtml("dernier", DERNIER_OPTIONS, colis.dernier ? "oui" : "non") : ""}
     </div>
     ${
       canFavori
@@ -190,14 +193,29 @@ export async function renderColisDetail(container, colisId, { onBack, onChange }
   // Contrairement au formulaire de scan (relu d'un bloc a la validation), la
   // fiche colis n'a pas de bouton "Enregistrer" : chaque choix est applique
   // immediatement, comme l'ancienne case a cocher qu'il remplace.
-  for (const champ of ["typeClient", "operation", "avant12h"]) {
+  for (const champ of ["typeClient", "operation", "avant12h", "dernier"]) {
     bindSegmented(container, champ);
     for (const btn of container.querySelectorAll(`[data-segmented="${champ}"]`)) {
       btn.addEventListener("click", async () => {
         colis.typeClient = readSegmented(container, "typeClient") || "particulier";
         colis.operation = readSegmented(container, "operation") || "livraison";
         colis.avant12h = readSegmented(container, "avant12h") === "oui";
+        // "Dernier arret" (voir routing/dernier-arret.js) : un seul a la fois,
+        // et applique tout de suite si la tournee est deja lancee.
+        const etaitDernier = colis.dernier === true;
+        const estDernier = readSegmented(container, "dernier") === "oui";
+        if (estDernier) colis.dernier = true;
+        else delete colis.dernier;
         await saveColis(colis);
+        if (estDernier && !etaitDernier) {
+          await retirerDernierDesAutres(colis.id);
+          if (showDeliveryActions) {
+            await mettreArretEnDernier(activeTour.id, colis.id);
+            showToast("Arrêt placé en dernier.");
+          } else {
+            showToast(activeTour ? "Sera le dernier arrêt au prochain recalcul." : "Sera le dernier arrêt de la tournée.");
+          }
+        }
         onChange?.();
       });
     }

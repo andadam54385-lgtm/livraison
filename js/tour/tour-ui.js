@@ -512,6 +512,7 @@ function renderPrepCard(c) {
     c.operation === "ramasse" ? `<span class="badge badge-info">Ramasse</span>` : "",
     c.typeClient === "pro" ? `<span class="badge badge-info">Pro</span>` : "",
     c.quantite > 1 ? `<span class="badge badge-pending">${c.quantite} colis</span>` : "",
+    c.dernier ? `<span class="badge badge-info">${icon("flag", { spaced: false, size: 12 })} Dernier</span>` : "",
   ].join("");
   // En mode selection, la carte NE s'ouvre plus au tap (data-open-detail
   // retire) : le tap coche/decoche, sinon impossible de cocher sans partir
@@ -973,6 +974,7 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
           ${colis.avant12h ? '<span class="badge badge-urgent">12h</span>' : ""}
           ${colis.typeClient === "pro" ? '<span class="badge badge-info">Pro</span>' : ""}
           ${colis.operation === "ramasse" ? '<span class="badge badge-info">Ramasse</span>' : ""}
+          ${colis.dernier && !done ? `<span class="badge badge-info">${icon("flag", { spaced: false, size: 12 })}</span>` : ""}
         </div>
       </div>
       <div class="muted stop-card-addr" data-open-detail data-colis-id="${escapeAttr(colis.id)}">${escapeHtml(adresse)}${colis.quantite > 1 ? ` · ${colis.quantite} colis` : ""}</div>

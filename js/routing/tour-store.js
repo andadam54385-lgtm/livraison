@@ -3,6 +3,7 @@ import { put, del, getAllFromIndex, tx } from "../lib/idb.js";
 import { uuid } from "../lib/id.js";
 import { getColis, saveColis } from "../scan/colis-store.js";
 import { remettreArretALivrer as appliquerRemiseALivrer } from "./remettre-a-livrer.js";
+import { deplacerEnDernier } from "./dernier-arret.js";
 
 // Lit, modifie et reecrit une tournee dans UNE SEULE transaction readwrite
 // IndexedDB (stores "tours" + "colis") -- correctif d'audit : les mutations
@@ -130,6 +131,17 @@ export async function remettreArretALivrer(tourId, colisId) {
   const db = await getDb();
   return updateTourAtomic(db, tourId, (tour, setColisStatut) => {
     appliquerRemiseALivrer(tour, colisId, setColisStatut);
+  });
+}
+
+// "Dernier arret" pose pendant une tournee en cours : l'arret passe tout de
+// suite apres les autres arrets a faire (voir deplacerEnDernier), sans
+// recalcul -- les heures estimees redeviennent approximatives, comme apres
+// un reordonnancement manuel.
+export async function mettreArretEnDernier(tourId, colisId) {
+  const db = await getDb();
+  return updateTourAtomic(db, tourId, (tour) => {
+    deplacerEnDernier(tour, colisId);
   });
 }
 
@@ -391,6 +403,7 @@ export async function finDeJournee({ secteur = "" } = {}) {
   for (const colis of aReporter) {
     colis.statut = "pret";
     delete colis.zone; // les zones manuelles valaient pour la tournee d'hier
+    delete colis.dernier; // le "dernier arret" aussi
     await put(db, "colis", colis);
     resume.reportes++;
   }

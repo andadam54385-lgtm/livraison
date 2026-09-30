@@ -13,6 +13,7 @@ import { emit } from "../lib/event-bus.js";
 import { setInlineLoading } from "../lib/loading.js";
 import { pickRecalcEligibles } from "./recalc-eligibles.js";
 import { zonesEffectives } from "./zones-effectives.js";
+import { indexDernier } from "./dernier-arret.js";
 
 // Colis "eligibles" pour le calcul INITIAL d'une tournee (runSort, Etat A) :
 // exactement ce que la preparation affiche (tout sauf livre/echec, voir
@@ -162,12 +163,20 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   // un seul groupe couvre tous les arrets et le comportement est identique a
   // l'ancien appel optimizeTourOrder() unique sur la totalite.
   const zoneParColis = zonesEffectives(eligibles, matrix);
+  // Colis marque "dernier arret" (fiche colis, voir dernier-arret.js) : sorti
+  // des groupes, fixe en fin de la derniere zone, juste avant le retour au
+  // depot. L'optimiseur construit le reste de la tournee EN SACHANT qu'elle
+  // finit la (le trajet jusqu'a lui compte dans le cout).
+  const dernierIdx = indexDernier(eligibles);
   const zoneGroups = new Map();
   eligibles.forEach((c, i) => {
+    if (i + 1 === dernierIdx) return;
     const z = zoneParColis[i];
     if (!zoneGroups.has(z)) zoneGroups.set(z, []);
     zoneGroups.get(z).push(i + 1);
   });
+  // Seul le "dernier" est a livrer : un groupe vide qui ne contiendra que lui.
+  if (zoneGroups.size === 0 && dernierIdx != null) zoneGroups.set(Infinity, []);
   const zoneKeys = [...zoneGroups.keys()].sort((a, b) => a - b);
 
   // Chaine les zones bout a bout : la zone N+1 part du dernier arret de la
@@ -185,11 +194,12 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   zoneKeys.forEach((z, zi) => {
     const isLastZone = zi === zoneKeys.length - 1;
     const indices = zoneGroups.get(z);
-    const finalIndices = isLastZone && depotEndIdx != null ? [...indices, depotEndIdx] : indices;
+    const queue = isLastZone ? [dernierIdx, depotEndIdx].filter((x) => x != null) : [];
+    const finalIndices = [...indices, ...queue];
     const { order: zoneOrder } = optimizeTourOrder(matrix, chainStart, finalIndices, {
       timing: { departureSec: zoneDepartureSec, dwellSec, deadlines, closedWindows },
       timeBudgetMs: zoneBudgetMs,
-      fixedEndIdx: isLastZone ? depotEndIdx : null,
+      fixedTail: queue,
     });
     const zoneLegs = legDurationsSeconds(zoneOrder, matrix, chainStart);
     zoneDepartureSec += zoneLegs.reduce((a, b) => a + b, 0) + zoneOrder.length * dwellSec;

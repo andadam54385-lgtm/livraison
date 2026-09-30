@@ -82,12 +82,18 @@ export function tourCost(order, matrix, startIdx, timing = {}) {
 
 // fixedEndIdx (optionnel) : force cet index a rester le tout dernier arret
 // (ex: retour au depot en fin de tournee) -- exclu du parcours glouton et
-// rajoute a la fin.
+// rajoute a la fin. fixedTail (optionnel) : la meme chose pour PLUSIEURS
+// points, dans l'ordre donne (ex: [arret marque "dernier", retour depot]).
+function queueFixe({ fixedEndIdx = null, fixedTail = null }) {
+  if (Array.isArray(fixedTail) && fixedTail.length > 0) return fixedTail;
+  return fixedEndIdx != null ? [fixedEndIdx] : [];
+}
+
 export function nearestNeighborOrder(matrix, startIdx, indices, options = {}) {
-  const { fixedEndIdx = null } = options;
+  const queue = queueFixe(options);
   const remaining = new Set(indices);
   remaining.delete(startIdx);
-  if (fixedEndIdx != null) remaining.delete(fixedEndIdx);
+  for (const idx of queue) remaining.delete(idx);
   const order = [];
   let current = startIdx;
 
@@ -112,7 +118,7 @@ export function nearestNeighborOrder(matrix, startIdx, indices, options = {}) {
     remaining.delete(best);
     current = best;
   }
-  if (fixedEndIdx != null) order.push(fixedEndIdx);
+  order.push(...queue);
   return order;
 }
 
@@ -225,9 +231,12 @@ export function ameliorerOrdre(initialOrder, matrix, startIdx, options = {}) {
 
 // fixedEndIdx (optionnel) : cet index (ex: point "retour au depot") reste
 // toujours le dernier arret ; seul l'ordre des autres arrets est optimise.
+// fixedTail (optionnel) : plusieurs points fixes en fin, dans l'ordre donne
+// (ex: [arret marque "dernier", retour depot]) -- le reste de la tournee est
+// optimise EN SACHANT qu'elle finit la (le cout compte le trajet jusqu'a eux).
 export function optimizeTourOrder(matrix, startIdx, stopIndices, options = {}) {
-  const { fixedEndIdx = null, ...rest } = options;
-  const nnOrder = nearestNeighborOrder(matrix, startIdx, stopIndices, { fixedEndIdx });
-  const lockTailCount = fixedEndIdx != null ? 1 : 0;
-  return ameliorerOrdre(nnOrder, matrix, startIdx, { ...rest, lockTailCount });
+  const { fixedEndIdx = null, fixedTail = null, ...rest } = options;
+  const queue = queueFixe({ fixedEndIdx, fixedTail });
+  const nnOrder = nearestNeighborOrder(matrix, startIdx, stopIndices, { fixedTail: queue });
+  return ameliorerOrdre(nnOrder, matrix, startIdx, { ...rest, lockTailCount: queue.length });
 }

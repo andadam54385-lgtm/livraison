@@ -4,6 +4,7 @@ import { buildSpatialGrid, findNearestNode } from "./spatial-index.js";
 import { dijkstraNodeToNode, createDijkstraScratch } from "./dijkstra.js";
 import { getColis } from "../scan/colis-store.js";
 import { saveTour } from "./tour-store.js";
+import { dernierEnQueue } from "./dernier-arret.js";
 
 // Insertion au moindre detour : quand un colis "oublie" est retrouve et
 // scanne en cours de tournee (Etat B), plutot que d'attendre un recalcul
@@ -81,11 +82,17 @@ export async function insertStopCheapest(tour, colis) {
   const grid = buildSpatialGrid(csr.nodeLat, csr.nodeLon);
   const scratch = createDijkstraScratch(csr.edgeCount);
 
+  // Arret marque "dernier" en queue (voir dernier-arret.js) : l'emplacement
+  // qui le suit (entre lui et le retour au depot) est interdit -- un colis
+  // ajoute en route ne passe jamais apres lui.
+  const garderDernier = dernierEnQueue(pendingWithColis.map((x) => x.colis));
+  const nbEmplacements = points.length - 1 - (garderDernier && tour.returnToDepot && tour.depotArrivee ? 1 : 0);
+
   // bestIdx = inserer juste apres points[bestIdx] (0 = tout en tete, juste
   // apres le point de reference).
   let bestIdx = 0;
   let bestExtraSec = Infinity;
-  for (let i = 0; i < points.length - 1; i++) {
+  for (let i = 0; i < nbEmplacements; i++) {
     const a = points[i];
     const b = points[i + 1];
     const aToB = travelSeconds(csr, grid, scratch, a, b);
@@ -105,7 +112,10 @@ export async function insertStopCheapest(tour, colis) {
   // Les arrets sans geocodage sont raccroches en fin de parcours (voir
   // pendingSansGeocode plus haut) -- pas de position optimale calculable
   // pour eux, mais ils restent dans la tournee.
-  const finalPending = [...newPendingOrder, ...pendingSansGeocode];
+  // ...mais toujours avant un arret marque "dernier".
+  const finalPending = garderDernier
+    ? [...newPendingOrder.slice(0, -1), ...pendingSansGeocode, newPendingOrder[newPendingOrder.length - 1]]
+    : [...newPendingOrder, ...pendingSansGeocode];
   finalPending.forEach((s, i) => {
     s.ordre = doneMaxOrdre + i + 1;
   });
