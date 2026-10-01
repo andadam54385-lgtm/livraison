@@ -5,6 +5,7 @@ import { dijkstraNodeToNode, createDijkstraScratch } from "./dijkstra.js";
 import { getColis } from "../scan/colis-store.js";
 import { saveTour } from "./tour-store.js";
 import { dernierEnQueue } from "./dernier-arret.js";
+import { estimationVolOiseauSec } from "./trajet-secours.js";
 
 // Insertion au moindre detour : quand un colis "oublie" est retrouve et
 // scanne en cours de tournee (Etat B), plutot que d'attendre un recalcul
@@ -17,12 +18,16 @@ function isPendingStop(stop) {
   return stop.statutLivraison !== "livre" && stop.statutLivraison !== "echec";
 }
 
+// Injoignable sur le graphe (bout de rue a sens unique, point hors reseau) :
+// estimation a vol d'oiseau plutot qu'Infinity, qui rendrait toutes les
+// insertions equivalentes (voir trajet-secours.js).
 function travelSeconds(csr, grid, scratch, from, to) {
   const fromNode = findNearestNode(grid, csr.nodeLat, csr.nodeLon, from.lat, from.lon).nodeIndex;
   const toNode = findNearestNode(grid, csr.nodeLat, csr.nodeLon, to.lat, to.lon).nodeIndex;
-  if (fromNode === -1 || toNode === -1) return Infinity;
+  if (fromNode === -1 || toNode === -1) return estimationVolOiseauSec(from, to);
   const result = dijkstraNodeToNode(csr, fromNode, [toNode], scratch, { maxSeconds: 3600 });
-  return result.get(toNode) ?? Infinity;
+  const t = result.get(toNode);
+  return Number.isFinite(t) ? t : estimationVolOiseauSec(from, to);
 }
 
 /**

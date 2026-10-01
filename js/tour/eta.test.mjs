@@ -90,5 +90,27 @@ console.log("\n=== Pause EN COURS : les heures reculent avec l'horloge ===");
   assert(Math.abs(plusTard.pauseTotalSec - 30 * 60) < 1, "le compteur de pause tourne (30 min)");
 }
 
+console.log("=== Troncon infini enregistre (point accroche a un bout de rue a sens unique) ===");
+// Cas reel du 2026-10-01 : le troncon vers le 4e arret valait Infinity ->
+// plus aucune heure apres lui, ni "Fin ≈" (total infini).
+{
+  const s = stops({}).map((e, i) => ({
+    stop: { ...e.stop, legDureeSec: i === 3 ? Infinity : 600 },
+    colis: { id: e.colis.id, geocode: { lat: 48.76 + i * 0.002, lon: 6.12 } },
+  }));
+  const r = computeEtas(tour({ returnToDepot: true, totalDureeSec: Infinity, depot: { lat: 48.76, lon: 6.12 }, depotArrivee: { lat: 48.62, lon: 6.21 } }), s, DWELL);
+  const toutesFinies = s.every(({ colis }) => Number.isFinite(r.etas.get(colis.id)?.getTime()));
+  assert(toutesFinies, "toutes les heures restent connues, y compris apres le troncon infini");
+  assert(r.etas.get("C5").getTime() > r.etas.get("C4").getTime(), "les heures restent dans l'ordre");
+  assert(Number.isFinite(r.depotEta?.getTime()), "le retour au depot (Fin ≈) reste connu");
+  assert(r.depotEta.getTime() > r.etas.get("C6").getTime() + min(10), "le retour au depot compte bien un trajet estime");
+}
+{
+  // Un troncon ABSENT (insertion en route) compte toujours 0, comme avant.
+  const s = stops({}).map((e, i) => ({ ...e, stop: { ...e.stop, legDureeSec: i === 1 ? null : 600 } }));
+  const r = computeEtas(tour(), s, DWELL);
+  assertClose(r.etas.get("C2").getTime(), r.etas.get("C1").getTime() + min(3), "troncon absent -> 0 (juste la duree d'arret)");
+}
+
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);
 process.exit(failures === 0 ? 0 : 1);

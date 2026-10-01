@@ -187,6 +187,28 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   préparation et d'arrêt. Vérifié en navigateur : #2 → #4 dans une tournée en cours, un
   second marquage retire le premier, et « Optimiser » met en dernier le colis le plus
   proche du départ.
+  **Trajets « injoignables » = jamais Infinity** (build 162, retour terrain 2026-10-01
+  « le sens est trop bizarre » puis « j'ai perdu l'estimation en haut »). Tournée réelle
+  rejouée avec le vrai graphe (43 adresses géocodées dans la BAN, import réel dans le
+  navigateur) : « 36 Rue Haute, Pompey » s'accrochait (7 m) à un nœud où l'on ne peut
+  pas ENTRER — 44 trajets vers lui `Infinity`, ceux depuis lui normaux (bout de rue à sens
+  unique). Deux effets d'une même cause : (1) `tourCost` remplace un trajet infini par une
+  pénalité FIXE de 4 h → ce point devenait une **téléportation gratuite** (y entrer coûte
+  pareil d'où qu'on vienne) : la tournée finissait loin à Saizerais en se croyant ramenée
+  gratis à Pompey — 119 min de route contre 105 ; (2) `computeEtas` cumulait `Infinity`
+  → plus aucune heure après ce point, ni « Fin ≈ », ni total (« — estimées »).
+  `js/routing/trajet-secours.js` (pur, testé) : `reparerMatrice` (un trajet infini prend
+  le temps du **sens inverse**, sinon `estimationVolOiseauSec` — ×1,35 à 40 km/h ;
+  valeurs calculées sur l'état d'origine, une réparation ne sert jamais de sens inverse à
+  une autre), appelée dans `computeOptimizedStops` juste après la matrice ;
+  `insertStopCheapest` estime au lieu d'Infinity ; `eta.js` estime un tronçon infini
+  DÉJÀ enregistré depuis l'arrêt précédent et le retour dépôt quand `totalDureeSec` est
+  infini — les tournées en cours récupèrent leurs heures sans recalcul ; `dureeTourneeSec`
+  pour tous les affichages du total. Rejeu avec le vrai module : 44 trajets réparés,
+  tous les tronçons finis, 105 min (Champigneulles → Bouxières → Custines → Millery →
+  Autreville → Marbache → Saizerais → Liverdun → Pompey → Frouard → dernier → dépôt).
+  Piste non faite : accrocher les adresses à un nœud qui a des arcs entrants ET sortants
+  (`inOffsets`/`outOffsets` du CSR) — la réparation suffit pour l'ordre et les heures.
 - **Sélection multiple de l'État A** (`selectionMode`/`selectedIds` dans `tour-ui.js`, cases à
   cocher sur les cartes de préparation, bouton « Supprimer (N) ») : le bouton « Tout
   cocher/décocher » doit utiliser le **même critère** pour son libellé et pour l'action du clic

@@ -14,6 +14,8 @@
 // reintroduire sans en reparler.
 
 // Marge appliquee aux seuls TRAJETS (pas a la duree d'arret, reglee a part).
+import { estimationVolOiseauSec } from "../routing/trajet-secours.js";
+
 export const MARGE_TRAJET = 0.1;
 
 // Pauses REELLES du livreur (repas, chargement, imprevu) : posees a la main
@@ -82,19 +84,41 @@ export function computeEtas(tour, stopsSorted, dwellSec, { maintenant = Date.now
 
   const facteurTrajet = 1 + MARGE_TRAJET;
 
+  // Troncon INFINI enregistre (tournee calculee avant trajet-secours.js, point
+  // accroche a un bout de rue a sens unique) : estimation a vol d'oiseau depuis
+  // l'arret precedent -- sinon cette heure ET toutes les suivantes, le "Fin ≈"
+  // et le total disparaissaient (retour terrain 2026-10-01 "j'ai perdu
+  // l'estimation en haut"). Un troncon ABSENT (insertion en route) compte
+  // toujours 0, comme avant.
+  const pointDe = (i) => (i < 0 ? tour.depot : stopsSorted[i]?.colis?.geocode);
+  const troncon = (i) => {
+    const leg = stopsSorted[i].stop.legDureeSec;
+    if (leg == null) return 0;
+    if (Number.isFinite(leg)) return leg;
+    const estime = estimationVolOiseauSec(pointDe(i - 1), pointDe(i));
+    return Number.isFinite(estime) ? estime : 0;
+  };
+
   let cumulative = 0;
   const etas = new Map();
   for (let i = anchorIndex + 1; i < stopsSorted.length; i++) {
     const { stop } = stopsSorted[i];
-    cumulative += (stop.legDureeSec || 0) * facteurTrajet;
+    cumulative += troncon(i) * facteurTrajet;
     etas.set(stop.colisId, new Date(anchorTime + cumulative * 1000));
     cumulative += dwellSec;
   }
 
   let depotEta = null;
   if (tour.returnToDepot) {
-    const sumStopLegs = stopsSorted.reduce((s, { stop }) => s + (stop.legDureeSec || 0), 0);
-    const returnLegSec = Math.max(0, (tour.totalDureeSec || 0) - sumStopLegs);
+    let returnLegSec;
+    if (Number.isFinite(tour.totalDureeSec)) {
+      const sumStopLegs = stopsSorted.reduce((s, { stop }) => s + (Number.isFinite(stop.legDureeSec) ? stop.legDureeSec : 0), 0);
+      returnLegSec = Math.max(0, tour.totalDureeSec - sumStopLegs);
+    } else {
+      // Total infini (meme cause) : retour estime depuis le dernier arret.
+      const estime = estimationVolOiseauSec(pointDe(stopsSorted.length - 1), tour.depotArrivee);
+      returnLegSec = Number.isFinite(estime) ? estime : 0;
+    }
     depotEta = new Date(anchorTime + (cumulative + returnLegSec * facteurTrajet) * 1000);
   }
 

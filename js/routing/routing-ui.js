@@ -14,6 +14,7 @@ import { setInlineLoading } from "../lib/loading.js";
 import { pickRecalcEligibles } from "./recalc-eligibles.js";
 import { zonesEffectives } from "./zones-effectives.js";
 import { indexDernier } from "./dernier-arret.js";
+import { reparerMatrice } from "./trajet-secours.js";
 
 // Colis "eligibles" pour le calcul INITIAL d'une tournee (runSort, Etat A) :
 // exactement ce que la preparation affiche (tout sauf livre/echec, voir
@@ -118,6 +119,13 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
       if (progressFill) progressFill.style.width = `${Math.round((done / total) * 100)}%`;
     },
   });
+
+  // Un trajet que le graphe dit injoignable (point accroche a un bout de rue a
+  // sens unique) prend le temps du sens inverse, ou une estimation a vol
+  // d'oiseau -- sinon ce point devient une "teleportation gratuite" pour
+  // l'optimiseur et les heures estimees deviennent infinies (voir
+  // trajet-secours.js).
+  reparerMatrice(matrix, points);
 
   setInlineLoading(statusEl, "Optimisation de l'ordre de tournée…");
 

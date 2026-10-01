@@ -17,6 +17,7 @@ import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { icon } from "../ui/icons.js";
 import { objectUrlFor, showPhotoViewer } from "../ui/photo-viewer.js";
+import { dureeTourneeSec } from "../routing/trajet-secours.js";
 import { ensureMap, refreshMapData, isMapMounted } from "../map/map-ui.js";
 import { on } from "../lib/event-bus.js";
 import { reportBug } from "../debug/bug-reports-store.js";
@@ -1335,7 +1336,7 @@ async function renderEtatB(tour) {
     <div class="card">
       <div class="card-row">
         <span class="muted">${delivered + failed}/${total} traités</span>
-        <span class="muted">${formatDurationShort(tour.totalDureeSec)} estimées</span>
+        <span class="muted">${formatDurationShort(dureeTourneeSec(tour))} estimées</span>
       </div>
     </div>
     <p id="routing-status" class="muted" style="margin:-2px 0 6px;"></p>

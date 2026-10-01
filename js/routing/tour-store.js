@@ -4,6 +4,7 @@ import { uuid } from "../lib/id.js";
 import { getColis, saveColis } from "../scan/colis-store.js";
 import { remettreArretALivrer as appliquerRemiseALivrer } from "./remettre-a-livrer.js";
 import { deplacerEnDernier } from "./dernier-arret.js";
+import { dureeTourneeSec } from "./trajet-secours.js";
 
 // Lit, modifie et reecrit une tournee dans UNE SEULE transaction readwrite
 // IndexedDB (stores "tours" + "colis") -- correctif d'audit : les mutations
@@ -259,7 +260,7 @@ export async function getTodayStats() {
   let toursCount = 0;
   for (const tour of tours) {
     if ((tour.dateCreation || "").slice(0, 10) === todayStr) {
-      dureeEstimeeSec += tour.totalDureeSec || 0;
+      dureeEstimeeSec += dureeTourneeSec(tour);
       toursCount++;
     }
     for (const stop of tour.stops) {
@@ -428,7 +429,7 @@ export async function getToursGroupedByDay() {
       total: stops.length,
       livres: stops.filter((s) => s.statutLivraison === "livre").length,
       echecs: stops.filter((s) => s.statutLivraison === "echec").length,
-      dureeSec: tour.totalDureeSec,
+      dureeSec: dureeTourneeSec(tour),
     });
   }
   return [...parJour.entries()]
