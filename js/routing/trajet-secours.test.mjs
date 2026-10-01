@@ -6,7 +6,7 @@
 //
 // Lancer : node js/routing/trajet-secours.test.mjs
 
-import { estimationVolOiseauSec, reparerMatrice, dureeTourneeSec } from "./trajet-secours.js";
+import { estimationVolOiseauSec, reparerMatrice, dureeTourneeSec, pointsMalRelies, colisAVerifier } from "./trajet-secours.js";
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -77,6 +77,40 @@ const saizerais = { lat: 48.7994, lon: 6.0448 };
     dureeTourneeSec({ totalDureeSec: Infinity, stops: [{ legDureeSec: 600 }, { legDureeSec: Infinity }, { legDureeSec: null }, { legDureeSec: 300 }] }),
     900
   );
+}
+
+// 6. Detection : seul le point fautif est signale (cas du 2026-10-01 : on ne
+//    peut pas entrer dans le point 2), pas les points qui menent a lui.
+{
+  const I = Infinity;
+  const m = [
+    [0, 100, I, 200],
+    [100, 0, I, 150],
+    [300, 250, 0, 120],
+    [200, 150, I, 0],
+  ];
+  check("seul le point injoignable est signale", pointsMalRelies(m), [2]);
+  check("matrice saine -> rien", pointsMalRelies([[0, 1], [1, 0]]), []);
+  const sortieImpossible = [
+    [0, I, I],
+    [100, 0, 50],
+    [100, 50, 0],
+  ];
+  check("point dont on ne peut pas SORTIR -> signale aussi", pointsMalRelies(sortieImpossible), [0]);
+}
+
+// 7. Tournee deja enregistree : arret au trajet d'arrivee infini -> a verifier,
+//    en plus de la liste posee au calcul ; un trajet absent (insertion) non.
+{
+  const ids = colisAVerifier({
+    adressesAVerifier: ["A"],
+    stops: [
+      { colisId: "B", legDureeSec: Infinity },
+      { colisId: "C", legDureeSec: null },
+      { colisId: "D", legDureeSec: 300 },
+    ],
+  });
+  check("liste du calcul + trajet infini enregistre", [...ids].sort(), ["A", "B"]);
 }
 
 if (failures > 0) {

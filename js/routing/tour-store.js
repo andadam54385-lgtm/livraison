@@ -61,7 +61,7 @@ function updateTourAtomic(db, tourId, mutateTour) {
   );
 }
 
-export async function createTour({ depot, stops, totalDureeSec, returnToDepot = false, depotArrivee = null }) {
+export async function createTour({ depot, stops, totalDureeSec, returnToDepot = false, depotArrivee = null, adressesAVerifier = [] }) {
   const db = await getDb();
   const tour = {
     id: uuid(),
@@ -72,6 +72,7 @@ export async function createTour({ depot, stops, totalDureeSec, returnToDepot = 
     totalDureeSec,
     returnToDepot,
     depotArrivee,
+    adressesAVerifier,
   };
   await put(db, "tours", tour);
   return tour;

@@ -17,7 +17,7 @@ import { showToast } from "../lib/toast.js";
 import { escapeHtml, escapeAttr } from "../lib/escape.js";
 import { icon } from "../ui/icons.js";
 import { objectUrlFor, showPhotoViewer } from "../ui/photo-viewer.js";
-import { dureeTourneeSec } from "../routing/trajet-secours.js";
+import { dureeTourneeSec, colisAVerifier } from "../routing/trajet-secours.js";
 import { ensureMap, refreshMapData, isMapMounted } from "../map/map-ui.js";
 import { on } from "../lib/event-bus.js";
 import { reportBug } from "../debug/bug-reports-store.js";
@@ -63,6 +63,8 @@ let traitesOuverts = false;
 let lastNavApp = "apple";
 let lastEtas = new Map();
 let lastDepotEta = null;
+// Colis des arrets mal relies au reseau routier (voir renderEtatB).
+let lastAVerifier = new Set();
 // Minuterie qui rafraichit l'affichage pendant une pause (compteur + heures
 // estimees qui reculent) -- voir la fin de renderEtatB.
 let pauseTicker = null;
@@ -914,6 +916,7 @@ function renderHeroCard(stop, colis, { navApp, eta, smsTemplates }) {
       <div class="hero-top">
         <span class="hero-eyebrow">Arrêt actuel · #${stop.ordre}</span>
         ${colis.avant12h ? '<span class="badge badge-urgent">⏰ Avant 12h</span>' : ""}
+        ${lastAVerifier.has(colis.id) ? `<span class="badge badge-warn">${icon("alert-triangle", { spaced: false, size: 12 })} Adresse à vérifier</span>` : ""}
       </div>
       <div class="hero-addr" data-open-detail data-colis-id="${escapeAttr(colis.id)}">${escapeHtml(street)}</div>
       <div class="hero-city" data-open-detail data-colis-id="${escapeAttr(colis.id)}">${escapeHtml(cityLine)}</div>
@@ -976,6 +979,7 @@ function renderStopCard(stop, colis, { navApp, eta, canMoveUp, canMoveDown }) {
           ${colis.typeClient === "pro" ? '<span class="badge badge-info">Pro</span>' : ""}
           ${colis.operation === "ramasse" ? '<span class="badge badge-info">Ramasse</span>' : ""}
           ${colis.dernier && !done ? `<span class="badge badge-info">${icon("flag", { spaced: false, size: 12 })}</span>` : ""}
+          ${lastAVerifier.has(colis.id) && !done ? `<span class="badge badge-warn" title="Adresse mal reliée aux routes">${icon("alert-triangle", { spaced: false, size: 12 })}</span>` : ""}
         </div>
       </div>
       <div class="muted stop-card-addr" data-open-detail data-colis-id="${escapeAttr(colis.id)}">${escapeHtml(adresse)}${colis.quantite > 1 ? ` · ${colis.quantite} colis` : ""}</div>
@@ -1327,6 +1331,26 @@ async function renderEtatB(tour) {
         ${pausesTerminees.length > 0 ? `<span class="muted" style="align-self:center;">Pause${pausesTerminees.length > 1 ? "s" : ""} : ${pausesTerminees.map((p) => escapeHtml(formatPause(p))).join(" · ")}</span>` : ""}
       </div>`;
 
+  // Adresses mal reliees au reseau routier (retour terrain 2026-10-01 :
+  // "faudrait prevenir quand il y a un probleme avec une adresse") -- voir
+  // pointsMalRelies/colisAVerifier dans trajet-secours.js. Seuls les arrets
+  // encore a faire sont signales.
+  lastAVerifier = colisAVerifier(tour);
+  const aVerifier = stopsWithColis.filter(({ stop, colis }) => colis && isPending(stop) && lastAVerifier.has(colis.id));
+  const alerteAdressesHtml =
+    aVerifier.length > 0
+      ? `<div class="card" style="border-color:var(--warn);">
+          <div class="card-title">${icon("alert-triangle")}${aVerifier.length} adresse${aVerifier.length > 1 ? "s" : ""} mal reliée${aVerifier.length > 1 ? "s" : ""} aux routes</div>
+          <p class="muted" style="margin:-2px 0 8px;">Le GPS de l'appli ne trouve pas de route pour y entrer : son temps de trajet et sa place dans l'ordre sont seulement estimés. Ouvre la fiche → « Corriger » → place le point sur l'entrée, puis recalcule (↻).</p>
+          ${aVerifier
+            .map(
+              ({ stop, colis }) =>
+                `<button type="button" class="btn-link" style="width:100%;justify-content:flex-start;margin-top:4px;" data-open-detail data-colis-id="${escapeAttr(colis.id)}">#${stop.ordre} ${escapeHtml(colis.nom || "")}${colis.nom ? " — " : ""}${escapeHtml(formatAdresseAffichage(colis))}</button>`
+            )
+            .join("")}
+        </div>`
+      : "";
+
   const heroEntry = stopsWithColis.find(({ stop, colis }) => isPending(stop) && colis);
   const heroHtml = heroEntry
     ? renderHeroCard(heroEntry.stop, heroEntry.colis, { navApp, eta: lastEtas.get(heroEntry.colis.id), smsTemplates: settings.smsTemplates })
@@ -1341,6 +1365,7 @@ async function renderEtatB(tour) {
     </div>
     <p id="routing-status" class="muted" style="margin:-2px 0 6px;"></p>
     <div class="progress-bar" style="margin:-2px 0 12px;"><div id="routing-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
+    ${alerteAdressesHtml}
     ${pauseHtml}
     ${pauseEnCoursActive ? "" : heroHtml}
     <div class="card">

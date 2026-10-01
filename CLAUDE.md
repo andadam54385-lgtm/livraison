@@ -209,6 +209,20 @@ install graphifyy` sur cette machine, PATH pas configuré → binaire à
   Autreville → Marbache → Saizerais → Liverdun → Pompey → Frouard → dernier → dépôt).
   Piste non faite : accrocher les adresses à un nœud qui a des arcs entrants ET sortants
   (`inOffsets`/`outOffsets` du CSR) — la réparation suffit pour l'ordre et les heures.
+  **Adresse mal reliée = SIGNALÉE** (build 163, « faudrait prévenir quand il y a un
+  problème avec une adresse ») : `pointsMalRelies` (avant `reparerMatrice`) retient un
+  point dont plus de la moitié des trajets VERS lui ou DEPUIS lui sont infinis — un point
+  normal n'a qu'un trajet infini, celui vers le fautif, il n'est jamais signalé — plus
+  les points à > 2 km de toute route (`unsnapped`). `computeOptimizedStops` renvoie
+  `adressesAVerifier` (ids de colis), posé sur la tournée par `runSort`/`createTour` et
+  `runRecalculate`. `colisAVerifier(tour)` y ajoute les arrêts au `legDureeSec` infini
+  DÉJÀ enregistré : une tournée calculée avant le correctif est signalée sans recalcul.
+  Affichage (État B) : bandeau orange « N adresse(s) mal reliée(s) aux routes » en haut
+  (arrêts encore à faire seulement, chacun cliquable → fiche, consigne « Corriger → place
+  le point sur l'entrée, puis recalcule »), badge ⚠ sur la carte d'arrêt et « Adresse à
+  vérifier » sur la carte de l'arrêt courant, mention dans le statut après « Optimiser ».
+  Vérifié en navigateur sur la tournée du téléphone reproduite (trajet et total infinis) :
+  bandeau + badge sur le bon arrêt, « Fin ≈ » revenu, heures 11:08 → 11:15 → 11:23.
 - **Sélection multiple de l'État A** (`selectionMode`/`selectedIds` dans `tour-ui.js`, cases à
   cocher sur les cartes de préparation, bouton « Supprimer (N) ») : le bouton « Tout
   cocher/décocher » doit utiliser le **même critère** pour son libellé et pour l'action du clic

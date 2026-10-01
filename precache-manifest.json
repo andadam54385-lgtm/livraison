@@ -1,6 +1,6 @@
 {
-  "version": "5f989d97c219",
-  "generatedAt": "2026-10-01T08:17:09.668Z",
+  "version": "f9103de5d995",
+  "generatedAt": "2026-10-01T08:24:10.434Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -122,7 +122,7 @@
   ],
   "files": {
     "./": "895fb6e347845610",
-    "./CLAUDE.md": "21372f5f808e2e0f",
+    "./CLAUDE.md": "6db3f3e7da9a71d6",
     "./README.md": "5c0141359e012b32",
     "./assets/manifest-content.json": "9b1852ddc3c4ddae",
     "./css/app.css": "02c92031bb6af237",
@@ -168,12 +168,12 @@
     "./js/routing/recalc-eligibles.test.mjs": "c7f6d78a38b12e79",
     "./js/routing/remettre-a-livrer.js": "8283b2309bc1509a",
     "./js/routing/remettre-a-livrer.test.mjs": "ae9b736d9c61ebb3",
-    "./js/routing/routing-ui.js": "7bbcc38ea5a1aba4",
+    "./js/routing/routing-ui.js": "706cab6e583ce730",
     "./js/routing/routing-worker.js": "d7c8eb42cebdced0",
     "./js/routing/spatial-index.js": "2385a8ef113a94e2",
-    "./js/routing/tour-store.js": "b4b436185d6775a9",
-    "./js/routing/trajet-secours.js": "c0e1019b08624a89",
-    "./js/routing/trajet-secours.test.mjs": "82b14e26121b3ce5",
+    "./js/routing/tour-store.js": "82c9d124c68a25c8",
+    "./js/routing/trajet-secours.js": "bd0e1facc4f1e814",
+    "./js/routing/trajet-secours.test.mjs": "c14720bfb6764d60",
     "./js/routing/tsp.js": "987fe35208ba719a",
     "./js/routing/tsp.test.mjs": "4adadb5a7b7f9ffa",
     "./js/routing/zones-effectives.js": "96b3088249b16ae6",
@@ -204,11 +204,11 @@
     "./js/tour/eta.js": "758270fa21e9ae4d",
     "./js/tour/eta.test.mjs": "93c02478f32e2301",
     "./js/tour/sms-template.js": "f998e753fbfeb66b",
-    "./js/tour/tour-ui.js": "c51a207989a4dcd2",
+    "./js/tour/tour-ui.js": "802c71cf7eeb4b10",
     "./js/ui/icons.js": "01850ab503e6f3b0",
     "./js/ui/photo-viewer.js": "62aba866a5a5fb3c",
     "./js/ui/segmented.js": "d68a585c517ee60c",
-    "./js/version.js": "bdd7d0c0e39d9de3",
+    "./js/version.js": "4f0331d605a08201",
     "./lib/maplibre/LICENSE-maplibre-gl.txt": "b0d2e08b85de5940",
     "./lib/maplibre/LICENSE-pmtiles.txt": "a3378c46a15ffd9d",
     "./lib/maplibre/basemap-assets/fonts/Noto Sans Italic/0-255.pbf": "087b2484de911904",
@@ -237,6 +237,6 @@
     "./lib/zxing/zxing-reader.js": "14d9ae7753136475",
     "./lib/zxing/zxing_reader.wasm": "9678b0ccf938a6c3",
     "./manifest.webmanifest": "5837ab48326dbdff",
-    "./sw.js": "2d42a2dfb39c5c6c"
+    "./sw.js": "3fb8a788eb49b9f4"
   }
 }

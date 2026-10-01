@@ -14,7 +14,7 @@ import { setInlineLoading } from "../lib/loading.js";
 import { pickRecalcEligibles } from "./recalc-eligibles.js";
 import { zonesEffectives } from "./zones-effectives.js";
 import { indexDernier } from "./dernier-arret.js";
-import { reparerMatrice } from "./trajet-secours.js";
+import { reparerMatrice, pointsMalRelies } from "./trajet-secours.js";
 
 // Colis "eligibles" pour le calcul INITIAL d'une tournee (runSort, Etat A) :
 // exactement ce que la preparation affiche (tout sauf livre/echec, voir
@@ -124,7 +124,14 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
   // sens unique) prend le temps du sens inverse, ou une estimation a vol
   // d'oiseau -- sinon ce point devient une "teleportation gratuite" pour
   // l'optimiseur et les heures estimees deviennent infinies (voir
-  // trajet-secours.js).
+  // trajet-secours.js). Les adresses concernees -- et celles trop loin de
+  // toute route connue -- sont SIGNALEES au livreur (bandeau en haut de la
+  // tournee, badge sur l'arret) : leur temps et leur place dans l'ordre ne
+  // sont qu'estimes, il doit pouvoir verifier le point.
+  const indicesAVerifier = new Set([...unsnapped, ...pointsMalRelies(matrix)]);
+  const adressesAVerifier = [...indicesAVerifier]
+    .filter((i) => i >= 1 && i <= eligibles.length)
+    .map((i) => eligibles[i - 1].id);
   reparerMatrice(matrix, points);
 
   setInlineLoading(statusEl, "Optimisation de l'ordre de tournée…");
@@ -234,7 +241,7 @@ async function computeOptimizedStops({ eligibles, start, depotReturnPoint, setti
     };
   });
 
-  return { stops, totalDureeSec };
+  return { stops, totalDureeSec, adressesAVerifier };
 }
 
 // Ecran appelant (tour-ui.js, Etat A) : doit fournir un conteneur avec
@@ -274,7 +281,7 @@ export async function runSort(container, { useGps, depotReturn, onDone, disableB
     }
 
     const depotReturnPoint = depotReturnChecked ? { lat: settings.depotLat, lon: settings.depotLon } : null;
-    const { stops, totalDureeSec } = await computeOptimizedStops({
+    const { stops, totalDureeSec, adressesAVerifier } = await computeOptimizedStops({
       eligibles,
       start,
       depotReturnPoint,
@@ -289,6 +296,7 @@ export async function runSort(container, { useGps, depotReturn, onDone, disableB
       totalDureeSec,
       returnToDepot: Boolean(depotReturnPoint),
       depotArrivee: depotReturnPoint ? { lat: settings.depotLat, lon: settings.depotLon, label: settings.depotLabel } : null,
+      adressesAVerifier,
     });
 
     for (const colis of eligibles) {
@@ -296,7 +304,7 @@ export async function runSort(container, { useGps, depotReturn, onDone, disableB
     }
 
     emit("tour:computed", { tour });
-    statusEl.textContent = `Tournée prête (${formatDurationShort(totalDureeSec)} estimées).`;
+    statusEl.textContent = `Tournée prête (${formatDurationShort(totalDureeSec)} estimées).${adressesAVerifier.length > 0 ? ` ⚠ ${adressesAVerifier.length} adresse${adressesAVerifier.length > 1 ? "s" : ""} mal reliée${adressesAVerifier.length > 1 ? "s" : ""} aux routes — voir en haut de la tournée.` : ""}`;
     onDone?.(tour);
   } catch (err) {
     console.error(err);
@@ -347,7 +355,7 @@ export async function runRecalculate(container, { tour, onDone, disableButtons =
     }
 
     const depotReturnPoint = tour.returnToDepot && tour.depotArrivee ? { lat: tour.depotArrivee.lat, lon: tour.depotArrivee.lon } : null;
-    const { stops: pendingStops, totalDureeSec: pendingTotal } = await computeOptimizedStops({
+    const { stops: pendingStops, totalDureeSec: pendingTotal, adressesAVerifier } = await computeOptimizedStops({
       eligibles,
       start,
       depotReturnPoint,
@@ -387,6 +395,7 @@ export async function runRecalculate(container, { tour, onDone, disableButtons =
       // dessine APRES ce point, sinon le trajet "repart" du point GPS du
       // recalcul au lieu de l'arret qui vient d'etre fait.
       recalcStart: { lat: start.lat, lon: start.lon, label: start.label, afterOrdre: fixedStops.length },
+      adressesAVerifier,
     });
 
     for (const colis of eligibles) {

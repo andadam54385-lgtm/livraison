@@ -9,7 +9,7 @@
 // ayant deja installe une version anterieure DOIT donc modifier ce fichier
 // (ex: incrementer SW_BUILD ci-dessous), meme si le bug corrige se trouve
 // ailleurs. Sans ca, le service worker reste bloque sur son ancien cache.
-const SW_BUILD = 162;
+const SW_BUILD = 163;
 
 // Le nom du cache ne depend QUE de SW_BUILD : l'activation le connait sans
 // relire le manifeste sur le reseau. Avant, un manifeste illisible pendant une

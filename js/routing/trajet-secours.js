@@ -31,6 +31,38 @@ export function estimationVolOiseauSec(a, b) {
   return ((km * DETOUR) / VITESSE_KMH) * 3600;
 }
 
+// Points MAL RELIES au reseau routier (retour terrain 2026-10-01 : "faudrait
+// prevenir quand il y a un probleme avec une adresse") : plus de la moitie
+// des trajets VERS lui, ou DEPUIS lui, sont injoignables -- le point est
+// accroche a un bout de rue ou l'on ne peut pas entrer (ou sortir). Un point
+// normal n'a qu'un trajet infini, celui qui mene au point fautif : il n'est
+// jamais signale. A appeler AVANT reparerMatrice. Renvoie les index.
+export function pointsMalRelies(matrix) {
+  const n = matrix.length;
+  const res = [];
+  for (let i = 0; i < n; i++) {
+    let entrees = 0;
+    let sorties = 0;
+    for (let j = 0; j < n; j++) {
+      if (i === j) continue;
+      if (!Number.isFinite(matrix[j][i])) entrees++;
+      if (!Number.isFinite(matrix[i][j])) sorties++;
+    }
+    if (n > 1 && (entrees > (n - 1) / 2 || sorties > (n - 1) / 2)) res.push(i);
+  }
+  return res;
+}
+
+// Arrets d'une tournee DEJA enregistree dont le trajet d'arrivee est infini
+// (calculee avant ce correctif) : signales sans attendre un recalcul.
+export function colisAVerifier(tour) {
+  const ids = new Set(tour?.adressesAVerifier || []);
+  for (const s of tour?.stops || []) {
+    if (s.legDureeSec != null && !Number.isFinite(s.legDureeSec)) ids.add(s.colisId);
+  }
+  return ids;
+}
+
 // Remplace sur place chaque trajet infini de la matrice ; renvoie le nombre
 // de trajets repares. `points[i]` = {lat, lon} du point i de la matrice.
 export function reparerMatrice(matrix, points) {
