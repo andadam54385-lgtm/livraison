@@ -1,0 +1,1140 @@
+import { parseAddressList, classifyBlockLines, groupLinesIntoBlocks } from "./parse-address-list.js";
+import { looseCommune } from "../geocode/match-address.js";
+import { normalizeCity } from "../geocode/normalize-address.js";
+
+let failures = 0;
+function assertEqual(actual, expected, label) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  if (!ok) failures++;
+  console.log(`${ok ? "OK  " : "FAIL"} ${label} (attendu: ${JSON.stringify(expected)}, obtenu: ${JSON.stringify(actual)})`);
+}
+function assert(cond, label) {
+  if (!cond) failures++;
+  console.log(`${cond ? "OK  " : "FAIL"} ${label}`);
+}
+
+// Fabrique des lignes OCR factices avec bbox : chaque ligne fait 20px de
+// haut, espacees de `gap` px entre elles (gap grand = coupure de bloc).
+function line(text, y, height = 20) {
+  return { text, bbox: { x0: 0, y0: y, x1: 200, y1: y + height } };
+}
+
+console.log("=== Cas 1 : 3 clients, 3 lignes chacun (nom/rue/ville), separes par un grand espace ===");
+{
+  const ocrLines = [
+    line("Jean Dupont", 0),
+    line("14 Rue des Jardins", 24),
+    line("54470 Ansauville", 48),
+    // grand ecart ici (trait separateur)
+    line("Marie Martin", 150),
+    line("12 Avenue de la Liberation", 174),
+    line("54000 Nancy", 198),
+    line("8 Impasse des Lilas", 300),
+    line("57000 Metz", 324),
+  ];
+  const result = parseAddressList(ocrLines);
+  assertEqual(result.length, 3, "3 blocs detectes");
+  assertEqual(result[0].nom, "Jean Dupont", "bloc 1 : nom");
+  assertEqual(result[0].rue, "14 Rue des Jardins", "bloc 1 : rue");
+  assertEqual(result[0].ville, "Ansauville", "bloc 1 : ville");
+  assertEqual(result[1].nom, "Marie Martin", "bloc 2 : nom");
+  assertEqual(result[2].nom, null, "bloc 3 : pas de nom (colis sans nom, pas grave)");
+  assertEqual(result[2].rue, "8 Impasse des Lilas", "bloc 3 : rue");
+  assertEqual(result[2].cp, "57000", "bloc 3 : cp");
+}
+
+console.log("\n=== Cas 2 : rue et debut de ville colles sur la meme ligne ===");
+{
+  const ocrLines = [line("12 Avenue de la Liberation 54000 Nancy", 0)];
+  const result = parseAddressList(ocrLines);
+  assertEqual(result.length, 1, "1 bloc detecte");
+  assertEqual(result[0].rue, "12 Avenue de la Liberation", "rue extraite sans le cp/ville colle");
+  assertEqual(result[0].cp, "54000", "cp extrait de la ligne colle");
+  assertEqual(result[0].ville, "Nancy", "ville extraite de la ligne colle");
+}
+
+console.log("\n=== Cas 3 : casse normale (pas tout en majuscules, contrairement a une etiquette imprimee) ===");
+{
+  const ocrLines = [line("Sophie Avril", 0), line("3 rue des Acacias", 24), line("54470 ansauville", 48)];
+  const result = parseAddressList(ocrLines);
+  assertEqual(result[0].nom, "Sophie Avril", "nom en casse normale non confondu avec un mot-cle de voie (Avril contient 'av')");
+  assertEqual(result[0].ville, "ansauville", "ville en minuscules correctement extraite");
+}
+
+console.log("\n=== Cas 4 : bloc sans aucune adresse exploitable (bruit) ignore ===");
+{
+  const ocrLines = [line("Ma Tournee du Jour", 0), line("14 Rue des Jardins", 24), line("54470 Ansauville", 48)];
+  const result = parseAddressList(ocrLines);
+  assertEqual(result.length, 1, "le titre sans rue/cp au-dessus n'est pas retenu comme bloc separe");
+}
+
+console.log("\n=== Cas 5 : vrai format terminal UPS -- rue / ville / CP sur 3 lignes SEPAREES (pas 'cp ville' colle) ===");
+{
+  const knownCities = new Set(["dommartin les toul"]); // forme "loose" (sans tirets) -- voir looseCommune
+  const ocrLines = [
+    line("BENALI KARIM", 0),
+    line("9 MARECHAL FOCH AVE", 24),
+    line("DOMMARTIN LES TOUL", 48),
+    line("54200", 72),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities });
+  assertEqual(result.length, 1, "1 bloc detecte");
+  assertEqual(result[0].nom, "BENALI KARIM", "nom correctement isole (pas ecrase par la ville)");
+  assertEqual(result[0].rue, "9 MARECHAL FOCH AVE", "rue sans le CP colle a tort (ancien bug)");
+  assertEqual(result[0].ville, "DOMMARTIN LES TOUL", "ville reconnue via knownCities malgre l'absence de CP sur la meme ligne");
+  assertEqual(result[0].cp, "54200", "CP seul sur sa ligne correctement isole (ancien bug : partait dans la rue)");
+}
+
+console.log("\n=== Cas 6 : retour a la ligne d'une rue trop longue (continuation rattachee a la rue, pas au nom) ===");
+{
+  const ocrLines = [
+    line("Paul Petit", 0),
+    line("3 Rue du General de", 24),
+    line("Gaulle", 48),
+    line("54470 Ansauville", 72),
+  ];
+  const result = parseAddressList(ocrLines);
+  assertEqual(result[0].nom, "Paul Petit", "nom non pollue par la 2e ligne de la rue");
+  assertEqual(result[0].rue, "3 Rue du General de Gaulle", "rue reconstituee sur ses 2 lignes");
+}
+
+console.log("\n=== Cas 7 : ville affichee en double (libelle de zone + ville reelle) -- pas de concatenation ===");
+{
+  const knownCities = new Set(["dommartin les toul"]); // forme "loose" (sans tirets) -- voir looseCommune
+  const ocrLines = [
+    line("CHAUSSEA", 0),
+    line("Dommartin-les-Toul", 24), // libelle de zone au-dessus du bloc (meme ville, redondant)
+    line("JONCHERY RUE", 48),
+    line("Dommartin-les-Toul", 72), // ville propre de l'adresse
+    line("54200", 96),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities });
+  assertEqual(result[0].ville, "Dommartin-les-Toul", "dernier match l'emporte, pas de doublon concatene");
+}
+
+console.log("\n=== Cas 8 : sans knownCities (Set vide, comportement par defaut), une ville seule sans CP est rattachee a la rue (repli continuation) ===");
+{
+  // Degradation gracieuse documentee : sans base de reference, impossible de
+  // distinguer une ville d'un nom par la seule forme du texte -- le repli
+  // "continuation du champ precedent" (ligne suivant une rue) l'emporte,
+  // donc la ville finit ajoutee a la rue plutot que de corrompre le nom.
+  // Le bloc reste retenu (rue non vide), juste sans ville extraite.
+  const ocrLines = [line("9 MARECHAL FOCH AVE", 0), line("DOMMARTIN LES TOUL", 24)];
+  const result = parseAddressList(ocrLines);
+  assertEqual(result[0].rue, "9 MARECHAL FOCH AVE DOMMARTIN LES TOUL", "rue englobe la ligne non identifiee (repli, pas une perte)");
+  assertEqual(result[0].ville, null, "ville non extraite sans knownCities (attendu, pas une regression)");
+}
+
+console.log("\n=== Cas 9 : bruit d'interface (distance 'Xkm') entre deux clients -- reproduit un bug reel de fusion de blocs ===");
+{
+  // Retour terrain : "il y avait 4 adresses sur la photo, tu m'en a sorti
+  // qu'une" -- reproduit ici avec les VRAIES 4 adresses et la ligne de
+  // distance qui s'affiche entre chaque client sur le vrai terminal, tres
+  // proche du CP precedent. Avant le correctif : la ligne "Xkm" cassait
+  // l'ecart en deux plus petits (ni l'un ni l'autre au-dessus du seuil),
+  // 2 clients fusionnaient en un seul bloc corrompu.
+  const knownCities = new Set(["dommartin les toul"]);
+  const ocrLines = [
+    line("CHAUSSEA", 0), line("Dommartin-les-Toul", 26), line("JONCHERY RUE", 52), line("DOMMARTIN-LES-TOUL", 78), line("54200", 104),
+    line("21.8km", 112),
+    line("Marie-Odile KIEFFER", 180), line("3 ACACIAS RUE", 206), line("DOMMARTIN LES TOUL", 232), line("54200", 258),
+    line("22.44km", 266),
+    line("JEANNE D'ARC RUE", 340), line("DOMMARTIN-LES-TOUL", 366), line("54200", 392),
+    line("22.34km", 400),
+    line("BENALI KARIM", 460), line("9 MARECHAL FOCH AVE", 486), line("DOMMARTIN LES TOUL", 512), line("54200", 538),
+    line("22.83km", 546),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities });
+  assertEqual(result.length, 4, "les 4 adresses restent 4 blocs distincts (pas de fusion)");
+  assertEqual(result[0].rue, "JONCHERY RUE", "rue non polluee par la distance (pas de '21.8km' ajoute)");
+  assertEqual(result[3].nom, "BENALI KARIM", "4e adresse bien isolee, pas fusionnee avec la 3e");
+}
+
+console.log("\n=== Cas 10 : terminal Chronopost (statut/code/compteur/heure/bandeau d'instruction) -- reproduit '118 adresses au lieu de 27' ===");
+{
+  // Retour terrain : un terminal plus charge visuellement qu'UPS (code de
+  // tournee "C18"/"C13", statut "TRANSFERE"/"EN COURS", compteur enveloppe/
+  // colis "0 / 1", heure seule en plus de la distance, et des bandeaux
+  // d'instruction en texte libre suivis d'un numero de suivi) faisait
+  // exploser chaque client en plusieurs faux clients (118 adresses extraites
+  // pour 27 arrets reels) : chaque element non reconnu devenait soit un faux
+  // nom ("TRANSFERE" pris pour le destinataire), soit un faux bloc a part
+  // entiere, soit polluait la rue.
+  const knownCities = new Set(["fremifontaine", "celles sur plaine"]);
+  const ocrLines = [
+    // Client 1 : carte simple (pas de bandeau), avec tout le bruit d'interface autour.
+    line("ALAIN VUILLAUME - ALAIN VUILLAUME", 0),
+    line("C18", 6, 18), // code tournee sur la meme rangee visuelle que le nom (petit decalage y, pas un vrai ecart de bloc)
+    line("12 RUE DES CHARMES", 30),
+    line("88600 FREMIFONTAINE", 56),
+    line("0 / 0", 82, 16),
+    line("TRANSFERE", 100, 16),
+    line("11 km", 118, 16),
+    line("11:45", 136, 16),
+    // grand ecart -> nouveau client
+    line("MICHEL COLLOT", 260),
+    line("C13", 266, 18),
+    line("8 RUE DU MOULIN", 290),
+    line("88110 CELLES SUR PLAINE", 316),
+    line("0 / 1", 342, 16),
+    line("EN COURS", 360, 16),
+    line("42 km", 378, 16),
+    line("12:26", 396, 16),
+    // Bandeau d'instruction en texte libre + numero de suivi -- toujours DANS la carte du client 2, ne doit ni le fusionner avec un client 3 ni devenir sa propre entree.
+    line("Attention consigne de livraison", 414, 16),
+    line("Relais/BP interdit. 2e livraison demain si non livre", 432, 16),
+    line("NX006123474FR", 450, 16),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities });
+  assertEqual(result.length, 2, "2 clients extraits (pas 8+ a cause du bruit/bandeau)");
+  assertEqual(result[0].nom, "ALAIN VUILLAUME - ALAIN VUILLAUME", "client 1 : nom non ecrase par 'TRANSFERE'/'C18'/etc.");
+  assertEqual(result[0].rue, "12 RUE DES CHARMES", "client 1 : rue non polluee par le compteur/statut/distance/heure");
+  assertEqual(result[1].nom, "MICHEL COLLOT", "client 2 : nom non ecrase malgre le bandeau d'instruction qui suit");
+  assertEqual(result[1].rue, "8 RUE DU MOULIN", "client 2 : rue non polluee par le bandeau ni le numero de suivi");
+  assertEqual(result[1].cp, "88110", "client 2 : CP toujours capture malgre le bruit avant/apres");
+}
+
+console.log("\n=== Cas 11 : bandeau d'instruction fusionne par l'OCR sur la MEME ligne qu'un vrai champ ===");
+{
+  // Cas observe reellement : l'OCR regroupe parfois plusieurs rangees
+  // visuelles en une seule "ligne" detectee -- ici la distance ET le debut du
+  // bandeau atterrissent sur la meme ligne que la rue. Seule la partie AVANT
+  // l'ancre doit etre gardee.
+  const ocrLines = [
+    line("BENALI KARIM", 0),
+    line("9 MARECHAL FOCH AVE 42 km Attention consigne de livraison", 26),
+    line("Relais/BP interdit. 2e livraison demain si non livre", 52),
+    line("NX006123474FR", 78),
+    line("88600 Dommartin les Toul", 104),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result.length, 1, "1 seul client (pas de faux bloc a partir du bandeau)");
+  assertEqual(result[0].rue, "9 MARECHAL FOCH AVE", "rue tronquee juste avant l'ancre du bandeau, distance/bandeau/suivi exclus");
+  assertEqual(result[0].cp, "88600", "CP toujours capture apres le bandeau/numero de suivi");
+}
+
+console.log("\n=== Cas 12 : badge d'un transporteur JAMAIS rencontre -- verifie la generalisation (pas juste le vocabulaire Chronopost) ===");
+{
+  // Retour terrain : "il faut que ca marche peu importe la mise en forme" --
+  // ce cas invente un mot-badge qui n'apparait dans AUCUN des motifs fixes
+  // (NOISE_LINE_PATTERNS ne connait que TRANSFERE/EN COURS/AGENCE/PART/PRO/
+  // C<n>/AGC). S'il est correctement ignore, c'est que looksLikeUiChrome
+  // (forme : court, sans espace, tout en majuscules -- pas un vocabulaire
+  // fixe) fonctionne bien au-dela des transporteurs deja vus.
+  const ocrLines = [
+    line("XPRESSDEP", 0), // badge fictif, jamais dans NOISE_LINE_PATTERNS
+    line("Julie Perrin", 26),
+    line("5 Rue des Merles", 52),
+    line("57000 Metz", 78),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result.length, 1, "1 seul bloc (le badge inconnu ne cree pas de faux client)");
+  assertEqual(result[0].nom, "Julie Perrin", "nom correct, pas ecrase par le badge inconnu");
+  assertEqual(result[0].rue, "5 Rue des Merles", "rue non polluee par le badge inconnu");
+}
+
+console.log("\n=== Cas 13 : texte parasite a plusieurs mots (trop long pour un nom) -- rejete, contrairement a un vrai nom court ===");
+{
+  // Retour terrain : "un nom c'est 1 ou 2 mots, 3 grand max, on evite les
+  // mots a rallonge" -- looksLikeUiChrome n'attrape que les badges SANS
+  // espace ; un texte parasite plus long (fusion OCR de plusieurs elements)
+  // passait encore au travers avant ce correctif.
+  const ocrLines = [
+    line("Vue synthese generale affichee ici maintenant", 0), // 6 mots, aucun mot-cle de voie -> rejete
+    line("Marie Dupont", 26), // 2 mots -> accepte (dernier "nom" retenu)
+    line("8 Rue des Tilleuls", 52),
+    line("57000 Metz", 78),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result[0].nom, "Marie Dupont", "texte parasite ignore, vrai nom court retenu");
+}
+{
+  // Motif reel a tiret ("ALAIN VUILLAUME - ALAIN VUILLAUME", voir Cas 10) :
+  // verifie ici isolement que 2 clauses courtes de part et d'autre du tiret
+  // restent acceptees (pas juste re-teste via un cas plus large).
+  const ocrLines = [line("Jean Petit - Jean Petit", 0), line("2 Rue du Lac", 26), line("57000 Metz", 52)];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result[0].nom, "Jean Petit - Jean Petit", "nom repete avec tiret toujours accepte (2 mots de chaque cote)");
+}
+{
+  // Mais un vrai texte long des DEUX cotes du tiret reste rejete (le tiret
+  // seul ne doit pas devenir une echappatoire a la limite de mots).
+  const ocrLines = [
+    line("Message affiche pour information seulement - a traiter avant midi", 0),
+    line("9 Cours du Lac", 26),
+    line("57000 Metz", 52),
+  ];
+  const result = parseAddressList(ocrLines, { knownCities: new Set() });
+  assertEqual(result[0].nom, null, "texte long de part et d'autre du tiret toujours rejete");
+}
+
+console.log("\n=== Cas 14 : terminal 'Itineraire' (retour terrain '138 points au lieu de 60') ===");
+{
+  // Transcrit d'une vraie video du terminal (2026-09-01) : colonne de droite
+  // (badge "8000 | 0+1", creneaux, "999X99", telephones, distances) fusionnee
+  // par l'OCR avec les lignes de gauche, ville et CP sur des lignes SEPAREES,
+  // commune repliee sur plusieurs lignes avec duplication OCR, pied d'ecran.
+  let y14 = 0;
+  const L14 = (text, gapBefore = 4) => {
+    y14 += gapBefore + 20;
+    return { text, bbox: { x0: 0, y0: y14, x1: 300, y1: y14 + 20 } };
+  };
+  const lines14 = [
+    L14("PRESSE"),
+    L14("1 RUE DES ALLIES"),
+    L14("LONGEVILLE-EN-BARROIS 14:30 - 18:30"),
+    L14("LONGEVILLE-EN-BARROIS 33639980006"),
+    L14("55000"),
+    L14("BM TABAC PRESSE"),
+    L14("MARCHAL KEVIN 8000 | 0+1", 40),
+    L14("1 ALLIES RUE"),
+    L14("LONGEVILLE EN BARROIS 15:10 - 17:10"),
+    L14("55000"),
+    L14("74.43km"),
+    L14("Yannick Perrot 8000 | 0+1", 40),
+    L14("41 CERISIERS RUE"),
+    L14("BAR LE DUC 55000 15:20 - 17:20"),
+    L14("79.01km"),
+    L14("UPS AP LOCA EST 999X99", 40),
+    L14("15 RUE DU MARECHAL"),
+    L14("LANNES 14:30 - 17:30"),
+    L14("SAVONNIERES DEVANT"),
+    L14("BAR SAVONNIERES 0639980007"),
+    L14("DEVANT BAR 55000"),
+    L14("LOCA EST 77.02km"),
+    L14("Eteindre le Diad", 40),
+  ];
+  const knownCities14 = new Set(
+    ["Longeville-en-Barrois", "Bar-le-Duc", "Savonnières-devant-Bar", "Resson", "Culey"].map((c) => looseCommune(normalizeCity(c)))
+  );
+  const res14 = parseAddressList(lines14, { knownCities: knownCities14 });
+  assertEqual(res14.length, 4, "4 clients exactement (pas 8+ par sur-decoupage, pied d'ecran ignore)");
+  assertEqual(res14[0].rue, "1 RUE DES ALLIES", "relai : rue");
+  assertEqual(res14[0].cp, "55000", "relai : CP seul sur sa ligne capture");
+  assertEqual(res14[0].ville, "LONGEVILLE-EN-BARROIS", "relai : commune reconnue malgre creneau/telephone fusionnes");
+  assertEqual(res14[1].nom, "MARCHAL KEVIN", "client 2 : nom sans le badge '8000 | 0+1'");
+  assertEqual(res14[1].rue, "1 ALLIES RUE", "client 2 : rue");
+  assertEqual(res14[1].ville, "LONGEVILLE EN BARROIS", "client 2 : ville sans le creneau fusionne");
+  assertEqual(res14[1].cp, "55000", "client 2 : CP");
+  assertEqual(res14[2].nom, "Yannick Perrot", "client 3 : nom sans badge");
+  assertEqual(res14[2].cp, "55000", "client 3 : cp extrait de 'BAR LE DUC 55000 15:20 - 17:20'");
+  assertEqual(res14[3].cp, "55000", "client 4 : UN seul bloc malgre commune repliee + telephone + 999X99");
+  assertEqual((res14[3].rue || "").startsWith("15 RUE DU MARECHAL LANNES"), true, "client 4 : la rue commence par la vraie rue");
+}
+
+console.log("\n=== Cas 15 : video du terminal, bruit AU MILIEU des lignes (retour terrain 2026-09-01) ===");
+{
+  // Transcrit des captures reelles de l'ecran de verification : le bruit de
+  // la colonne de droite se retrouve fusionne AU MILIEU du texte utile, et
+  // plusieurs clients tombent dans un seul bloc (l'ecart vertical disparait
+  // quand l'OCR fusionne des lignes).
+  let y15 = 0;
+  const L15 = (text, gapBefore = 4) => {
+    y15 += gapBefore + 20;
+    return { text, bbox: { x0: 0, y0: y15, x1: 300, y1: y15 + 20 } };
+  };
+  const knownCities15 = new Set(
+    ["Bar-le-Duc", "Longeville-en-Barrois", "Ligny-en-Barrois", "Resson"].map((c) => looseCommune(normalizeCity(c)))
+  );
+  const knownCps15 = new Set(["55000", "55500", "55210"]);
+
+  // (a) bruit collé au nom et à la ville, un seul vrai client
+  const clientA = parseAddressList(
+    [L15("nnick Perrot 8000 | 0:"), L15("41 CERISIERS RUE"), L15("BAR LE DUC 15:20-17:20 ©"), L15("55000")],
+    { knownCities: knownCities15, knownCps: knownCps15 }
+  );
+  assertEqual(clientA.length, 1, "(a) un seul client");
+  assertEqual(clientA[0].nom, "nnick Perrot", "(a) nom nettoye du badge '8000 | 0:'");
+  assertEqual(clientA[0].rue, "41 CERISIERS RUE", "(a) rue");
+  assertEqual(clientA[0].cp, "55000", "(a) CP");
+
+  // (b) bloc FUSIONNE : deux clients, deux CP -> doit etre recoupe
+  const fusionne = parseAddressList(
+    [
+      L15("12.61km Q OPTICIENS KRYS 8000 | 0+1"),
+      L15("7 ANDRE MAGINOT 11:30-13:30 ©"),
+      L15("BAR-LE-DUC"),
+      L15("55000"),
+      L15("PIERSON LEA 8000 | 0+2"),
+      L15("11 PEUPLIERS BLVD"),
+      L15("BAR LE DUC 11:40 - 13:40 ©"),
+      L15("55000"),
+    ],
+    { knownCities: knownCities15, knownCps: knownCps15 }
+  );
+  assertEqual(fusionne.length, 2, "(b) le bloc fusionne est recoupe en 2 clients");
+  assertEqual(fusionne[0].rue, "7 ANDRE MAGINOT", "(b) client 1 : rue sans le creneau");
+  assertEqual(fusionne[1].rue, "11 PEUPLIERS BLVD", "(b) client 2 : rue");
+
+  // (c) faux codes postaux inventes par l'OCR -> aucun client fabrique
+  const fauxCp = parseAddressList(
+    [L15("11:30-13:30 ® ., 55014 é"), L15("EXELMANS RUE BARYE DUC, 55096"), L15("35 AP LOCA EST 8000 | 0+1 @ 4 BAR VOIE lo RESSON 55000 15:50 - 17:50 (©, 99999")],
+    { knownCities: knownCities15, knownCps: knownCps15 }
+  );
+  assertEqual(
+    fauxCp.every((b) => !b.cp || knownCps15.has(b.cp)),
+    true,
+    "(c) aucun CP invente (55014/55096/99999) n'est retenu"
+  );
+
+  // (d) residus purs : jamais retenus comme clients
+  for (const bruit of ["n° 1.73km Q", "8000 | 0+1 RD = -Itinéraire,", "0639980008 & * 2.24km Q,", "A9 9.73km Q"]) {
+    const r = parseAddressList([L15(bruit)], { knownCities: knownCities15, knownCps: knownCps15 });
+    assertEqual(r.length, 0, `(d) residu ecarte : ${bruit}`);
+  }
+}
+
+console.log("\n=== Cas 16 : marqueurs de distance, chrome telephone, badges a espace (terrain 2026-09-01 soir) ===");
+{
+  let y16 = 0;
+  const L16 = (text, gapBefore = 4) => {
+    y16 += gapBefore + 20;
+    return { text, bbox: { x0: 0, y0: y16, x1: 300, y1: y16 + 20 } };
+  };
+  const knownCities16 = new Set(["Bar-le-Duc", "Velaines"].map((c) => looseCommune(normalizeCity(c))));
+  const knownCps16 = new Set(["55000", "55500"]);
+  const opts16 = { knownCities: knownCities16, knownCps: knownCps16 };
+
+  // (a) FUSION coupee sur les marqueurs de distance. Disposition FIDELE au
+  // terminal : chaque fiche porte bien sa ligne "COMMUNE CP" (verifie sur le
+  // compte rendu OCR d'une vraie video, images 4/5/7), ce que la premiere
+  // version de ce cas omettait pour le client KULLMANN.
+  const fusion = parseAddressList(
+    [
+      L16("10.5km Q PE 2 KULLMANN IMP 10:30 - 12:30 ®"),
+      L16("BAR LE DUC 55000"),
+      L16("10.84km Q EURLGREGAUTO 8000 | 0+1 D 4 9EME RI AVE BAR-LE-DUC"),
+      L16("55000 10:30-12:30 © ,, BAR LE DUC"),
+    ],
+    opts16
+  );
+  assertEqual(fusion.length >= 2, true, "(a) la fusion est coupee sur les marqueurs de distance");
+  assertEqual(
+    fusion.some((b) => (b.rue || "").includes("KULLMANN")),
+    true,
+    "(a) le premier client (KULLMANN) est isole"
+  );
+
+  // (a-bis) L'intention d'origine de (a) : le marqueur de distance coupe TOUT
+  // SEUL, sans l'aide d'un second code postal. Verifiee sans base de reference
+  // (Sets vides), ou le filtre "fiche localisable" ne s'applique pas -- c'est
+  // bien le decoupage qu'on teste ici, pas la retention.
+  const fusionSansRef = parseAddressList([
+    L16("10.5km Q PE 2 KULLMANN IMP 10:30 - 12:30 ®"),
+    L16("10.84km Q EURLGREGAUTO 8000 | 0+1 D 4 9EME RI AVE BAR-LE-DUC"),
+    L16("55000 10:30-12:30 © ,, BAR LE DUC"),
+  ]);
+  assertEqual(fusionSansRef.length >= 2, true, "(a-bis) le marqueur de distance coupe sans second CP");
+  assertEqual(
+    fusionSansRef.some((b) => (b.rue || "").includes("KULLMANN")),
+    true,
+    "(a-bis) KULLMANN isole sans base de reference"
+  );
+
+  // (b) chrome du telephone + de l'appli : jamais un client
+  for (const chrome of [
+    "19 F-Bouyques Telecom (2) 9 © 4 80% M = itineraire 2 @ : LISTE(63) | CARTE SYNTHESE | CREER",
+    "LISTE(58) — CARTE -— SYNTHÈSE — CRÉER",
+  ]) {
+    assertEqual(parseAddressList([L16(chrome)], opts16).length, 0, `(b) chrome ecarte : ${chrome.slice(0, 28)}...`);
+  }
+
+  // (c) distance en METRES (pas seulement km)
+  const metres = parseAddressList([L16("717.01m Q 3 ANTOINE LAVOISIERALL 4000 | 1140"), L16("55500")], opts16);
+  assertEqual(
+    metres.every((b) => !/717/.test(b.rue || "")),
+    true,
+    "(c) la distance en metres est retiree de la rue"
+  );
+
+  // (d) badge a ESPACE ("4000 | 140 87") nettoye du nom
+  const badge = parseAddressList([L16("EDF 4000 | 140 87"), L16("2 NOTRE DAME RUE"), L16("55500")], opts16);
+  assertEqual(badge.length, 1, "(d) un seul client");
+  assertEqual(badge[0].nom, "EDF", "(d) nom nettoye du badge a espace");
+}
+
+console.log("\n=== Cas 17 : compte rendu OCR d'une vraie video (63 arrets, terrain 2026-09-01) ===");
+{
+  let y17 = 0;
+  const L17 = (text, gapBefore = 4) => {
+    y17 += gapBefore + 20;
+    return { text, bbox: { x0: 0, y0: y17, x1: 300, y1: y17 + 20 } };
+  };
+  const knownCities17 = new Set(
+    ["Bar-le-Duc", "Fains-Veel", "Velaines", "Ligny-en-Barrois", "Louppy-le-Chateau"].map((c) =>
+      looseCommune(normalizeCity(c))
+    )
+  );
+  const knownCps17 = new Set(["55000", "55500", "55800"]);
+  const opts17 = { knownCities: knownCities17, knownCps: knownCps17 };
+
+  // (a) Ordre "<rue> <VILLE> <CP>" sur une seule ligne, avec la ponctuation
+  // parasite que l'OCR colle derriere le code postal. Avant : la commune
+  // restait dans la rue et le CP n'etait pas vu du tout -> "a verifier".
+  const villeAvantCp = parseAddressList([L17("AUDITION HUSSON"), L17("1 VERDUN RUE BAR LE DUC 55000 )")], opts17);
+  assertEqual(villeAvantCp.length, 1, "(a) une seule fiche");
+  assertEqual(villeAvantCp[0].rue, "1 VERDUN RUE", "(a) la commune est retiree de la rue");
+  assertEqual(villeAvantCp[0].cp, "55000", "(a) le CP est lu malgre la parenthese qui le suit");
+  assertEqual(villeAvantCp[0].ville, "BAR LE DUC", "(a) la commune est extraite");
+
+  // (b) Meme chose avec un "@" parasite et une commune ecrite sans tiret.
+  const arobase = parseAddressList([L17("crea tif"), L17("50 CHATEAU RUE FAINS VEEL 55000 @")], opts17);
+  assertEqual(arobase.length, 1, "(b) une seule fiche");
+  assertEqual(arobase[0].rue, "50 CHATEAU RUE", "(b) rue propre");
+  assertEqual(arobase[0].ville, "FAINS VEEL", "(b) commune extraite malgre le @");
+
+  // (c) FRAGMENTS coupes par le bord HAUT de l'ecran pendant le defilement :
+  // ni CP ni commune (ces lignes-la sont restees hors du cadre). Ils
+  // representaient une grande part des "a verifier" d'une video reelle et
+  // n'etaient geocodables dans aucun cas.
+  for (const fragment of [
+    "ERATION AVE FAINSAUEEL DRDLU",
+    "SSAGE RUE D ILLE EN BARROIS",
+    "7ECHAL LANNES D 11ERES DEVANT",
+  ]) {
+    assertEqual(parseAddressList([L17(fragment)], opts17).length, 0, `(c) fragment ecarte : ${fragment.slice(0, 24)}`);
+  }
+
+  // (d) ... mais une fiche ENTIERE reste retenue, meme sans nom lisible.
+  const entiere = parseAddressList([L17("10 LIBERATION AVE"), L17("FAINS-VEEL 55000")], opts17);
+  assertEqual(entiere.length, 1, "(d) fiche entiere conservee");
+  assertEqual(entiere[0].cp, "55000", "(d) CP present");
+
+  // (e) Sans base de reference, aucun filtrage supplementaire : le repli
+  // d'avant l'import BAN reste identique.
+  assertEqual(parseAddressList([L17("ERATION AVE FAINSAUEEL DRDLU")]).length, 1, "(e) sans reference, rien n'est filtre");
+}
+
+console.log("\n=== Cas 18 : video reelle de 66 arrets (terrain 2026-09-02) -- positions reelles, CP suivi d'un creneau mal lu ===");
+{
+  // Lignes REELLES du compte rendu OCR (texte + position verticale), pour les
+  // images qui portaient les six fiches perdues au build 121. Toutes avaient
+  // la meme cause : le CP n'etait lu que s'il terminait la ligne, or ce
+  // terminal ecrit "<COMMUNE> <CP> <creneau>" et l'OCR massacre le creneau.
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const knownCities18 = new Set(
+    ["Euville", "Sorcy-Saint-Martin", "Commercy", "Sauvigny", "Sepvigny", "Chalaines",
+      "Rigny-la-Salle", "Laneuville-au-Rupt", "Domgermain", "Vignot"].map((c) => looseCommune(normalizeCity(c)))
+  );
+  const opts18 = { knownCities: knownCities18, knownCps: new Set(["55190", "55200", "55140", "54119", "54113"]) };
+  const rues = (r) => r.map((b) => b.rue);
+
+  // (a) image 7 : "EUVILLE 55200 40 - 11:40 ©)" -- creneau tronque derriere le CP
+  const img7 = parseAddressList([
+    R(365, 398, "A° 28.78km"), R(417, 452, "HUMBERT SANDRINE 8000 | 0+1"), R(449, 465, "14 ECOLES RUE"),
+    R(463, 493, "SORCY ST MARTIN 55190 09:20- 11:20 (©"), R(636, 653, "17 SOUS LES VIGNES RUE"),
+    R(663, 679, "EUVILLE 55200"), R(753, 774, "a"), R(798, 814, "EST RAMONAGE"),
+    R(825, 841, "30 SOUS LES VIGNES RUE"), R(846, 878, "EUVILLE 55200 09:30 - 11:30 @ ="),
+    R(934, 971, "# a 27.43km Q"), R(974, 1014, "Morelli bastien Toner"),
+    R(993, 1032, "2 SAULES CHMN 8000 | 0+1 3"), R(1040, 1070, "EUVILLE 55200 40 - 11:40 ©)"),
+  ], opts18);
+  assertEqual(img7.length, 4, "(a) quatre fiches");
+  const morelli = img7.find((b) => (b.nom || "").startsWith("Morelli"));
+  assertEqual(morelli && morelli.rue, "2 SAULES CHMN", "(a) Morelli retrouve, rue propre (plus de residu '3')");
+  assertEqual(morelli && morelli.cp, "55200", "(a) Morelli : CP lu malgre le creneau tronque");
+  assertEqual(morelli && morelli.ville, "EUVILLE", "(a) Morelli : commune");
+  const humbert = img7.find((b) => (b.nom || "").startsWith("HUMBERT"));
+  assertEqual(humbert && humbert.rue, "14 ECOLES RUE", "(a) 'SORCY ST MARTIN' detache de la rue (ST = SAINT)");
+  assertEqual(humbert && humbert.ville, "SORCY ST MARTIN", "(a) commune abregee reconnue");
+
+  // (b) image 9 : "EUVILLE 55200 09:40 - 11:40 (D" -- une lettre parasite apres le creneau
+  const img9 = parseAddressList([
+    R(392, 428, "Josiane BRETON 8000 | 0+1 v"), R(425, 449, "27 PIERRE D'OR RUE ‘"),
+    R(446, 471, "EUVILLE 55200 09:40 - 11:40 (D"), R(529, 573, "AR 30.1km Q"),
+    R(588, 624, "ODILE MOREL 8000 | 0+1 D"), R(619, 635, "SORCY RTE"), R(635, 666, "EUVILLE 55200 09:50 - 11:50 © ,"),
+  ], opts18);
+  const breton = img9.find((b) => (b.nom || "").startsWith("Josiane"));
+  assertEqual(breton && breton.nom, "Josiane BRETON", "(b) Josiane BRETON retrouvee, sans residu 'v'");
+  assertEqual(breton && breton.rue, "27 PIERRE D'OR RUE", "(b) rue sans l'apostrophe parasite");
+  assertEqual(breton && breton.cp, "55200", "(b) CP lu malgre '(D'");
+
+  // (c) image 18 : marqueur de distance reduit a "a" -> la coupure par CP
+  // doit separer trois clients consecutifs.
+  const img18 = parseAddressList([
+    R(426, 465, "Gerardin Loic 8000 | 0+1 v"), R(455, 472, "9 VERGERS RUE"), R(476, 509, "COMMERCY 55200 10:40-12:40 © ,"),
+    R(622, 668, "Mme vautrin massot 8000 | 0+1 VU"), R(625, 678, "LS) sylvie"),
+    R(675, 709, "17 VERGERS RUE 10:40 - 12:40 © «"), R(706, 725, "COMMERCY 55200"), R(772, 794, "a"),
+    R(805, 845, "LHERITIER MAINTENANCE ©"), R(846, 865, "14 ARTILLEURS AVE"), R(874, 909, "COMMERCY 55200 10:40 - 12:40 © q"),
+  ], opts18);
+  assertEqual(rues(img18), ["9 VERGERS RUE", "17 VERGERS RUE", "14 ARTILLEURS AVE"], "(c) trois clients separes malgre le marqueur perdu");
+  assertEqual(img18[2].ville, "COMMERCY", "(c) 'q' n'est plus pris pour la commune");
+
+  // (d) image 35/40 : "SEPVIGNY 55140 1220-1420", "DOMGERMAIN 54119 @ A", "15:10-1710"
+  const img35 = parseAddressList([
+    R(577, 629, "… SANTORO BRUNO 8000 | TS"), R(614, 634, "8 PETITE FONTAINE RUE"), R(640, 672, "SEPVIGNY 55140 1220-1420 ® ,"),
+  ], opts18);
+  assertEqual(img35.length === 1 && img35[0].cp, "55140", "(d) SANTORO : CP lu malgre '1220-1420'");
+  assertEqual(img35[0] && img35[0].ville, "SEPVIGNY", "(d) SANTORO : commune");
+  const img40 = parseAddressList([
+    R(619, 665, "Hanus Gerard 8000 | 0+1 VU"), R(646, 665, "39 CHENEVIERES RUE"), R(673, 706, "DOMGERMAIN 54119 15:00 - 17:00 @ A"),
+    R(763, 801, "a 11.64km Q"), R(809, 832, "maison individuelle ; 7"), R(828, 847, "8000 | 0+1"),
+    R(823, 860, "7 ROSIERE RUE ! ©"), R(857, 905, "DOMGERMAIN 54119 15:10-1710 © ,"),
+  ], opts18);
+  assertEqual(rues(img40), ["39 CHENEVIERES RUE", "7 ROSIERE RUE"], "(d) Hanus Gerard et 'maison individuelle' retrouves");
+  assertEqual(img40.map((b) => b.cp), ["54119", "54119"], "(d) les deux CP lus");
+
+  // (e) rangee d'icone sans distance ("Û 27.11km 9" -> "9") : plus jamais
+  // le debut d'une rue ("9 Remi colson v 5 CHARMILLES RUE" observe).
+  const img30 = parseAddressList([
+    R(396, 458, "Û 27.11km 9"), R(475, 511, "Remi colson 8000 | 0+1 v"), R(502, 519, "5 CHARMILLES RUE"),
+    R(523, 554, "BUREY EN VAUX 55140 12:10-1410 (© ,"),
+  ], { knownCities: new Set([looseCommune(normalizeCity("Burey-en-Vaux"))]), knownCps: new Set(["55140"]) });
+  assertEqual(img30.length === 1 && img30[0].rue, "5 CHARMILLES RUE", "(e) residu du marqueur ecarte de la rue");
+  assertEqual(img30[0] && img30[0].nom, "Remi colson", "(e) nom propre");
+}
+
+console.log("\n=== Cas 19 : scan par PHOTOS d'une vraie tournee (44 arrets, terrain 2026-09-02) ===");
+{
+  // Lignes REELLES du compte rendu OCR du premier scan par photos. L'OCR est
+  // bien plus propre qu'en video ; les erreurs restantes sont d'autres
+  // familles : un chiffre du CP mal lu (mais formant un AUTRE CP valide),
+  // des residus d'icones, des noms sur deux lignes.
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const villes19 = [
+    ["Commercy", "55200"], ["Vaucouleurs", "55140"], ["Sauvigny", "55140"], ["Rigny-la-Salle", "55140"],
+    ["Broussey-en-Blois", "55190"], ["Domgermain", "54119"], ["Mont-le-Vignoble", "54113"], ["Uruffe", "54112"],
+    ["Gye", "54113"], ["Blenod-les-Toul", "54113"], ["Stenay", "55700"],
+  ];
+  const knownCities19 = new Set(villes19.map(([c]) => looseCommune(normalizeCity(c))));
+  const knownCps19 = new Set(villes19.map(([, cp]) => cp));
+  const cityCps19 = new Map();
+  for (const [c, cp] of villes19) {
+    const k = looseCommune(normalizeCity(c));
+    if (!cityCps19.has(k)) cityCps19.set(k, new Set());
+    cityCps19.get(k).add(cp);
+  }
+  const opts19 = { knownCities: knownCities19, knownCps: knownCps19, cityCps: cityCps19 };
+
+  // (a) "COMMERCY 55700" : 55700 (Stenay) est un vrai CP de la zone, seule
+  // la commune permet de le corriger.
+  const img2 = parseAddressList([
+    R(663, 694, "CDM COMMERCY UTML"), R(718, 749, "22 CHARLES DE GAULLE"), R(772, 803, "PL"), R(827, 855, "COMMERCY 55700"),
+    R(930, 1008, "# #e 1.17km Q"), R(1026, 1116, "BIJOUTERIE CENTRALE 8000 | 0+1 D"), R(1097, 1131, "5 CHARLES DE GAULLE PL"),
+    R(1135, 1197, "COMMERCY 55200 10:30 - 12:30 (©"),
+  ], opts19);
+  assertEqual(img2.map((b) => b.cp), ["55200", "55200"], "(a) le CP mal lu est corrige par la commune");
+  assertEqual(img2[1].nom, "BIJOUTERIE CENTRALE", "(a) majuscule isolee retiree du nom");
+  assertEqual(img2[0].rue, "22 CHARLES DE GAULLE PL", "(a) rue repliee sur deux lignes");
+
+  // (b) nom sur deux lignes, "@p" en fin de nom, "COMMERCY COMMERCY" comme
+  // ligne de commune d'une fiche de ramasse
+  const img3 = parseAddressList([
+    R(951, 1024, "Mme vautrin massot 8000 | 0+1 ç"), R(1022, 1053, "sylvie"), R(1042, 1102, "17 VERGERS RUE 10:40 - 12:40 © e"),
+    R(1117, 1151, "COMMERCY 55200 ="), R(1200, 1275, "A9 1.28km Q"), R(1304, 1369, "LHERITIER MAINTENANCE | 8000 |0+2@p"),
+    R(1360, 1396, "14 ARTILLEURS AVE"), R(1387, 1445, "COMMERCY 55200 10:40 - 12:40 ©"), R(1545, 1618, "A° 1.5km Q"),
+    R(1650, 1714, "CHAUSSEA COMMERCY oSRO3E"), R(1683, 1779, "nG CHEMIN DES VERPILLERES"), R(1732, 1789, "COMMERCY COMMERCY 09:00 -16:00 (©"),
+    R(1808, 1837, "55200"),
+  ], opts19);
+  assertEqual(img3.map((b) => b.nom), ["Mme vautrin massot sylvie", "LHERITIER MAINTENANCE", "CHAUSSEA COMMERCY"], "(b) noms : deux lignes jointes, residus retires");
+  assertEqual(img3[2].rue, "CHEMIN DES VERPILLERES", "(b) 'nG' retire, commune non collee a la rue");
+  assertEqual(img3[2].ville, "COMMERCY", "(b) 'COMMERCY COMMERCY' reconnu comme la commune");
+
+  // (c) "55140 |" n'est pas un badge ; CP complete par la commune ; residus
+  const img8 = parseAddressList([
+    R(1303, 1367, "PATRICK MASSON 8000 | 041 ÉD"), R(1358, 1390, "GRANDE RUE"), R(1385, 1441, "RIGNY-LA-SALLE 55140 | 12:40-14:40 (©"),
+  ], opts19);
+  assertEqual(img8[0] && img8[0].cp, "55140", "(c) '55140 |' garde son CP");
+  const img4 = parseAddressList([R(1031, 1063, "3 BASSE RUE ["), R(1066, 1124, "BROUSSEY EN BLOIS 11:10-13:10 © ,")], opts19);
+  assertEqual(img4[0] && img4[0].cp, "55190", "(c) CP absent complete par la commune");
+  const img7 = parseAddressList([R(1744, 1779, "Poirot Gilbert"), R(1731, 1829, "19 NOYERS RUE 3000 ( 9#) &"), R(1815, 1879, "SAUVIGNY 55140 12:10 - 14:10 © ë")], opts19);
+  assertEqual(img7[0] && img7[0].rue, "19 NOYERS RUE", "(c) '3000 ( 9#) &' retire de la rue");
+  const img9 = parseAddressList([R(1374, 1462, "maison individuelle 3000 | 0+1 V©"), R(1421, 1480, "4 7 ROSIERE RUE"), R(1476, 1532, "DOMGERMAIN 54119 15:10-17:10 ®")], opts19);
+  assertEqual(img9[0] && img9[0].rue, "7 ROSIERE RUE", "(c) icone lue '4' devant le numero retiree");
+  assertEqual(img9[0] && img9[0].nom, "maison individuelle", "(c) nom propre");
+  assertEqual(parseAddressList([R(0, 20, "EURLGREGAUTO"), R(24, 44, "4 9EME RI AVE"), R(48, 68, "COMMERCY 55200")], opts19)[0].rue, "4 9EME RI AVE", "(c) '4 9EME RI AVE' garde son numero");
+
+  // (d) raison sociale longue sur deux lignes, jeton parasite en tete, badge
+  // residuel devant un numero
+  const img10 = parseAddressList([
+    R(646, 714, "SYND MIXTE DESEAUXDU | 8000} 041 @D"), R(695, 723, "TOULOIS"), R(733, 790, "31 LEOPOLD CABRET RUE 15:20-17:20(® ,"),
+    R(793, 823, "MONT-LE-VIGNOBLE 54113 :"), R(890, 956, "A° 25.72km Q"), R(972, 1058, "eus MOUGEL FABRICE 8000 | 0+1"),
+    R(1040, 1070, "8 AUBEPINES RUE"), R(1076, 1132, "URUFFE 54112 15:20 - 17:20 ©"), R(1580, 1646, "A° 26.87km ç"),
+    R(1683, 1747, "8000 | 0+2 3"), R(1726, 1758, "5 SAINT MANSUY RUE"), R(1765, 1822, "GYE 54113 15:30 - 17:30 ® …"),
+  ], opts19);
+  assertEqual(img10.map((b) => b.nom), ["SYND MIXTE DESEAUXDU TOULOIS", "MOUGEL FABRICE", null], "(d) noms");
+  assertEqual(img10[2].rue, "5 SAINT MANSUY RUE", "(d) residu de badge '3' retire devant le numero");
+
+  // (e) code de ramasse dans le nom, creneau "18:0C", commune en minuscules
+  const img11 = parseAddressList([
+    R(1126, 1169, "DOMAINE CLAUDE A1912WF"), R(1147, 1240, "nG VOSGIEN"), R(1217, 1249, "37 - 39 Route de Toul 09:00 - 18:0C"),
+    R(1265, 1296, "Blenod-les-Toul"), R(1311, 1342, "Blenod-les-Toul 54113"),
+  ], opts19);
+  assertEqual(img11[0] && img11[0].nom, "DOMAINE CLAUDE VOSGIEN", "(e) code de ramasse retire, nom joint");
+  assertEqual(img11[0] && img11[0].rue, "37 - 39 Route de Toul", "(e) creneau '18:0C' retire de la rue");
+  assertEqual(img11[0] && img11[0].cp, "54113", "(e) CP");
+}
+
+console.log("\n=== Cas 20 : recadrages reels d'un terminal (terrain 2026-09-04) -- CP + icone, commune coupee sur le tiret, commune abregee ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const villes20 = [
+    ["Vieville-sous-les-Cotes", "55210"], ["Vigneulles-les-Hattonchatel", "55210"], ["Heudicourt-sous-les-Cotes", "55210"],
+    ["Villers-sous-Preny", "54700"], ["Labeuville", "55160"], ["Saint-Mihiel", "55300"], ["Saint-Maurice-sous-les-Cotes", "55210"],
+  ];
+  const knownCities20 = new Set(villes20.map(([c]) => looseCommune(normalizeCity(c))));
+  const opts20 = { knownCities: knownCities20, knownCps: new Set(villes20.map(([, cp]) => cp)) };
+
+  // (a) image 1 : "552100" = 55210 + l'icone "maison" lue "0" ; commune
+  // repliee sur le tiret.
+  const img1 = parseAddressList([
+    R(49, 87, "DOMAINE DE"), R(100, 140, "MEUSSAMONT"), R(35, 103, "8000 | 0+1 v"),
+    R(123, 191, "11 ARNAY-LE-DUCRUE | 12:10-14100 ,"), R(191, 244, "VIEVILLE-SOUS :"), R(258, 295, "-LES-COTES"),
+    R(291, 375, "552100 57.02km Q"),
+  ], opts20);
+  assertEqual(img1.length, 1, "(a) la fiche est retenue");
+  assertEqual(img1[0] && img1[0].cp, "55210", "(a) CP lu malgre le chiffre de l'icone colle");
+  assertEqual(img1[0] && img1[0].ville, "VIEVILLE-SOUS-LES-COTES", "(a) commune recollee sur le tiret");
+  assertEqual(img1[0] && img1[0].nom, "DOMAINE DE MEUSSAMONT", "(a) nom sur deux lignes");
+
+  // (b) image 4 : deux fiches, commune coupee APRES le tiret, puis commune
+  // abregee ("HEUDICOURT" pour Heudicourt-sous-les-Cotes).
+  const img4 = parseAddressList([
+    R(19, 104, "COMPAGNIE DES 8000 | 0+2"), R(81, 120, "FROMAGES &"), R(127, 199, "SAINT-BENOIT RTE 12:30-14:30 (D «"),
+    R(184, 268, "VIGNEULLES-LES- °"), R(268, 305, "HATTONCHATEL"), R(324, 408, "552109 53.19km Q"),
+    R(454, 535, "MON TECHNICIEN 8000 | 0+1 D"), R(516, 554, "12 LAC RUE"), R(558, 627, "HEUDICOURT 55210 12:30 - 14:30 ®"),
+    R(752, 845, "@ kb 51.14km Q"),
+  ], opts20);
+  assertEqual(img4.length, 2, "(b) deux fiches");
+  assertEqual(img4[0] && img4[0].ville, "VIGNEULLES-LES-HATTONCHATEL", "(b) commune recollee (tiret en fin de ligne)");
+  assertEqual(img4[0] && img4[0].cp, "55210", "(b) CP lu malgre '552109'");
+  assertEqual(img4[0] && img4[0].rue, "SAINT-BENOIT RTE", "(b) rue propre");
+  assertEqual(img4[1] && img4[1].rue, "12 LAC RUE", "(b) la commune abregee n'est plus collee a la rue");
+  assertEqual(img4[1] && img4[1].ville, "HEUDICOURT", "(b) commune abregee reconnue par prefixe unique");
+  assertEqual(img4[1] && img4[1].cp, "55210", "(b) CP");
+
+  // (c) garde-fous du prefixe : trop court, ou ambigu, jamais accepte
+  const ambigu = parseAddressList([R(0, 20, "3 GRANDE RUE"), R(24, 44, "SAINT 55300")], opts20);
+  assertEqual(ambigu[0] && ambigu[0].ville, null, "(c) 'SAINT' commence plusieurs communes : pas une commune");
+  const court = parseAddressList([R(0, 20, "3 GRANDE RUE"), R(24, 44, "VIEVI 55210")], opts20);
+  assertEqual(court[0] && court[0].ville, null, "(c) prefixe de 5 lettres : refuse");
+  // Sans base, un jeton de 6 chiffres n'est jamais un CP.
+  assertEqual(parseAddressList([R(0, 20, "11 ARNAY RUE"), R(24, 44, "VIEVILLE 552100")])[0].cp, null, "(c) '552100' sans base : pas un CP");
+}
+
+console.log("\n=== Cas 21 : 'LT' = lotissement (retour terrain) ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const opts21 = {
+    knownCities: new Set(["Onville", "Vandieres"].map((c) => looseCommune(normalizeCity(c)))),
+    knownCps: new Set(["54890"]),
+  };
+
+  // Un lotissement n'a souvent PAS de numero de voie : sans le mot-cle "LT",
+  // la ligne ne demarrait aucune adresse (ni chiffre en tete, ni type de voie
+  // reconnu) et partait en continuation du nom -- la fiche se retrouvait sans
+  // rue exploitable.
+  const sansNumero = parseAddressList([
+    R(0, 40, "MARTIN SOPHIE 8000 | 0+1 D"),
+    R(44, 84, "LES ROSES LT"),
+    R(88, 128, "ONVILLE 54890 12:30 - 14:30 ®"),
+  ], opts21);
+  assertEqual(sansNumero.length, 1, "(a) la fiche est retenue");
+  assertEqual(sansNumero[0] && sansNumero[0].rue, "LES ROSES LT", "(a) la ligne 'LT' est bien la rue");
+  assertEqual(sansNumero[0] && sansNumero[0].nom, "MARTIN SOPHIE", "(a) le nom n'a pas avale la ligne du lotissement");
+  assertEqual(sansNumero[0] && sansNumero[0].ville, "ONVILLE", "(a) commune");
+
+  // Type de voie en tete, toujours sans numero.
+  const enTete = parseAddressList([
+    R(0, 40, "DUPONT JEAN 8000 | 0+1 D"),
+    R(44, 84, "LT DU CHENE"),
+    R(88, 128, "ONVILLE 54890"),
+  ], opts21);
+  assertEqual(enTete[0] && enTete[0].rue, "LT DU CHENE", "(b) 'LT' en tete reconnu comme rue");
+}
+
+console.log("\n=== Cas 22 : compte rendu photos reel du 2026-09-08 (9 images, 35 fiches) ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const villes22 = [
+    ["Dieue-sur-Meuse", "55320"], ["Cousances-les-Triconville", "55500"], ["Cousances-les-Forges", "55170"],
+    ["Ranzieres", "55300"], ["Chauvoncourt", "55300"], ["Rupt-en-Woevre", "55320"],
+    ["Petit-Failly", "54260"], ["Grand-Failly", "54260"],
+  ];
+  const knownCities22 = new Set(villes22.map(([c]) => looseCommune(normalizeCity(c))));
+  const opts22 = { knownCities: knownCities22, knownCps: new Set(villes22.map(([, cp]) => cp)) };
+
+  // (a) commune abregee a 5 lettres, avec son CP sur la meme ligne : "DIEUE"
+  // pour Dieue-sur-Meuse. Refusee pour une lettre de trop peu, elle finissait
+  // DANS la rue et l'arret partait sans ville.
+  const dieue = parseAddressList([
+    R(1630, 1705, "UN TEMPS POUR SOI 8000 | 0+1 v"),
+    R(1680, 1713, "3 GEORGES BEAUMONT"),
+    R(1729, 1758, "ALL"),
+    R(1778, 1810, "DIEUE 55320"),
+  ], opts22);
+  assertEqual(dieue.length, 1, "(a) une fiche");
+  assertEqual(dieue[0] && dieue[0].ville, "DIEUE", "(a) commune de 5 lettres acceptee quand le CP est sur la ligne");
+  assertEqual(dieue[0] && dieue[0].rue, "3 GEORGES BEAUMONT ALL", "(a) la rue garde son type de voie replie, sans la commune");
+  assertEqual(dieue[0] && dieue[0].nom, "UN TEMPS POUR SOI", "(a) nom");
+
+  // (a-bis) le garde-fou : SANS CP sur la ligne, un mot de 5 lettres qui
+  // commence une commune reste un nom. "PETIT" (Petit-Failly) est aussi l'un
+  // des noms de famille les plus repandus.
+  const petit = parseAddressList([
+    R(0, 30, "PETIT"),
+    R(34, 64, "3 HAUTE RUE"),
+    R(68, 98, "RANZIERES 55300"),
+  ], opts22);
+  assertEqual(petit[0] && petit[0].nom, "PETIT", "(a-bis) 'PETIT' seul reste un nom, pas la commune Petit-Failly");
+  assertEqual(petit[0] && petit[0].ville, "RANZIERES", "(a-bis) la vraie commune est bien lue");
+
+  // (b) commune coupee EN PLEIN MOT, pas sur le tiret : "COUSANCES-LE" +
+  // "S-TRICONVILLE". Recollee seulement parce que la base reconnait le
+  // resultat.
+  const cousances = parseAddressList([
+    R(926, 958, "1 ULYSSE GUINARD RUE"),
+    R(976, 1008, "COUSANCES-LE"),
+    R(1027, 1059, "S-TRICONVILLE"),
+    R(1078, 1108, "55500"),
+  ], opts22);
+  assertEqual(cousances[0] && cousances[0].ville, "COUSANCES-LES-TRICONVILLE", "(b) commune recollee en plein mot");
+  assertEqual(cousances[0] && cousances[0].rue, "1 ULYSSE GUINARD RUE", "(b) la rue ne contient plus la commune");
+  // Jamais sur la seule forme : un fragment qui ne donne aucune commune connue
+  // reste une ligne a part.
+  const pasUneCommune = parseAddressList([
+    R(0, 30, "1 ULYSSE GUINARD RUE"),
+    R(34, 64, "MARTIN-LE"),
+    R(68, 98, "S-DUPONT"),
+    R(102, 132, "55500"),
+  ], opts22);
+  assertEqual(
+    (pasUneCommune[0] && pasUneCommune[0].ville) || null,
+    null,
+    "(b) un faux fragment n'est jamais recolle en commune"
+  );
+
+  // (c) residu d'icone "Qu" (la loupe) seul sur sa ligne : "QU" est un
+  // mot-cle de voie (quai), la ligne passait donc pour une rue et avalait le
+  // nom du client puis la vraie rue.
+  const icone = parseAddressList([
+    R(1383, 1427, "Qu"),
+    R(1455, 1483, "Florian Cordier"),
+    R(1501, 1528, "7 PUITS RUE"),
+    R(1546, 1573, "RANZIERES 55300"),
+  ], opts22);
+  assertEqual(icone[0] && icone[0].nom, "Florian Cordier", "(c) le nom n'est plus avale par le residu d'icone");
+  assertEqual(icone[0] && icone[0].rue, "7 PUITS RUE", "(c) rue propre");
+  // Le meme mot-cle court reste une CONTINUATION valable de rue (cas (a)).
+
+  // (d) "2." (numero de page/residu de badge) seul sur sa ligne, en tete de la
+  // photo suivante : il commencait par un chiffre, passait pour une rue et se
+  // collait devant la vraie -- l'arret devenait un faux doublon de lui-meme,
+  // avec un autre numero de voie.
+  const residuChiffre = parseAddressList([
+    R(697, 716, "2."),
+    R(742, 825, "7 BAR LE DUC ROUT 8000 | 041 =)"),
+    R(794, 832, "CHAUVONCOURT 55300"),
+  ], opts22);
+  assertEqual(residuChiffre[0] && residuChiffre[0].rue, "7 BAR LE DUC ROUT", "(d) le residu '2.' ne fabrique plus un faux numero de voie");
+
+  // (e) queue de badge isolee sur sa ligne par l'OCR ("0+1" separe de ses
+  // "8000 |") : le motif de badge ne la reconnait plus, elle partait dans la
+  // rue ("12 LIBERATION RUE 0+1 MEUSE").
+  const queueBadge = parseAddressList([
+    R(1466, 1498, "12 LIBERATION RUE"),
+    R(1492, 1522, "0+1"),
+    R(1571, 1605, "RANZIERES 55300"),
+  ], opts22);
+  assertEqual(queueBadge[0] && queueBadge[0].rue, "12 LIBERATION RUE", "(e) la queue de badge ne pollue plus la rue");
+}
+
+console.log("\n=== Cas 23 : compte rendu photos reel du 2026-09-09 (12 images, 47 arrets) ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  // Kœur s'ecrit avec la LIGATURE dans la BAN (comme Vandœuvre, Jœuf,
+  // Lalœuf) ; le terminal, lui, ecrit toujours "KOEUR".
+  const villes23 = [
+    ["Kœur-la-Grande", "55300"], ["Kœur-la-Petite", "55300"], ["Sommedieue", "55320"],
+    ["Mecrin", "55300"], ["Andilly", "54200"], ["Menil-la-Tour", "54200"],
+    ["Dieue-sur-Meuse", "55320"], ["Saint-Mihiel", "55300"], ["Les Paroches", "55300"],
+  ];
+  const knownCities23 = new Set(villes23.map(([c]) => looseCommune(normalizeCity(c))));
+  const cityCps23 = new Map();
+  for (const [c, cp] of villes23) {
+    const key = looseCommune(normalizeCity(c));
+    if (!cityCps23.has(key)) cityCps23.set(key, new Set());
+    cityCps23.get(key).add(cp);
+  }
+  const opts23 = { knownCities: knownCities23, knownCps: new Set(villes23.map(([, cp]) => cp)), cityCps: cityCps23 };
+
+  // (a) ligature : la BAN dit "Kœur-la-Grande", le terminal "KOEUR-LA-GRANDE".
+  // Sans expansion des deux cotes, la commune n'etait jamais reconnue et
+  // partait dans la rue.
+  const koeur = parseAddressList([
+    R(925, 964, "lallemand regis"),
+    R(977, 1008, "2 'ETANG RUE"),
+    R(1030, 1059, "KOEUR-LA-GRANDE 55300"),
+  ], opts23);
+  assertEqual(koeur[0] && koeur[0].ville, "KOEUR-LA-GRANDE", "(a) commune a ligature reconnue");
+  assertEqual(koeur[0] && koeur[0].rue, "2 'ETANG RUE", "(a) la commune n'est plus collee a la rue");
+
+  // (b) nom fini par un tiret ("Odette Marchetti-", nom compose coupe) recolle
+  // a la rue suivante par la regle des communes repliees.
+  const tiret = parseAddressList([
+    R(913, 975, "Odette Marchetti-"),
+    R(985, 1015, "6 LAVOIR RUE"),
+    R(1035, 1065, "MECRIN 55300"),
+  ], opts23);
+  assertEqual(tiret[0] && tiret[0].nom, "Odette Marchetti-", "(b) le nom coupe reste un nom");
+  assertEqual(tiret[0] && tiret[0].rue, "6 LAVOIR RUE", "(b) la rue n'a pas avale le nom");
+
+  // (c) "74 A" (residu entre deux fiches) : commencait par un chiffre, donc
+  // pris pour une rue, puis avalait le nom et la vraie rue -- adresse
+  // geocodee au 74 au lieu du 61.
+  const residu = parseAddressList([
+    R(1547, 1607, "74 A"),
+    R(1639, 1704, "COLIN YANN 4000 | 1+0"),
+    R(1690, 1721, "61 TILLEULS RUE"),
+    R(1724, 1780, "ANDILLY 54200 00:00 - 12:00 (©)"),
+  ], opts23);
+  assertEqual(residu[0] && residu[0].nom, "COLIN YANN", "(c) nom rendu au client");
+  assertEqual(residu[0] && residu[0].rue, "61 TILLEULS RUE", "(c) bon numero de voie");
+
+  // (d) commune a une lettre pres + CP d'une autre commune, tous deux mal lus
+  // ("SOMMEDIEUF 55270") : arret fantome en double du meme client. La commune
+  // reconnue, cpParCommune corrige le CP et le dedoublonnage peut operer.
+  const floue = parseAddressList([
+    R(694, 745, "rene didier 8000 | 0+1 7"),
+    R(700, 783, "8 PONT RUE MEUSE '"),
+    R(806, 837, "SOMMEDIEUF 55270"),
+  ], { ...opts23, knownCps: new Set([...opts23.knownCps, "55270"]) });
+  assertEqual(floue[0] && floue[0].ville, "SOMMEDIEUE", "(d) commune corrigee a une lettre pres");
+  assertEqual(floue[0] && floue[0].cp, "55320", "(d) CP recalcule depuis la commune");
+  // Jamais sur un mot court ou ambigu : "MECRAN" (6 lettres) reste tel quel.
+  const trop = parseAddressList([R(0, 30, "3 GRANDE RUE"), R(34, 64, "MECRAN 55300")], opts23);
+  assertEqual(trop[0] && trop[0].ville, null, "(d) mot de moins de 8 lettres : jamais corrige");
+
+  // (e) residu court AVANT le numero de voie, en capitales (invisible pour la
+  // regle des residus en minuscules) : "LUN 18 ...", "LS) 1 ...", "Le 12 ...".
+  for (const [texte, attendu] of [
+    ["LUN 18 L'OREE DU PARC RUE", "18 L'OREE DU PARC RUE"],
+    ["LS) 1 SAINT MICHEL RUE", "1 SAINT MICHEL RUE"],
+    ["Le 12 BOUVREUILS RUE", "12 BOUVREUILS RUE"],
+  ]) {
+    const r = parseAddressList([R(0, 30, "NATHALIE KLEIN"), R(34, 64, texte), R(68, 98, "MENIL-LA-TOUR 54200")], opts23);
+    assertEqual(r[0] && r[0].rue, attendu, `(e) residu retire : ${texte}`);
+  }
+  // Un mot-cle de voie court n'est PAS un residu.
+  const zi = parseAddressList([R(0, 30, "SOCIETE X"), R(34, 64, "ZI 3 GRANDE RUE"), R(68, 98, "MECRIN 55300")], opts23);
+  assertEqual(zi[0] && zi[0].rue, "ZI 3 GRANDE RUE", "(e) 'ZI' devant un numero reste dans la rue");
+
+  // (f) marqueur de distance dont l'unite porte une lettre parasite
+  // ("6.12KMm") : ni coupe de fiche, ni nettoyage -- la distance partait dans
+  // le nom.
+  const marqueur = parseAddressList([
+    R(1237, 1308, "fÂA° '6.12KMm Q"),
+    R(1348, 1425, "SANDRA MULLER 8000 | 0+1 uw"),
+    R(1405, 1435, "4 VIGNE RUE"),
+    R(1459, 1490, "LES PAROCHES 55300"),
+  ], opts23);
+  assertEqual(marqueur.length, 1, "(f) une seule fiche");
+  assertEqual((marqueur[0].nom || "").startsWith("SANDRA MULLER"), true, `(f) la distance ne pollue plus le nom (obtenu: ${marqueur[0].nom})`);
+
+  // (g) un CHIFFRE du CP lu comme une lettre ("5530C") : la ligne restait
+  // collee a la rue, la fiche perdait CP et ville, et le filtre "localisable"
+  // la supprimait -- un arret entier disparaissait de la tournee.
+  const cpLettre = parseAddressList([
+    R(979, 1008, "CELINE BAUDOIN"),
+    R(1035, 1063, "12 BRUYERES CHMN"),
+    R(1089, 1118, "ST MIHIEL 5530C"),
+  ], opts23);
+  assertEqual(cpLettre.length, 1, "(g) la fiche n'est plus perdue");
+  assertEqual(cpLettre[0] && cpLettre[0].cp, "55300", "(g) CP reconstruit");
+  assertEqual(cpLettre[0] && cpLettre[0].ville, "ST MIHIEL", "(g) commune lue");
+  assertEqual(cpLettre[0] && cpLettre[0].rue, "12 BRUYERES CHMN", "(g) rue propre");
+  // Garde-fou : "SS3OO" donnerait "55300" (un CP bien reel de la liste) une
+  // fois toutes les lettres converties -- refuse, un seul vrai chiffre sur
+  // cinq. Sans la regle des 4 chiffres minimum, la fiche serait retenue avec
+  // un code postal invente ; ici elle reste non localisable, donc ecartee.
+  const faux = parseAddressList([R(0, 30, "3 GRANDE RUE"), R(34, 64, "SS3OO")], opts23);
+  assertEqual(faux.length, 0, "(g) un mot de 5 lettres ne fabrique pas un CP, meme s'il en donnerait un valide");
+
+  // (h) fiche sans rue avec badge sans barre ("GARAGE CHAUV UONCOURT
+  // 8000 0+1 wo") : le nom doit survivre au nettoyage -- badge "8000 0+1"
+  // sans le "|", puis residu d'icone "wo" en fin. La fiche (nom + commune +
+  // CP, pas de rue) est retenue ; c'est ensuite dedup-drafts.js qui la
+  // protege de l'absorption (voir son test).
+  const sansRue = parseAddressList([
+    R(1475, 1554, "GARAGE CHAUV UONCOURT 8000 0+1 wo"),
+    R(1531, 1560, "CHAUVONCOURT 55300"),
+  ], { ...opts23, knownCities: new Set([...opts23.knownCities, looseCommune(normalizeCity("Chauvoncourt"))]), knownCps: new Set([...opts23.knownCps]) });
+  assertEqual(sansRue.length, 1, "(h) la fiche sans rue est retenue");
+  assertEqual(sansRue[0] && sansRue[0].nom, "GARAGE CHAUV UONCOURT", "(h) nom nettoye du badge sans barre et du residu");
+  assertEqual(sansRue[0] && sansRue[0].ville, "CHAUVONCOURT", "(h) commune");
+}
+
+console.log("\n=== Cas 24 : commune collee en FIN de rue, sans CP sur la ligne (terrain 2026-09-11) ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const villes24 = [
+    ["Saint-Mihiel", "55300"], ["Ranzieres", "55300"], ["Apremont-la-Foret", "55300"], ["Les Paroches", "55300"],
+    ["Ansauville", "54470"], ["Dieue-sur-Meuse", "55320"], ["Genicourt-sur-Meuse", "55320"], ["Commercy", "55200"],
+  ];
+  const knownCities24 = new Set(villes24.map(([c]) => looseCommune(normalizeCity(c))));
+  const opts24 = { knownCities: knownCities24, knownCps: new Set(villes24.map(([, cp]) => cp)) };
+
+  // Bug reel : la commune restait dans la rue, l'arret partait sans ville, et
+  // le geocodage n'avait plus que le CP pour trancher entre les 34 communes du
+  // 55300 -- il a choisi "8 Rue de Saint Mihiel" a RANZIERES (une rue qui
+  // porte le nom de la ville voisine) au lieu de "8 Rue du Temple" a
+  // Saint-Mihiel. Deux arrets livres dans le mauvais village.
+  const temple = parseAddressList([R(1365, 1420, "8 TEMPLE RUE ST MIHIEL 8000 | 0+1 D"), R(1393, 1470, "LS 55300")], opts24);
+  assertEqual(temple[0] && temple[0].ville, "ST MIHIEL", "(a) commune detachee de la fin de la rue");
+  assertEqual(temple[0] && temple[0].rue, "8 TEMPLE RUE", "(a) la rue garde son type de voie, sans la commune ni le residu d'icone");
+
+  // Commune repliee sur la ligne suivante : le detachement se fait sur la rue
+  // ASSEMBLEE, pas ligne par ligne.
+  const gaulle = parseAddressList([
+    R(1143, 1219, "16 GENERAL DE GAULLE 8000 | 041 v"),
+    R(1213, 1243, "RUE APREMONT LA"),
+    R(1264, 1294, "FORET 55300"),
+  ], opts24);
+  assertEqual(gaulle[0] && gaulle[0].ville, "APREMONT LA FORET", "(b) commune recomposee sur deux lignes puis detachee");
+  assertEqual(gaulle[0] && gaulle[0].rue, "16 GENERAL DE GAULLE RUE", "(b) rue propre");
+
+  // Le detachement vaut aussi quand la commune est la BONNE : "2 VAUX RUE
+  // RANZIERES" est vraiment a Ranzieres.
+  const vaux = parseAddressList([R(1508, 1581, "2 VAUX RUE RANZIERES 8000180"), R(1558, 1626, "M, 55300")], opts24);
+  assertEqual(vaux[0] && vaux[0].ville, "RANZIERES", "(c) commune correcte detachee malgre le residu de badge");
+  assertEqual(vaux[0] && vaux[0].rue, "2 VAUX RUE", "(c) rue propre");
+
+  // Prefixe de 5 lettres accepte ici aussi : la rue qui se termine par son
+  // TYPE est la corroboration (voir MIN_PREFIXE_COMMUNE_CORROBORE).
+  const dieue = parseAddressList([R(734, 761, "2 MEUSE RUE DIEUE"), R(781, 808, "55320")], opts24);
+  assertEqual(dieue[0] && dieue[0].ville, "DIEUE", "(d) commune abregee a 5 lettres detachee");
+  assertEqual(dieue[0] && dieue[0].rue, "2 MEUSE RUE", "(d) rue propre");
+
+  // Garde-fou : une rue qui PORTE un nom de commune ne doit pas perdre son
+  // dernier mot. Ici le reste ne finirait pas par un type de voie.
+  const porteUnNom = parseAddressList([R(0, 30, "3 RUE DE COMMERCY"), R(34, 64, "55200")], opts24);
+  assertEqual(porteUnNom[0] && porteUnNom[0].rue, "3 RUE DE COMMERCY", "(e) 'Rue de Commercy' reste entiere");
+  assertEqual(porteUnNom[0] && porteUnNom[0].ville, null, "(e) et n'invente pas la commune");
+
+  // Garde-fou : au plus deux jetons entre la commune et la fin de ligne.
+  // Au-dela, ce n'est plus un residu d'icone -- on ne devine pas.
+  const tropLoin = parseAddressList([R(0, 30, "8 CROIX RUE ANSAUVILLE PORTE BLEUE ARRIERE"), R(34, 64, "54470")], opts24);
+  assertEqual(tropLoin[0] && tropLoin[0].ville, null, "(f) trois mots apres la commune : pas de detachement");
+  // Sans type de voie mais avec un numero devant ("8 GRANDE ANSAUVILLE" : le
+  // terminal omet parfois le type, "1 BASSE KOEUR LA PETITE" le 2026-09-14)
+  // la commune EXACTE est detachee -- l'alternative serait un geocodage sur
+  // le seul code postal. Un reste qui finit par un mot de liaison, lui, n'est
+  // jamais coupe (voir "3 RUE DE COMMERCY" ci-dessus).
+  const sansType = parseAddressList([R(0, 30, "8 GRANDE ANSAUVILLE"), R(34, 64, "54470")], opts24);
+  assertEqual(sansType[0] && sansType[0].ville, "ANSAUVILLE", "(f) sans type de voie : commune exacte detachee quand meme");
+  assertEqual(sansType[0] && sansType[0].rue, "8 GRANDE", "(f) ... et la rue garde son numero");
+}
+
+console.log("\n=== Cas 25 : compte rendu photos reel du 2026-09-14 (mode LISTE sans distances, 54 arrets) ===");
+{
+  const R = (y0, y1, text) => ({ text, bbox: { x0: 0, y0, x1: 300, y1 } });
+  const villes25 = [
+    ["Saint-Mihiel", "55300"], ["Rupt-devant-Saint-Mihiel", "55260"], ["Koeur-la-Petite", "55300"], ["Lerouville", "55200"],
+    ["Les Trois-Domaines", "55220"], ["Mandres-aux-Quatre-Tours", "54470"], ["Vigneulles-les-Hattonchatel", "55210"],
+    ["Ippecourt", "55220"], ["Les Souhesmes-Rampont", "55220"], ["Bar-le-Duc", "55000"],
+    // Une seconde commune en "Saint-" : comme dans la vraie base, "SAINT"
+    // seul est ambigu et ne doit jamais etre pris pour une commune.
+    ["Saint-Aubin-sur-Aire", "55500"],
+  ];
+  const knownCities25 = new Set(villes25.map(([c]) => looseCommune(normalizeCity(c))));
+  const cityCps25 = new Map();
+  for (const [c, cp] of villes25) {
+    const key = looseCommune(normalizeCity(c));
+    if (!cityCps25.has(key)) cityCps25.set(key, new Set());
+    cityCps25.get(key).add(cp);
+  }
+  const opts25 = { knownCities: knownCities25, knownCps: new Set(villes25.map(([, cp]) => cp)), cityCps: cityCps25 };
+
+  // (a) Commune coupee AU MILIEU de son nom par le retour a la ligne :
+  // "4 CHAMPS RUE RUPT" / "DEVANT SAINT MIHIEL" / "55260". Sur la ligne seule,
+  // "SAINT MIHIEL" etait reconnue, "DEVANT" jete, et cpParCommune ecrasait
+  // meme le vrai 55260 par 55300 : arret livre dans le mauvais village.
+  const rupt = parseAddressList([R(1171, 1201, "4 CHAMPS RUE RUPT"), R(1219, 1249, "DEVANT SAINT MIHIEL"), R(1268, 1297, "55260")], opts25);
+  assertEqual(rupt[0] && rupt[0].ville, "RUPT DEVANT SAINT MIHIEL", "(a) la commune longue l'emporte sur son suffixe");
+  assertEqual(rupt[0] && rupt[0].rue, "4 CHAMPS RUE", "(a) la rue rend le mot emprunte");
+  assertEqual(rupt[0] && rupt[0].cp, "55260", "(a) le vrai CP est conserve");
+
+  // (b) Residu d'icone pris pour une ville par la forme seule ("MIHIEL 55300
+  // Va") : la fausse ville "Va" bloquait le detachement de "ST MIHIEL".
+  const va = parseAddressList([R(1433, 1485, "2 MARSOUPE RUE ST  4000|1+080"), R(1470, 1534, "MIHIEL 55300 Va")], opts25);
+  assertEqual(va[0] && va[0].ville, "ST MIHIEL", "(b) une ville de 2 lettres n'est jamais retenue, la vraie est detachee");
+  assertEqual(va[0] && va[0].rue, "2 MARSOUPE RUE", "(b) rue propre");
+
+  // (c) Residu entre le type de voie et la commune : "CHMN ST" / "MS MiHIEL".
+  const ms = parseAddressList([R(1587, 1640, "9 PETITE FIN CHMN ST 8000 | 0+1"), R(1638, 1704, "MS MiHIEL 55300")], opts25);
+  assertEqual(ms[0] && ms[0].ville, "ST MiHIEL", "(c) le residu 'MS' est retire avant le detachement");
+  assertEqual(ms[0] && ms[0].rue, "9 PETITE FIN CHMN", "(c) rue propre");
+
+  // (d) Mode LISTE, sans distances : le BADGE separe les fiches. Ici le CP de
+  // la premiere est illisible ("55:00") -- avant, les deux fiches n'en
+  // faisaient qu'une, un client perdu.
+  const badge = parseAddressList([
+    R(967, 1016, "9 VAUX RUEL ST MIHIEL 8000 | 0+1 v"),
+    R(1007, 1066, "ME 55:00"),
+    R(1108, 1157, "10 DOCTEUR 8000 | 0+1 QD"),
+    R(1157, 1185, "ALBERT THIERY RUE"),
+    R(1198, 1226, "SAINT-MIHIEL 55300"),
+  ], opts25);
+  assertEqual(badge.length, 2, "(d) deux fiches, coupees sur le badge");
+  assertEqual(badge[0] && badge[0].rue, "9 VAUX RUEL", "(d) 'RUEL' est un type de voie, la commune est detachee derriere");
+  assertEqual(badge[0] && badge[0].ville, "ST MIHIEL", "(d) ... commune de la premiere");
+  assertEqual(badge[0] && badge[0].cp, "55300", "(d) ... CP retrouve par la commune");
+  assertEqual(badge[1] && badge[1].rue, "10 DOCTEUR ALBERT THIERY RUE", "(d) le glyphe 'QD' du badge est mange avec lui");
+  // Le badge sur la ligne de la RUE, le nom juste au-dessus sur la meme
+  // rangee : la fiche s'ouvre sur le nom, jamais entre les deux (cas 18).
+  const rangee = parseAddressList([
+    R(934, 971, "# a 27.43km Q"), R(974, 1014, "Morelli bastien Toner"), R(993, 1032, "2 SAULES CHMN 8000 | 0+1 3"), R(1040, 1070, "EUVILLE 55200"),
+  ], { ...opts25, knownCities: new Set([...knownCities25, "euville"]) });
+  assertEqual(rangee.length, 1, "(d) nom et rue d'une meme rangee restent dans la meme fiche");
+  assertEqual(rangee[0] && rangee[0].nom, "Morelli bastien Toner", "(d) ... avec le nom");
+
+  // (e) Rue SANS type de voie, commune exacte derriere : "1 BASSE" /
+  // "KOEUR LA PETITE" et "1 REBUS QUR" / "LEROUVILLE".
+  const basse = parseAddressList([R(807, 866, "1 BASSE KOEUR LA 8000 | 0+1 v"), R(868, 893, "PETITE 55300")], opts25);
+  assertEqual(basse[0] && basse[0].ville, "KOEUR LA PETITE", "(e) commune exacte detachee sans type de voie");
+  assertEqual(basse[0] && basse[0].rue, "1 BASSE", "(e) rue reduite a son numero et son nom");
+  const rebus = parseAddressList([R(685, 724, "1 REBUS QUR LEROUVILLE"), R(741, 766, "55200")], opts25);
+  assertEqual(rebus[0] && rebus[0].ville, "LEROUVILLE", "(e) commune d'un seul mot detachee derriere un numero");
+  // Garde-fou inchange : une rue qui porte un nom de commune n'est pas coupee.
+  const porte = parseAddressList([R(0, 30, "3 ROUTE DE BAR LE DUC"), R(34, 64, "55300")], opts25);
+  assertEqual(porte[0] && porte[0].ville, null, "(e) 'Route de Bar le Duc' reste une rue entiere");
+
+  // (f) Icone lue comme un chiffre devant la commune : "18 SACREE VOIE LES" /
+  // "5 TROIS-DOMAINES 55220".
+  const trois = parseAddressList([R(820, 874, "18 SACREE VOIE LES 8000 | 0+1 @"), R(867, 926, "5 TROIS-DOMAINES 55220")], opts25);
+  assertEqual(trois[0] && trois[0].ville, "LES TROIS-DOMAINES", "(f) le '5' d'icone est ecarte, la commune recomposee");
+  assertEqual(trois[0] && trois[0].rue, "18 SACREE VOIE", "(f) rue propre");
+
+  // (g) Commune coupee en plein mot APRES un type de voie sur la ligne :
+  // "RUE MANDRES-AU" / "X-QUATRE-TOURS" (le recollage teste la FIN du texte,
+  // pas la ligne entiere) ; et fiche sans CP sur la carte du terminal.
+  const mandres = parseAddressList([
+    R(541, 589, "47 SAINT MARTIN 8000 | 0+1 87"), R(594, 625, "RUE MANDRES-AU"), R(637, 676, "X-QUATRE-TOURS ;"),
+    R(669, 731, "8000] \"TS"), R(685, 724, "1 REBUS QUR LEROUVILLE"), R(741, 766, "55200"),
+  ], opts25);
+  assertEqual(mandres.length, 2, "(g) deux fiches : le badge isole fait ouvrir la seconde sur la ligne en face");
+  assertEqual(mandres[0] && mandres[0].ville, "MANDRES-AUX-QUATRE-TOURS", "(g) commune recollee et detachee");
+  assertEqual(mandres[0] && mandres[0].rue, "47 SAINT MARTIN RUE", "(g) rue propre, glyphe '87' du badge mange");
+  assertEqual(mandres[0] && mandres[0].cp, "54470", "(g) CP retrouve par la commune (absent de la carte)");
+
+  // (h) Fiche sans CP suivie d'une fiche complete : le badge de la seconde
+  // les separe ("SAINT-BENOIT RTE / VIGNEULLES-LES-HATTONCHATEL" etait
+  // avalee par "9 BASSE RUE MEUSE / IPPECOURT").
+  const benoit = parseAddressList([
+    R(827, 887, "8000 | 0+2 ©"), R(827, 866, "SAINT-BENOIT RTE"), R(881, 906, "VIGNEULLES-LES"), R(922, 947, "-HATTONCHATEL"),
+    R(976, 1023, "9 BASSE RUE MEUSE 8000 | 0+1 QD"), R(1016, 1041, "IPPECOURT 55220"),
+  ], opts25);
+  assertEqual(benoit.length, 2, "(h) deux fiches");
+  assertEqual(benoit[0] && benoit[0].ville, "VIGNEULLES-LES-HATTONCHATEL", "(h) la premiere garde sa commune");
+  assertEqual(benoit[1] && benoit[1].rue, "9 BASSE RUE MEUSE", "(h) la seconde est propre");
+}
+
+console.log("\n=== groupLinesIntoBlocks : seuil relatif a la hauteur de ligne ===");
+{
+  // Lignes petites (10px), ecart de 20px doit quand meme couper (ratio > 1.6)
+  const smallLines = [line("A", 0, 10), line("B", 12, 10), line("C", 40, 10)];
+  const blocks = groupLinesIntoBlocks(smallLines);
+  assertEqual(blocks.length, 2, "coupure detectee meme avec de petites lignes (seuil relatif, pas absolu)");
+}
+
+console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} ECHEC(S)`);
+process.exit(failures === 0 ? 0 : 1);

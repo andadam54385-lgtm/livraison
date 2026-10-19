@@ -1,0 +1,94 @@
+// Tests unitaires des formatteurs d'adresse purs de colis-store.js (aucun
+// acces IndexedDB necessaire pour ces deux fonctions). Execute directement
+// via `node js/scan/colis-store.test.mjs`, comme parse-ups-label.test.mjs.
+import { formatAdresseAffichage, formatAdresseForNav, statutApresGeocodage } from "./colis-store.js";
+
+let failures = 0;
+
+function assertEqual(actual, expected, label) {
+  const ok = actual === expected;
+  if (!ok) failures++;
+  console.log(`${ok ? "OK  " : "FAIL"} ${label} (attendu: ${JSON.stringify(expected)}, obtenu: ${JSON.stringify(actual)})`);
+}
+
+// --- Cas nominal : colis geocode via la BAN, adresseAffichage posee ---
+console.log("\n=== Cas nominal : adresseAffichage posee par un match BAN ===");
+{
+  const colis = {
+    adresseAffichage: "6 Rue de l'Église, 54470 Ansauville",
+    adresseRaw: { rue: "6 RUE DE L EGLISE", cp: "54470", ville: "ANSAUVILLE" },
+    geocode: { status: "ok", lat: 48.69, lon: 6.18 },
+  };
+  assertEqual(formatAdresseAffichage(colis), "6 Rue de l'Église, 54470 Ansauville", "affichage (BAN)");
+  assertEqual(formatAdresseForNav(colis), "6 Rue de l'Église, 54470 Ansauville", "nav (BAN, identique a l'affichage)");
+}
+
+// --- Regression (bug terrain "adresse compressee envoyee au GPS") :
+// coordonnees GPS collees a la main (adresse introuvable dans la BAN, ex:
+// entreprise/zone industrielle, voir scan-ui.js's acceptManualCoords) --
+// adresseAffichage reste null, formatAdresseAffichage retombe sur le texte
+// brut qui a deja ECHOUE le geocodage automatique. Ce texte ne doit JAMAIS
+// etre envoye a buildNavUrl/wazeUrl/googleMapsUrl/appleMapsUrl a la place des
+// coordonnees precises que le livreur vient de fournir -- formatAdresseForNav
+// doit retourner null dans ce cas pour forcer le repli sur lat/lon (voir
+// deep-links.js, qui ne retombe sur lat/lon que si `adresse` est absent). ---
+console.log("\n=== Regression : geocode.manual -> formatAdresseForNav doit renvoyer null ===");
+{
+  const colis = {
+    adresseAffichage: null,
+    adresseRaw: { rue: "ZI DES ACACIAS", cp: "54000", ville: "NANCY" },
+    geocode: { status: "ok", lat: 48.6905, lon: 6.1826, candidates: [], manual: true },
+  };
+  assertEqual(
+    formatAdresseAffichage(colis),
+    "ZI DES ACACIAS, 54000 NANCY",
+    "affichage (repli adresseRaw, texte qui a echoue le geocodage -- OK pour un simple libelle)"
+  );
+  assertEqual(
+    formatAdresseForNav(colis),
+    null,
+    "nav (JAMAIS ce texte -- doit etre null pour que buildNavUrl retombe sur lat/lon)"
+  );
+}
+
+// --- Cas limite : geocode.manual mais adresseRaw entierement vide ---
+console.log("\n=== Cas limite : geocode.manual, adresseRaw vide ===");
+{
+  const colis = {
+    adresseAffichage: null,
+    adresseRaw: { rue: "", cp: "", ville: "" },
+    geocode: { status: "ok", lat: 48.6905, lon: 6.1826, manual: true },
+  };
+  assertEqual(formatAdresseAffichage(colis), "(adresse à vérifier)", "affichage (repli texte vide)");
+  assertEqual(formatAdresseForNav(colis), null, "nav (toujours null pour geocode.manual, quel que soit adresseRaw)");
+}
+
+// Fiche sans rue (carte reelle du terminal sans ligne de rue, ex "GARAGE
+// CHAUVONCOURT / CHAUVONCOURT 55300") : pas de virgule orpheline en tete.
+{
+  const colis = {
+    adresseAffichage: null,
+    adresseRaw: { rue: "", cp: "55300", ville: "CHAUVONCOURT" },
+    geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
+  };
+  assertEqual(formatAdresseAffichage(colis), "55300 CHAUVONCOURT", "affichage sans rue : cp + ville seuls");
+}
+
+// Statut apres (re)geocodage -- retour terrain : un colis LIVRE corrige apres
+// coup repassait "pret" et ressortait dans la preparation du lendemain
+// ("il en restait 3 alors que je les avais livres").
+{
+  assertEqual(statutApresGeocodage("livre", true), "livre", "livre + adresse corrigee : reste livre");
+  assertEqual(statutApresGeocodage("livre", false), "livre", "livre + adresse introuvable : reste livre quand meme");
+  assertEqual(statutApresGeocodage("echec", true), "echec", "echec : reste echec (le report passe par 'Reporter')");
+  assertEqual(statutApresGeocodage("en_tournee", true), "en_tournee", "en tournee + adresse ok : reste en tournee (pas un colis neuf)");
+  assertEqual(statutApresGeocodage("en_tournee", false), "a_verifier", "en tournee + adresse introuvable : a verifier");
+  assertEqual(statutApresGeocodage("pret", true), "pret", "pret + ok : pret");
+  assertEqual(statutApresGeocodage("a_verifier", true), "pret", "a verifier + ok : devient pret");
+  assertEqual(statutApresGeocodage("a_verifier", false), "a_verifier", "a verifier + introuvable : reste a verifier");
+  assertEqual(statutApresGeocodage(undefined, true), "pret", "colis neuf sans statut + ok : pret");
+  assertEqual(statutApresGeocodage(undefined, false), "a_verifier", "colis neuf sans statut + introuvable : a verifier");
+}
+
+console.log(`\n${failures === 0 ? "TOUS LES TESTS SONT PASSES" : `${failures} ECHEC(S)`}`);
+process.exit(failures === 0 ? 0 : 1);

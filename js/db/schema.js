@@ -1,0 +1,92 @@
+import { openDatabase } from "../lib/idb.js";
+
+export const DB_NAME = "delivery-tour";
+export const DB_VERSION = 7;
+
+let dbPromise = null;
+
+function upgrade(db, oldVersion, newVersion, transaction) {
+  if (!db.objectStoreNames.contains("graphMeta")) {
+    db.createObjectStore("graphMeta", { keyPath: "key" });
+  }
+  // Fond de carte assets/map.pmtiles (60+ Mo, voir js/map/pmtiles-store.js) :
+  // le Blob lui-meme est stocke directement dans le champ "file" de ce
+  // record, a cote de sa version -- pas en OPFS (essaye d'abord, abandonne :
+  // navigator.storage.getDirectory()/createWritable() se sont reveles
+  // indisponibles sur au moins un appareil de test reel).
+  if (!db.objectStoreNames.contains("mapMeta")) {
+    db.createObjectStore("mapMeta", { keyPath: "key" });
+  }
+  if (!db.objectStoreNames.contains("graphCSR")) {
+    db.createObjectStore("graphCSR", { keyPath: "key" });
+  }
+  if (!db.objectStoreNames.contains("banMeta")) {
+    db.createObjectStore("banMeta", { keyPath: "key" });
+  }
+  if (!db.objectStoreNames.contains("banEntries")) {
+    const store = db.createObjectStore("banEntries", { keyPath: "id", autoIncrement: true });
+    store.createIndex("by_cp", "cp", { unique: false });
+    store.createIndex("by_cn", "cn", { unique: false });
+    store.createIndex("by_rn", "rn", { unique: false });
+  } else if (!transaction.objectStore("banEntries").indexNames.contains("by_rn")) {
+    // Migration DB_VERSION 5 -> 6 : ajoute l'index sur le nom de rue
+    // normalise (rn), necessaire pour l'autocompletion "adresse complete sur
+    // une ligne" (voir ban-index.js's queryByStreetPrefix / geocode-ui.js).
+    // db.createObjectStore ne s'applique qu'a un store TOUT NEUF -- pour un
+    // store deja peuple (cas de la quasi-totalite des appareils, la BAN est
+    // deja importee), l'index s'ajoute via la transaction "versionchange" en
+    // cours sur le store EXISTANT.
+    transaction.objectStore("banEntries").createIndex("by_rn", "rn", { unique: false });
+  }
+  if (!db.objectStoreNames.contains("colis")) {
+    const store = db.createObjectStore("colis", { keyPath: "id" });
+    store.createIndex("by_statut", "statut", { unique: false });
+    store.createIndex("by_dateScan", "dateScan", { unique: false });
+  }
+  if (!db.objectStoreNames.contains("tours")) {
+    const store = db.createObjectStore("tours", { keyPath: "id" });
+    store.createIndex("by_statut", "statut", { unique: false });
+  }
+  if (!db.objectStoreNames.contains("settings")) {
+    db.createObjectStore("settings", { keyPath: "key" });
+  }
+  // Adresses favorites + notes (ex: "code portail 1234", "livrer a l'arriere").
+  // Store distinct de colis/tours : le bouton "Effacer tous les colis et
+  // tournees" des Reglages ne touche jamais ce store, les favoris et leurs
+  // notes survivent donc a un reset.
+  if (!db.objectStoreNames.contains("favoris")) {
+    const store = db.createObjectStore("favoris", { keyPath: "id" });
+    store.createIndex("by_cp", "cp", { unique: false });
+  }
+  // Historique des corrections manuelles apres un scan OCR (texte brut +
+  // ce que le parser a produit + ce que l'utilisateur a valide a la place) :
+  // sert de journal exploitable pour ameliorer parse-ups-label.js avec de
+  // vrais cas reels, pas juste corriger un colis a la fois -- voir
+  // js/scan/ocr-corrections-store.js.
+  if (!db.objectStoreNames.contains("ocrCorrections")) {
+    db.createObjectStore("ocrCorrections", { keyPath: "id" });
+  }
+  // Rapports de bug (v5) : notes manuelles ("Signaler un bug", Reglages) et
+  // captures automatiques d'erreurs JS non attrapees (voir app.js) -- meme
+  // esprit que ocrCorrections, mais pour n'importe quel souci technique, pas
+  // seulement l'OCR. Voir js/debug/bug-reports-store.js.
+  // Comptes rendus de scan de LISTE (video/live) -- voir
+  // js/scan/scan-reports-store.js. Ajoute en DB_VERSION 7.
+  if (!db.objectStoreNames.contains("scanReports")) {
+    db.createObjectStore("scanReports", { keyPath: "id" });
+  }
+  if (!db.objectStoreNames.contains("bugReports")) {
+    db.createObjectStore("bugReports", { keyPath: "id" });
+  }
+}
+
+export function openDb() {
+  if (!dbPromise) {
+    dbPromise = openDatabase(DB_NAME, DB_VERSION, (db, oldVersion, newVersion, transaction) => upgrade(db, oldVersion, newVersion, transaction));
+  }
+  return dbPromise;
+}
+
+export async function getDb() {
+  return openDb();
+}

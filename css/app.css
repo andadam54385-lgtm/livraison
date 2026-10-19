@@ -1,0 +1,1045 @@
+/* Refonte "Navigation nuit" (2026-08-31, direction choisie par l'utilisateur
+   parmi 3 maquettes) : encre bleue profonde + accent turquoise, coins tres
+   arrondis (--radius-card/--radius-btn), cartes portees par l'ombre plutot que
+   par la bordure, halo turquoise sur les actions primaires, nav du bas
+   translucide avec flou. Le mode clair est un papier teinte bleu assorti
+   (accent teal fonce, memes roles de tokens).
+
+   Systeme de design "chantier A" : usage terrain a une main, parfois avec
+   des gants, en plein soleil ou dans un depot sombre a 6h. 4 couleurs
+   semantiques exactement pour le statut d'un arret -- a_livrer = neutre (pas
+   de couleur), livre = vert (--ok), echec = rouge (--warn), avant12h = orange
+   (--urgent, volontairement distinct du rouge pour ne jamais les
+   confondre au premier coup d'oeil). --accent est separe : c'est la couleur
+   d'action (Naviguer, Valider), pas un statut. Clair par defaut, sombre via
+   prefers-color-scheme -- jamais invente, les deux themes sont regles
+   independamment pour un contraste WCAG AA correct dans les deux sens. */
+:root {
+  color-scheme: light;
+  --bg: #f2f6fb;
+  --bg-elevated: #e9eff8;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f4f8fd;
+  --border: #cfdbea;
+  --border-soft: #e0e9f4;
+  --text: #0c1626;
+  --text-muted: #53637c;
+  --accent: #0e7490;
+  --accent-strong: #0891b2;
+  --accent-ink: #ffffff;
+  --ok: #15803d;
+  --ok-bg: #dcf5e4;
+  --ok-ink: #ffffff;
+  --warn: #dc2626;
+  --warn-bg: #fde5e5;
+  --urgent: #b45309;
+  --urgent-bg: #fdf0d9;
+  --danger: #dc2626;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --radius-card: 20px;
+  --radius-btn: 14px;
+  --shadow-card: 0 1px 2px rgba(12,22,38,0.04), 0 8px 22px rgba(12,22,38,0.07);
+  --shadow-elevated: 0 10px 28px rgba(12,22,38,0.12);
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+  color-scheme: dark;
+  --bg: #0b1220; --bg-elevated: #101a2e; --bg-card: #152238; --bg-card-hover: #1a2a45;
+  --border: #2b3c58; --border-soft: #1c2a42; --text: #eef4ff; --text-muted: #8fa3c4;
+  --accent: #22d3ee; --accent-strong: #67e8f9; --accent-ink: #06303c;
+  --ok: #34d399; --ok-bg: rgba(52,211,153,0.13); --ok-ink: #032015;
+  --warn: #fb7185; --warn-bg: rgba(251,113,133,0.14);
+  --urgent: #fbbf24; --urgent-bg: rgba(251,191,36,0.13); --danger: #fb7185;
+  --shadow-card: inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  --shadow-elevated: 0 10px 30px rgba(0,0,0,0.5);
+  }
+}
+/* Bascule manuelle (reglage futur eventuel) : gagne toujours sur la
+   preference systeme, dans les deux sens. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1220; --bg-elevated: #101a2e; --bg-card: #152238; --bg-card-hover: #1a2a45;
+  --border: #2b3c58; --border-soft: #1c2a42; --text: #eef4ff; --text-muted: #8fa3c4;
+  --accent: #22d3ee; --accent-strong: #67e8f9; --accent-ink: #06303c;
+  --ok: #34d399; --ok-bg: rgba(52,211,153,0.13); --ok-ink: #032015;
+  --warn: #fb7185; --warn-bg: rgba(251,113,133,0.14);
+  --urgent: #fbbf24; --urgent-bg: rgba(251,191,36,0.13); --danger: #fb7185;
+  --shadow-card: inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  --shadow-elevated: 0 10px 30px rgba(0,0,0,0.5);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f6fb; --bg-elevated: #e9eff8; --bg-card: #ffffff; --bg-card-hover: #f4f8fd;
+  --border: #cfdbea; --border-soft: #e0e9f4; --text: #0c1626; --text-muted: #53637c;
+  --accent: #0e7490; --accent-strong: #0891b2; --accent-ink: #ffffff;
+  --ok: #15803d; --ok-bg: #dcf5e4; --ok-ink: #ffffff;
+  --warn: #dc2626; --warn-bg: #fde5e5;
+  --urgent: #b45309; --urgent-bg: #fdf0d9; --danger: #dc2626;
+  --shadow-card: 0 1px 2px rgba(12,22,38,0.04), 0 8px 22px rgba(12,22,38,0.07);
+  --shadow-elevated: 0 10px 28px rgba(12,22,38,0.12);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: contain;
+}
+
+body { display: flex; flex-direction: column; }
+
+h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+p { line-height: 1.45; }
+.muted { color: var(--text-muted); font-size: 0.9rem; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  padding: 12px 16px;
+  min-height: 44px;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease), opacity 0.12s var(--ease), background-color 0.12s var(--ease), border-color 0.12s var(--ease);
+}
+button:active { transform: scale(0.97); opacity: 0.85; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 650; box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 35%, transparent); }
+button.ok { background: var(--ok); border-color: var(--ok); color: var(--ok-ink); font-weight: 650; }
+button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+/* Actions frequentes (Livre, Naviguer, Appeler, Valider) : cible tactile
+   agrandie -- utilisable a une main, avec des gants, sans viser precisement. */
+button.btn-lg, .btn-link.btn-lg { min-height: 56px; font-size: 1.05rem; border-radius: 16px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* :not(checkbox/radio) : sans ca, cette regle peignait AUSSI les cases a
+   cocher -- fond sombre, 44px de haut, coins arrondis, et aucune coche
+   visible par-dessus. Retour terrain 2026-09-11 ("les cadres sont bizarres,
+   il y a un problème") : les deux cases des horaires apparaissaient comme de
+   gros carres noirs. Les cases gardent donc leur rendu natif, teinte a
+   l'accent de l'appli. */
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  min-height: 44px;
+  width: 100%;
+  max-width: 100%;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+input[type="checkbox"], input[type="radio"] {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent-strong);
+}
+/* iOS centre la valeur d'un input[type=time] des que le champ est bien plus
+   large que son contenu : sur un champ pleine largeur, l'heure flottait au
+   milieu et le champ paraissait deborder de sa carte (retour terrain). On lui
+   donne une largeur a sa mesure, alignee a gauche comme les autres champs. */
+input[type="time"] {
+  width: auto;
+  min-width: 7.5em;
+  text-align: left;
+}
+/* Deux champs horaires cote a cote (fermeture d'un favori) : ils se partagent
+   la ligne au lieu de la deborder. */
+.button-row input[type="time"] { flex: 1 1 0; min-width: 0; }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  outline: none;
+}
+/* Champs de fiche colis : cible tactile agrandie, meme logique que .btn-lg. */
+input.field-lg { min-height: 52px; font-size: 1.05rem; }
+
+a { color: var(--accent-strong); }
+
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  padding: 12px 16px;
+  min-height: 44px;
+  text-decoration: none;
+  text-align: center;
+  transition: transform 0.12s var(--ease), opacity 0.12s var(--ease);
+}
+.btn-link:active { transform: scale(0.97); opacity: 0.85; }
+.btn-link.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 650; box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 35%, transparent); }
+.btn-link.ok { background: var(--ok); border-color: var(--ok); color: var(--ok-ink); font-weight: 650; }
+
+.view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+.view[hidden] { display: none; }
+
+.view-header {
+  padding: 16px 16px 12px;
+  background: linear-gradient(180deg, var(--bg-elevated), var(--bg));
+  flex-shrink: 0;
+}
+.view-header-row { display: flex; align-items: center; gap: 10px; }
+
+/* Bouton carre icone seule (retour, menu...) -- meme cible tactile minimale
+   que les boutons texte, sans le padding horizontal qui n'a pas de sens ici. */
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.view-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px 24px;
+  -webkit-overflow-scrolling: touch;
+}
+/* Seul l'ecran Tournee porte le FAB de scan (#scan-fab, HTML statique de
+   #tour-view) : il flotte au-dessus du bas de la liste, et sans cette reserve
+   la derniere carte -- ou le bloc "Depart" -- passe dessous et devient
+   intouchable. 60px de bouton + les 16px qui le separent de la nav. */
+#tour-content.view-content { padding-bottom: calc(24px + 76px); }
+
+.stats-row { display: flex; gap: 8px; margin-top: 8px; }
+.stat-pill {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.stat-pill-warn { border-color: var(--warn); color: var(--warn); }
+
+/* (nav du bas supprimee : fusion Carte + Tournee, un seul ecran) */
+
+.fab {
+  position: fixed;
+  right: 20px;
+  bottom: calc(var(--safe-bottom) + 20px);
+  z-index: 12;
+  width: 60px; height: 60px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  font-size: 1.5rem;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: transform 0.12s var(--ease);
+}
+.fab:active { transform: scale(0.92); }
+
+.progress-bar {
+  height: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  transition: width 0.3s var(--ease);
+}
+
+.import-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  padding: 24px;
+  gap: 8px;
+  text-align: center;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow-card);
+}
+.card-title { font-weight: 650; margin-bottom: 4px; letter-spacing: -0.01em; }
+.card-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+/* Cartes d'arrets compactes (ecran Tournee, Etat B) : retour terrain -- une
+   liste de potentiellement 20+ arrets a faire defiler d'une traite prenait
+   trop de place avec le gabarit ".card" generique (pense pour un item isole).
+   Padding/marges reduits, memes actions qu'avant (rien retire) mais
+   regroupees sur UNE seule ligne d'icones plutot que deux lignes de boutons
+   pleine largeur + une 3e ligne pour le reordonnancement -- voir
+   renderStopCard() dans tour-ui.js. */
+/* Cartes de preparation (ecran Tournee, Etat A) : meme traitement compact que
+   .stop-card ci-dessous, pour la meme raison -- une liste de 20+ colis a
+   preparer passait la moitie de sa hauteur en marges avec le gabarit .card
+   generique (pense pour un item isole). */
+.prep-card { padding: 9px 11px; margin-bottom: 6px; }
+.prep-card .card-title { font-size: 0.95rem; margin-bottom: 0; }
+.prep-card-addr { font-size: 0.82rem; line-height: 1.35; }
+.prep-card-badges { margin-top: 6px; }
+/* Colis sans nom : repli neutre a la place du nom, jamais une alerte -- le nom
+   n'est pas bloquant pour passer "pret" (voir CLAUDE.md). */
+.card-title-empty { color: var(--text-muted); font-weight: 500; font-style: italic; }
+/* Mode selection de la preparation : pastille de coche a gauche du titre,
+   carte teintee quand elle est retenue. */
+.prep-check {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-ink);
+}
+.prep-card-selected { border-color: var(--accent) !important; background: color-mix(in srgb, var(--accent) 10%, var(--bg-card)); }
+.prep-card-selected .prep-check { background: var(--accent); border-color: var(--accent); }
+
+.stop-card { padding: 8px 10px; margin-bottom: 6px; }
+.stop-card .card-title { font-size: 0.92rem; margin-bottom: 1px; }
+.stop-card-addr { font-size: 0.8rem; margin-top: 1px; }
+.stop-card-actions { display: flex; gap: 6px; margin-top: 6px; }
+.stop-card-actions a, .stop-card-actions button {
+  flex: 1;
+  min-height: 38px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Arret courant (ecran Tournee) : seul element mis en avant, tout le reste
+   (liste "a venir") reste volontairement discret en dessous. Deux passes de
+   densification successives sur retour terrain ("trop gros", puis "diminue
+   legerement") : padding, tailles de police et hauteur des boutons d'action
+   resserres, en gardant Naviguer/Livre comme cibles confortables a une main
+   (>=46px) -- c'est le geste le plus repete de la journee. */
+.hero-card {
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow-card);
+}
+.hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; gap: 8px; }
+.hero-eyebrow { font-size: 0.64rem; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
+.hero-addr { font-size: 1.05rem; font-weight: 750; letter-spacing: -0.015em; line-height: 1.15; margin: 0 0 1px; }
+.hero-city { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 4px; }
+.hero-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 4px; border-top: 1px solid var(--border-soft); margin-bottom: 6px; }
+.hero-name { font-size: 0.85rem; font-weight: 650; }
+.hero-sub { font-size: 0.72rem; color: var(--text-muted); margin-top: 1px; }
+.hero-actions { display: flex; flex-direction: column; gap: 5px; }
+.hero-actions .button-row { margin-top: 0; }
+/* Actions principales : les boutons generiques (44px) et .btn-lg (56px)
+   etaient surdimensionnes dans une carte densifiee -- ramenes a 46px, au
+   dessus du minimum tactile puisque c est le geste le plus repete. */
+.hero-actions .btn-link,
+.hero-actions button,
+.hero-actions .btn-lg { min-height: 46px; font-size: 0.95rem; border-radius: 12px; }
+.hero-fail-btn {
+  width: 100%;
+  text-align: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 650;
+  padding: 5px;
+  min-height: 0;
+}
+.hero-fail-btn:active { color: var(--warn); }
+
+/* ============== Fusion Carte + Tournee (un seul ecran) ==============
+   #tour-map-slot est un frere STATIQUE de la feuille : les renders de
+   tour-ui n'y touchent jamais, l'instance MapLibre y survit.
+   - mode "backdrop" (tournee active) : le slot prend l'espace sous le
+     header, la feuille #tour-sheet coulisse par-dessus (hauteur inline
+     posee par tour-ui, crans collapsed/half/full).
+   - mode "overlay" (preparation, bouton Carte du header) : le slot passe
+     plein ecran au-dessus de tout, bouton X pour fermer.
+   Hors de ces modes, #tour-sheet est en display:contents : #tour-content
+   redevient un simple enfant de flux, layout identique a l'avant-fusion. */
+#tour-view { position: relative; }
+#tour-map-slot { display: none; }
+#tour-map-slot[data-map-variant] { display: block; }
+#tour-map-slot[hidden] { display: none; }
+.map-backdrop #tour-map-slot {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+#tour-sheet { display: contents; }
+.map-backdrop #tour-sheet {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  background: var(--bg);
+  border-top: 1px solid var(--border-soft);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  box-shadow: var(--shadow-elevated);
+  height: 48vh;
+  /* Jamais moins que la poignee + le libelle : quoi qu'il arrive a la
+     hauteur inline, la feuille reste attrapable. */
+  min-height: 76px;
+}
+.map-backdrop #tour-content { flex: 1; min-height: 0; }
+/* MapLibre (WebGL) a besoin d'un parent a hauteur concrete : le slot/canvas
+   est une colonne flex non-scrollable, .map-canvas-wrap prend tout. */
+#tour-map-slot[data-map-variant] { display: flex; flex-direction: column; }
+#tour-map-slot[hidden] { display: none !important; }
+/* Petit cadre de selection d'un point (retour terrain 2026-09-16 : "remettre
+   le petit cadre en haut quand on selectionne un point au lieu de le
+   visualiser en bas") : flotte en HAUT de la zone carte, sous le header --
+   `top` pose en JS a l'affichage (la hauteur du header varie avec ses
+   pastilles). Ne deplace jamais la carte (pas de reflow, pas de resize
+   MapLibre a gerer). */
+.map-stop-popover {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  z-index: 9;
+}
+.map-stop-popover[hidden] { display: none; }
+/* Compact (retour terrain 2026-09-17 : "mets-le plus petit") : il flotte
+   au-dessus de la carte, il ne doit pas en manger la moitie. */
+.map-popover-card { margin: 0; padding: 8px 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); }
+.map-popover-head { display: flex; align-items: center; gap: 6px; }
+.map-popover-titre {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.map-popover-adresse {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.map-popover-x {
+  flex-shrink: 0;
+  min-height: 0;
+  padding: 4px;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+}
+/* "Y aller" et "Livré" portent le texte, les deux autres restent des icones
+   carrees : quatre libelles ne tiendraient pas sur une ligne de telephone. */
+.map-popover-actions { display: flex; gap: 6px; margin-top: 8px; }
+.map-popover-actions > * { flex: 1; min-height: 40px; font-size: 0.85rem; padding: 6px 8px; }
+.map-popover-actions > #map-popover-fiche,
+.map-popover-actions > #map-popover-list { flex: 0 0 40px; padding: 6px; }
+
+.map-canvas-wrap { position: relative; flex: 1; min-height: 0; }
+#maplibre-map { position: absolute; inset: 0; }
+/* Grille de controles MapLibre par defaut (~29px) agrandie pour rester
+   proche du standard 44px+ "usage a une main / gants" du reste de l'appli. */
+.maplibregl-ctrl-group button { width: 40px; height: 40px; }
+/* Le controle d'attribution par defaut (coin haut-gauche) chevaucherait
+   sinon notre bouton menu, place dans ce meme coin -- decale sous lui. */
+.maplibregl-ctrl-top-left { margin-top: 56px; }
+
+/* Carte plein ecran (chantier refonte) : plus de header ni de legende
+   toujours visibles -- un seul bouton menu en haut a gauche ouvre un panneau
+   regroupant legende + avertissements + acces aux Reglages. */
+.map-menu-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-elevated);
+}
+.map-menu-panel {
+  position: absolute;
+  top: 62px;
+  left: 12px;
+  z-index: 6;
+  width: min(280px, calc(100vw - 24px));
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-elevated);
+  padding: 10px;
+}
+.map-menu-panel[hidden] { display: none; }
+.map-menu-panel .btn-link { justify-content: flex-start; width: 100%; }
+.map-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 0.85rem;
+}
+.legend-item { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.map-menu-warn { display: flex; align-items: center; gap: 6px; color: var(--warn); font-size: 0.8rem; margin: 8px 0 0; }
+
+/* Selection par zones (lasso) : bouton dedie a cote du menu, overlay SVG de
+   dessin par-dessus la carte (capture les evenements pointer tant que le mode
+   est actif, la carte MapLibre en dessous ne recoit alors plus rien -- pas
+   besoin de desactiver dragPan separement), bandeau d'aide + panneau de
+   confirmation flottants. Voir setupZoneMode() dans map-ui.js. */
+.zone-mode-btn { left: 64px; }
+/* La liste d'arrets interne de la carte doublonnerait la feuille de
+   tour-ui juste au-dessus -- masquee (la carte est toujours en fond). */
+[data-map-variant="backdrop"] .stop-panel { display: none; }
+.zone-mode-btn.active { background: var(--accent); color: var(--accent-ink); }
+/* Un <div> (pas un <svg>) : hit-testable sur toute sa boite meme transparent,
+   contrairement a un <svg> racine vide dont Safari ne detecte de facon fiable
+   que les zones reellement peintes (voir setupZoneMode() dans map-ui.js pour
+   le bug reel que ca causait). Le <svg> imbrique (.zone-draw-svg) ne sert
+   qu'a l'affichage, jamais a la detection du geste. */
+.zone-draw-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: none;
+}
+.zone-draw-overlay.active { pointer-events: auto; }
+.zone-draw-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.zone-draw-svg polygon {
+  fill: color-mix(in srgb, var(--accent) 22%, transparent);
+  stroke: var(--accent-strong);
+  stroke-width: 2.5;
+  stroke-dasharray: 6 4;
+  stroke-linejoin: round;
+}
+.zone-hint-bar {
+  position: absolute;
+  top: 12px;
+  left: 116px;
+  right: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  box-shadow: var(--shadow-elevated);
+  padding: 10px 12px;
+  font-size: 0.82rem;
+}
+.zone-hint-bar[hidden] { display: none; }
+.zone-hint-bar button { flex-shrink: 0; padding: 6px 10px; min-height: 0; font-size: 0.78rem; }
+/* Choix du numero de zone EN HAUT (build 156, retour terrain "met le choix
+   du numero de zone en haut pas en bas") : en bas, le clavier numerique de
+   l'iPhone le recouvrait des qu'on touchait le champ, et il tombait sur la
+   feuille des colis. Il recouvre la barre d'aide et les boutons du haut le
+   temps du choix -- ils ne servent a rien pendant ce temps. */
+#zone-confirm-panel:not(:empty) {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  z-index: 7;
+}
+.zone-confirm-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-elevated);
+  padding: 12px;
+}
+
+/* Mise en evidence d'une carte de colis quand on tape son point sur la
+   carte (le tap ne montre plus de fiche flottante : il amene a la carte du
+   colis dans la feuille, qui porte deja toutes les actions). */
+@keyframes flash-target {
+  0% { box-shadow: 0 0 0 3px var(--accent); }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+.flash-target {
+  animation: flash-target 0.85s var(--ease) 3;
+  border-color: var(--accent) !important;
+}
+
+/* Sections repliables de la liste d'arrets (Etat B, voir renderStopsList) :
+   "Arrets suivants" et "Deja traites". Un <details> natif -- l'etat ouvert/
+   ferme est memorise par tour-ui pour la session. Le marqueur natif est
+   remplace par un chevron qui pivote. */
+.stops-section { margin-bottom: 8px; }
+.stops-section > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  background: var(--bg-card);
+  font-weight: 650;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.stops-section > summary::-webkit-details-marker { display: none; }
+.stops-summary-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.stops-summary-sub { font-weight: 450; font-size: 0.85rem; overflow-wrap: anywhere; }
+.stops-chevron { display: flex; flex-shrink: 0; transition: transform 0.2s var(--ease); }
+.stops-section[open] > summary .stops-chevron { transform: rotate(180deg); }
+.stops-section[open] > summary { margin-bottom: 8px; }
+
+/* Feuille glissante a 3 positions (repliee/mi-hauteur/pleine hauteur, voir
+   setupStopPanelSheet dans map-ui.js) : hauteur pilotee en JS (px) pendant le
+   drag, pas de classe CSS par etat -- data-state ne sert qu'a un eventuel
+   style visuel (ex: coin arrondis identiques dans les 3 cas ici). */
+.stop-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  box-shadow: var(--shadow-elevated);
+  height: 64px;
+}
+.stop-panel-handle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 16px 16px 0 0;
+  padding: 8px 12px 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  touch-action: none;
+  cursor: grab;
+}
+/* L'attribut hidden doit gagner sur le display:flex de la classe (la
+   poignee statique de #tour-sheet est masquee hors mode backdrop). */
+.stop-panel-handle[hidden] { display: none; }
+.stop-panel-bar {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+}
+.stop-panel-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 10px;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.stop-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.stop-row:last-child { border-bottom: none; }
+.stop-row-done { opacity: 0.55; }
+.stop-row-num {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.stop-row-done .stop-row-num { background: var(--bg-elevated); color: var(--text-muted); }
+.stop-row-body { flex: 1; min-width: 0; }
+.stop-row-title { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.stop-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.stop-row-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.stop-row-btn:active { transform: scale(0.94); }
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.badge-ok { background: var(--ok-bg); color: var(--ok); }
+.badge-warn { background: var(--warn-bg); color: var(--warn); }
+.badge-urgent { background: var(--urgent-bg); color: var(--urgent); }
+.badge-pending { background: var(--bg-elevated); color: var(--text-muted); }
+/* "A verifier" n'est PAS un statut de livraison mais une alerte de qualite
+   geocodage/OCR : il ne doit donc consommer aucune des 4 couleurs semantiques.
+   Il etait rouge dans la pastille d'en-tete (.stat-pill-warn) et gris muet
+   dans le badge de carte -- soit le meme concept lu de deux facons, et en plus
+   le rouge d'"echec" vole pour autre chose (les deux cohabitent a l'ecran en
+   Etat A : "Non livres" juste au-dessus de la liste de preparation). Contour
+   tirete + icone : visible sans etre une des 4 couleurs, identique aux deux
+   endroits. */
+.badge-check {
+  background: transparent;
+  border: 1px dashed var(--text-muted);
+  color: var(--text-muted);
+  padding: 2px 8px;
+}
+.stat-pill-check { background: transparent; border-style: dashed; border-color: var(--text-muted); color: var(--text-muted); }
+
+/* Boutons a choix unique (type de client, operation, avant 12h) -- voir
+   ui/segmented.js. Cibles tactiles pleine largeur, a une main et avec des
+   gants, la ou une case a cocher de 26px demandait de viser. */
+.segmented { display: flex; gap: 6px; }
+/* Compact (retour terrain "en plus petit") : ces boutons restent des cibles
+   tactiles correctes (~36px) mais ne dominent plus le formulaire -- trois
+   groupes empiles a 46px chacun mangeaient un demi-ecran. Les libelles de
+   groupe ("Type de client"...) ont saute en meme temps : les options se
+   suffisent. */
+.segmented-stack { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.segmented-btn {
+  flex: 1;
+  min-height: 36px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  font-weight: 550;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.segmented-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 650;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Coeur "mettre en favori" (fiche colis) : contour au repos, plein une fois
+   l'adresse favorite. */
+.fav-btn { flex-shrink: 0; }
+.fav-btn.active { color: var(--warn); border-color: var(--warn); }
+.fav-btn.active svg { fill: currentColor; }
+
+/* Editeur d'horaires jour par jour (favoris/horaires-ui.js) : onglets
+   Lun..Dim en tete, un seul jour edite a la fois. Le point sous un jour
+   signale qu'il porte des horaires (rouge : ferme toute la journee). */
+.hours-editor { display: flex; flex-direction: column; gap: 8px; }
+.hours-days { display: flex; gap: 4px; }
+.hours-day {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px 0 2px;
+  font-size: 0.78rem;
+  font-weight: 550;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.hours-day.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 650;
+}
+.hours-dot { display: block; width: 6px; height: 6px; border-radius: 50%; margin-top: 3px; background: transparent; }
+.hours-day.set .hours-dot { background: currentColor; }
+.hours-day.closed .hours-dot { background: var(--warn); }
+.hours-day.active.closed .hours-dot { background: var(--accent-ink); }
+.hours-modes { display: flex; flex-direction: column; gap: 6px; }
+.hours-check { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+.hours-check[hidden] { display: none; }
+/* Horaires replies par defaut (retour terrain : "la majorite du temps ca
+   encombre pour rien") -- deplies d'office quand l'adresse en a deja. */
+.hours-disclosure { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--bg-elevated); }
+.hours-disclosure > summary { cursor: pointer; font-size: 0.9rem; color: var(--text-muted); list-style: none; display: flex; align-items: center; gap: 6px; }
+.hours-disclosure > summary::-webkit-details-marker { display: none; }
+.hours-disclosure > summary::after { content: "＋"; margin-left: auto; font-size: 1rem; }
+.hours-disclosure[open] > summary::after { content: "−"; }
+.hours-disclosure[open] > summary { margin-bottom: 10px; color: var(--text); }
+.hours-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.hours-grid label { display: flex; flex-direction: column; gap: 2px; font-size: 0.78rem; color: var(--text-muted); }
+.hours-grid input[type="time"] { width: 100%; min-height: 38px; }
+.hours-resume { margin: 0; font-size: 0.82rem; }
+.hours-copy { display: flex; gap: 6px; }
+.hours-copy button { flex: 1 1 0; min-width: 0; font-size: 0.8rem; padding: 8px 4px; }
+
+/* Badges purement informatifs (pro, ramasse) : ils qualifient le client ou
+   l'operation, jamais le statut de livraison -- d'ou un contour neutre plutot
+   qu'une des 4 couleurs semantiques, deja toutes prises. */
+.badge-info {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 2px 8px;
+}
+
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 5px; font-weight: 500; }
+
+.toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0; }
+
+.button-row { display: flex; gap: 10px; margin-top: 14px; }
+.button-row button { flex: 1; }
+/* Raccourci GPS de la fiche colis : il suit une .button-row (Rescanner /
+   Valider) qui n'a pas de marge basse, donc les trois boutons se touchaient
+   -- retour terrain 2026-09-11 ("trop colles, c'est pas beau"). Action
+   secondaire : meme ecart que la grille au-dessus, et un vrai blanc avant le
+   champ Adresse qui suit. */
+.btn-gps-direct { width: 100%; margin: 10px 0 18px; }
+/* Actions secondaires (Ajouter une adresse, Scanner une liste...) : retour
+   terrain "trop gros" -- cible tactile plus modeste que le defaut (toujours
+   >=36px, reste tapable), texte plus petit. */
+.btn-compact { min-height: 36px; padding: 7px 10px; font-size: 0.85rem; }
+
+.toast-container {
+  position: fixed;
+  top: calc(var(--safe-top) + 10px);
+  left: 16px; right: 16px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  box-shadow: var(--shadow-elevated);
+  animation: toast-in 0.2s var(--ease);
+}
+.toast-warn { border-color: var(--warn); }
+.toast-danger { border-color: var(--danger); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.candidate-list { display: flex; flex-direction: column; gap: 8px; }
+/* Bug reel : un display:flex sur .candidate-list ecrasait l'attribut hidden
+   (regle UA [hidden]{display:none}, priorite plus basse que le CSS auteur
+   des que la specificite est egale -- meme piege deja rencontre et corrige
+   pour .view, voir .view[hidden] plus haut). Les 3 modeles SMS s'affichaient
+   donc tout le temps au lieu d'apparaitre seulement au tap sur 💬/le logo. */
+.candidate-list[hidden] { display: none; }
+.candidate-item { text-align: left; }
+.candidate-item .muted { display: block; margin-top: 2px; }
+
+.empty-state {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 48px 24px;
+  line-height: 1.5;
+}
+/* Chantier polish visuel (retour terrain : "aspect general pas fini") : les
+   etats d'attente reels (OCR, geocodage, chargement de la carte...)
+   utilisaient un simple texte statique ("Geocodage…"), visuellement
+   identique a un ecran fige/plante -- rien ne bougeait pour rassurer que
+   l'appli travaille encore. .spinner est un anneau CSS pur (aucun asset/JS),
+   colore avec --accent comme le reste des elements d'action. */
+.spinner {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.empty-state .spinner { margin-bottom: 12px; }
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.2s; }
+}
+/* Variante en ligne (ligne de statut, bouton, liste de resultats) : meme
+   anneau, calibre sur la hauteur du texte qui l'accompagne. */
+.spinner-inline {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+  vertical-align: -1px;
+  margin-right: 8px;
+}
+/* Dans un bouton, l'anneau suit la couleur du texte (comme les icones, voir
+   ui/icons.js) -- sinon il disparait sur un fond .primary, qui est justement
+   le seul bouton assez long a repondre pour meriter un indicateur. */
+button .spinner-inline,
+.btn-link .spinner-inline {
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+}
+
+/* Photo du colis (colis.photoColis, "pour le retrouver dans le camion") :
+   vignette sur la fiche et la hero card, visionneuse plein ecran au tap (un
+   tap n'importe ou referme -- voir js/ui/photo-viewer.js). */
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.photo-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
+}
+.colis-photo-thumb {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.hero-photo-thumb {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.viewfinder-wrap {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #000;
+}
+.viewfinder-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.viewfinder-frame {
+  position: absolute;
+  inset: 22% 8%;
+  border: 3px dashed rgba(255, 255, 255, 0.75);
+  border-radius: 12px;
+  pointer-events: none;
+}
+
+/* Scan en rafale (batch-scan-ui.js) : pas d'aspect-ratio fixe/object-fit
+   cover comme .viewfinder-wrap -- la video garde son ratio natif (largeur
+   100%, hauteur automatique) pour que les cadres SVG (coordonnees en pixels
+   natifs de la video, voir viewBox pose en JS) restent alignes sans calcul
+   de recadrage/offset a refaire a chaque frame. */
+.batch-viewfinder-wrap {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #000;
+  line-height: 0;
+}
+.batch-viewfinder-wrap video { width: 100%; height: auto; display: block; }
+.batch-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}

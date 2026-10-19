@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Tournée">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f6fb">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b1220">
+<title>Tournée UPS</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<div id="import-view" class="view" data-view="import" hidden>
+  <div class="import-screen">
+    <h1>Préparation des données locales</h1>
+    <p id="import-status"><span class="spinner spinner-inline"></span>Initialisation…</p>
+    <div class="progress-bar"><div id="import-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
+    <p id="import-detail" class="muted"></p>
+  </div>
+</div>
+
+<div id="tour-view" class="view" data-view="tour" hidden>
+  <header class="view-header">
+    <div class="view-header-row">
+      <h1 id="tour-header-title" style="flex:1;">Tournée</h1>
+      <button type="button" id="tour-recalc-btn" class="icon-btn" aria-label="Recalculer la tournée" hidden></button>
+      <button type="button" id="tour-settings-btn" class="icon-btn" aria-label="Réglages"></button>
+    </div>
+    <div class="stats-row" id="tour-header-stats" style="flex-wrap:wrap;"></div>
+    <div class="progress-bar" id="tour-header-progress" hidden><div id="tour-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
+  </header>
+  <div id="tour-map-slot" hidden></div>
+  <!-- Petit cadre de selection d'un point sur la carte (voir
+       showMapStopPopover dans tour-ui.js) : statique comme le slot carte,
+       jamais reecrit par les renders de la feuille. -->
+  <div id="map-stop-popover" class="map-stop-popover" hidden></div>
+  <div id="tour-sheet">
+    <button type="button" id="tour-sheet-handle" class="stop-panel-handle" hidden>
+      <span class="stop-panel-bar"></span>
+      <span id="tour-sheet-label"></span>
+    </button>
+    <div id="tour-content" class="view-content"></div>
+  </div>
+  <button id="scan-fab" class="fab" type="button" aria-label="Scanner un colis"></button>
+</div>
+
+<div id="settings-view" class="view" data-view="settings" hidden>
+  <header class="view-header">
+    <div class="view-header-row">
+      <button type="button" id="settings-back" class="icon-btn" aria-label="Retour"></button>
+      <h1>Réglages</h1>
+    </div>
+  </header>
+  <div id="settings-content" class="view-content"></div>
+</div>
+
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

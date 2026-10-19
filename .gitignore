@@ -1,0 +1,21 @@
+.DS_Store
+Thumbs.db
+*.log
+
+# App sans dependance (stdlib + vendorise, voir CLAUDE.md) -- ce dossier
+# n'apparait qu'a l'occasion d'un outil de test local temporaire (ex:
+# fake-indexeddb pour verifier une requete IndexedDB hors navigateur),
+# jamais un vrai package du projet.
+node_modules/
+
+# Sources non compressees des donnees (trop grosses pour Git au-dela d'une
+# petite zone -- seules les versions .gz sont commitees et deployees, voir
+# tools/compress-assets.js). Copiees depuis data-prep/output/ localement.
+assets/graph.json
+assets/ban.json
+
+# Graphe de connaissance du code (Graphify), usage consultatif local pour
+# les sessions Claude Code -- pas un artefact de l'app, ne doit pas etre
+# deploye ni publie (voir CLAUDE.md).
+graphify-out/
+.tmp-photos/

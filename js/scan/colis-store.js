@@ -1,0 +1,154 @@
+import { getDb } from "../db/schema.js";
+import { get, put, del, getAll, getAllFromIndex } from "../lib/idb.js";
+import { uuid } from "../lib/id.js";
+
+export async function isDuplicateTracking(tracking) {
+  if (!tracking) return false;
+  const db = await getDb();
+  const existing = await get(db, "colis", tracking);
+  return Boolean(existing);
+}
+
+export async function saveColis(colis) {
+  const db = await getDb();
+  const id = colis.id || colis.tracking || uuid();
+  const record = { ...colis, id };
+  await put(db, "colis", record);
+  return record;
+}
+
+export async function getColis(id) {
+  const db = await getDb();
+  return get(db, "colis", id);
+}
+
+export async function deleteColis(id) {
+  const db = await getDb();
+  return del(db, "colis", id);
+}
+
+export async function listAllColis() {
+  const db = await getDb();
+  const all = await getAll(db, "colis");
+  return all.sort((a, b) => (a.dateScan || "").localeCompare(b.dateScan || ""));
+}
+
+export async function listColisByStatut(statut) {
+  const db = await getDb();
+  return getAllFromIndex(db, "colis", "by_statut", statut);
+}
+
+// Adresse a AFFICHER (toute l'UI doit passer par ici, jamais reconstruire a
+// la main depuis adresseRaw) : une fois le colis geocode, adresseAffichage
+// contient l'adresse canonique de la BAN (bien casee, complete -- voir
+// geocode-ui.js/formatEntry, pose au moment du match dans scan-ui.js). Avant
+// geocodage, repli sur adresseRaw (texte OCR/saisie tel quel, jamais une
+// forme normalisee : normalizeStreet/normalizeCity ne servent qu'au matching
+// interne, voir geocode/normalize-address.js).
+export function formatAdresseAffichage(colis) {
+  if (colis.adresseAffichage) return colis.adresseAffichage;
+  const rue = colis.adresseRaw?.rue || "";
+  const cp = colis.adresseRaw?.cp || "";
+  const ville = colis.adresseRaw?.ville || "";
+  if (!rue && !cp && !ville) return "(adresse à vérifier)";
+  // filter(Boolean) : une fiche SANS rue existe reellement (carte du terminal
+  // sans ligne de rue, voir dedup-drafts.js) -- sans ce filtre elle
+  // s'affichait ", 55300 CHAUVONCOURT" avec la virgule orpheline en tete.
+  return [rue, `${cp} ${ville}`.trim()].filter(Boolean).join(", ");
+}
+
+// Adresse a passer aux liens de navigation GPS (deep-links.js) -- DIFFERENT de
+// formatAdresseAffichage (display) : quand geocode.manual est vrai (livreur a
+// colle des coordonnees GPS a la main via "Introuvable ? entreprise/zone
+// industrielle...", voir scan-ui.js's acceptManualCoords), adresseAffichage
+// n'est JAMAIS pose (pas de match BAN) et formatAdresseAffichage retombe alors
+// sur adresseRaw -- c'est-a-dire EXACTEMENT le texte qui vient d'echouer le
+// geocodage automatique. deep-links.js prefere toujours `adresse` a
+// `lat,lon` des qu'un texte est present (retour terrain : precision GPS BAN
+// parfois moins bonne que le geocodage Apple/Waze/Google sur une adresse
+// propre) -- mais ici ce texte n'a justement RIEN de propre/fiable, et les
+// coordonnees que le livreur a explicitement recuperees (copiees depuis un
+// point precis sur Google Maps) sont la seule information fiable qu'on ait.
+// Les ecarter au profit du texte fait recommencer Apple/Waze/Google le meme
+// geocodage bancal, silencieusement, et peut renvoyer un point eloigne (bug
+// terrain "adresse compressee envoyee au GPS" -- voir memoire du bug).
+export function formatAdresseForNav(colis) {
+  if (colis.geocode?.manual) return null;
+  return formatAdresseAffichage(colis);
+}
+
+// Champs de qualification poses au moment de valider une adresse (retour
+// terrain). Definis ici plutot que dans chaque ecran : le formulaire de scan
+// ET la fiche colis proposent les memes choix, et le rendu des cartes lit les
+// memes valeurs.
+//
+// typeClient et operation sont INFORMATIFS (badges, vocabulaire, modele de
+// SMS) : la "fermeture de midi des pros" qui pesait sur le tri de tournee a
+// ete debranchee sur demande apres le retour terrain "des allers-retours"
+// (le moteur closedWindows de routing/tsp.js reste teste et rebranchable,
+// voir computeOptimizedStops dans routing-ui.js).
+export const TYPE_CLIENT_OPTIONS = [
+  { value: "particulier", label: "Particulier", icon: "home" },
+  { value: "pro", label: "Pro", icon: "clipboard-list" },
+];
+
+export const OPERATION_OPTIONS = [
+  { value: "livraison", label: "Livraison", icon: "navigation" },
+  { value: "ramasse", label: "Ramasse", icon: "repeat" },
+];
+
+export const AVANT12H_OPTIONS = [
+  { value: "non", label: "Pas d'urgence" },
+  { value: "oui", label: "Avant 12h", icon: "clock" },
+];
+
+// "Dernier arret" (voir routing/dernier-arret.js) : un seul colis a la fois.
+export const DERNIER_OPTIONS = [
+  { value: "non", label: "Ordre normal" },
+  { value: "oui", label: "Dernier arrêt", icon: "flag" },
+];
+
+// Pose la marque "dernier" sur ce colis et la retire de tous les autres encore
+// en jeu -- sinon deux "derniers" se disputeraient la fin de tournee.
+export async function retirerDernierDesAutres(colisId) {
+  const tous = await listAllColis();
+  for (const c of tous) {
+    if (c.id !== colisId && c.dernier) {
+      delete c.dernier;
+      await saveColis(c);
+    }
+  }
+}
+
+// Statut d'un colis APRES un (re)geocodage -- correction d'adresse, choix
+// d'un candidat, coordonnees collees. Bug reel corrige ici (retour terrain :
+// "des colis ne se sont pas enleves quand je les ai modifies apres avoir
+// optimise la tournee", "a la fin il en restait 3 alors que je les avais
+// livres") : la sauvegarde remettait TOUJOURS "pret" des que l'adresse etait
+// reconnue, y compris sur un colis deja livre ou deja dans la tournee. Un
+// colis livre corrige apres coup repassait "pret" et ressortait dans la
+// preparation du lendemain. Le statut de LIVRAISON (livre/echec) est un
+// fait acquis qu'une correction d'adresse ne remet pas en cause ; un colis
+// en tournee y reste tant que son adresse tient. Fonction pure, testee dans
+// colis-store.test.mjs.
+export function statutApresGeocodage(statutActuel, geocodeOk) {
+  if (statutActuel === "livre" || statutActuel === "echec") return statutActuel;
+  if (!geocodeOk) return "a_verifier";
+  return statutActuel === "en_tournee" ? "en_tournee" : "pret";
+}
+
+export function isRamasse(colis) {
+  return colis?.operation === "ramasse";
+}
+
+// Vocabulaire : une ramasse n'est pas "livree" mais "ramassee". Le statut
+// stocke reste "livre" dans les deux cas (c'est l'etat "traite avec succes",
+// voir les statuts dans CLAUDE.md) -- seul l'affichage change, pour ne pas
+// dedoubler toute la machine a etats pour une question de mot.
+export function verbeAction(colis) {
+  return isRamasse(colis) ? "Ramassé" : "Livré";
+}
+
+export function verbeActionInfinitif(colis) {
+  return isRamasse(colis) ? "ramasser" : "livrer";
+}

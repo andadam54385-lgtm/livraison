@@ -1,0 +1,834 @@
+import { openCamera } from "./capture.js";
+import { startBarcodeViewfinder } from "./viewfinder-ui.js";
+import { loadImageToCanvas, cropCanvas, preprocessForOcr, attachCropSelector } from "./preprocess.js";
+import { recognizeCanvas } from "./ocr.js";
+import { parseUpsLabel } from "./parse-ups-label.js";
+import { saveColis, isDuplicateTracking } from "./colis-store.js";
+import { recordCorrectionIfNeeded } from "./ocr-corrections-store.js";
+import { matchAddress, looseCommune } from "../geocode/match-address.js";
+import { renderCandidatePicker, renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
+import { listDistinctCities, searchAdresses, preloadBanEntries } from "../geocode/ban-index.js";
+import { normalizeCity } from "../geocode/normalize-address.js";
+import { getSetting } from "../settings/settings-store.js";
+import { findNearbyFavori } from "../favoris/favoris-store.js";
+import { googleMapsSearchUrl } from "../tour/deep-links.js";
+import { searchOnlinePlaces } from "../geocode/online-search.js";
+import { statutApresGeocodage } from "./colis-store.js";
+import { showToast } from "../lib/toast.js";
+import { escapeHtml, escapeAttr } from "../lib/escape.js";
+import { loadingHtml, inlineLoadingHtml } from "../lib/loading.js";
+import { segmentedHtml, bindSegmented, readSegmented } from "../ui/segmented.js";
+import { TYPE_CLIENT_OPTIONS, OPERATION_OPTIONS, AVANT12H_OPTIONS } from "./colis-store.js";
+import { emit } from "../lib/event-bus.js";
+import { uuid } from "../lib/id.js";
+import { dernierePositionConnue } from "../lib/derniere-position.js";
+import { choisirPointsDeReference } from "./points-reference.js";
+import { getActiveTour } from "../routing/tour-store.js";
+import { listAllColis } from "./colis-store.js";
+import { icon } from "../ui/icons.js";
+
+// Flux de capture/validation d'un colis (photo -> OCR -> fiche editable ->
+// geocodage), independant de tout onglet : utilise a la fois par le bouton
+// flottant camera (Etat A/B de l'ecran Tournee, voir tour-ui.js) et par le
+// bouton "Corriger" de la fiche colis (colis-detail-ui.js). Chaque fonction
+// est parametree par son `container` (pas de conteneur global module-level)
+// pour rester appelable depuis n'importe quel ecran.
+
+
+// Separe le numero de rue (champ dedie dans la saisie manuelle) du reste --
+// gere le numero en tete ("6 Rue de l'Eglise", forme la plus courante) ET en
+// fin ("Rue de l'Eglise 6", forme reelle rencontree sur une etiquette UPS
+// scannee, voir parse-ups-label.test.mjs cas 1). L'ancienne extraction dans
+// runGeocodeAndSave ne gerait que le numero en tete (`/^(\d+)/`) : un vrai
+// bug qui privait matchAddress de son bonus numero pour ce cas reel.
+//
+// Bug reel corrige ici (retour terrain : "accepte pas les bis ou les a/b") :
+// le suffixe de repetition ne reconnaissait que les mots complets
+// bis/ter/quater, jamais une lettre seule (6A, 6B...), pourtant tout aussi
+// courante sur une adresse francaise. "6a Rue de l'Eglise" (colle, sans
+// espace) ne matchait NI le motif "numero en tete" NI celui "numero en fin"
+// -- toute la chaine retombait en "rue" avec un numero vide, faisant perdre
+// le bonus numero du matching ET polluant la comparaison de similarite de
+// rue avec un "6a" parasite. La lettre seule est testee apres les mots
+// complets (jamais avant) et exige une frontiere de mot juste apres, pour
+// ne jamais confondre la premiere lettre du nom de rue qui suit avec un
+// suffixe ("6 Rue..." ne doit jamais lire "R" comme un suffixe -- "R" est
+// suivi de "u", pas d'une frontiere de mot, donc rejete).
+const REP_SUFFIX_WORDS = "bis|ter|quater|quinquies";
+// Exportee pour reutilisation par batch-scan-ui.js (scan en rafale, plusieurs
+// adresses par photo) -- meme logique d'extraction numero/suffixe que la
+// saisie manuelle, pas de raison de la dupliquer.
+export function splitNumeroRue(rueComplete) {
+  if (!rueComplete) return { numero: "", rue: "" };
+  const s = rueComplete.trim();
+  let m = s.match(new RegExp(`^(\\d+)\\s?(${REP_SUFFIX_WORDS})\\b\\.?\\s*(.*)$`, "i"));
+  if (m) return { numero: `${m[1]} ${m[2]}`.trim(), rue: m[3].trim() };
+  m = s.match(/^(\d+)\s?([a-z])\b\.?\s+(.+)$/i);
+  if (m) return { numero: `${m[1]}${m[2]}`.trim(), rue: m[3].trim() };
+  m = s.match(/^(\d+)\s+(.+)$/);
+  if (m) return { numero: m[1].trim(), rue: m[2].trim() };
+  m = s.match(new RegExp(`^(.+?)\\s+(\\d+\\s?(?:${REP_SUFFIX_WORDS}|[a-z])?)$`, "i"));
+  if (m) return { numero: m[2].replace(/\s+/g, "").trim(), rue: m[1].trim() };
+  return { numero: "", rue: s };
+}
+
+function joinNumeroRue(numero, rue) {
+  const n = (numero || "").trim();
+  const r = (rue || "").trim();
+  return n ? `${n} ${r}`.trim() : r;
+}
+
+// onCancelled (optionnel) : appele UNIQUEMENT si l'utilisateur annule avant
+// meme d'atteindre la fiche de revue (viseur code-barres ou selecteur de
+// photo natif), jamais en cas de succes ni d'erreur reelle. Bug reel
+// corrige ici, retour terrain : "cliquer sur annuler ne sort pas de la
+// prise de photo" -- avant ce parametre, l'annulation etait avalee en
+// silence (commentaire "on laisse l'ecran tel quel") en supposant que le
+// contenu D'AVANT le scan etait encore la, alors qu'il avait deja ete
+// ECRASE par le rendu du viseur camera (startBarcodeViewfinder ecrit dans
+// le meme container) : l'ecran restait bloque sur ce viseur mort (plus de
+// flux camera, boutons inertes puisque deja geres par une promesse
+// resolue), sans aucun moyen d'en sortir.
+export async function startScanFlow(container, { onSaved, onCancelled } = {}) {
+  try {
+    // Scan live du code-barres d'abord (plus fiable que l'OCR pour le
+    // tracking, suite exacte de chiffres/lettres) ; barcodeTracking vaut
+    // null si rien n'est detecte / camera live indisponible / l'utilisateur
+    // choisit "Prendre une photo à la place" -- dans tous ces cas on
+    // enchaine quand meme sur la photo+OCR habituelle pour le nom/adresse.
+    const barcodeTracking = await startBarcodeViewfinder(container);
+    const file = await openCamera();
+    await runOcrPipeline(container, file, { onSaved, barcodeTracking });
+  } catch (err) {
+    if (err.message !== "Aucune photo sélectionnée." && err.message !== "Scan annulé.") {
+      console.error(err);
+      container.innerHTML = `<div class="empty-state">Erreur photo: ${err.message}</div>`;
+    } else if (onCancelled) {
+      onCancelled();
+    }
+  }
+}
+
+// Repli quand le scan/OCR ne fonctionne pas ou pas bien (mauvaise photo,
+// pas d'appareil photo, colis hors UPS...) : ouvre directement la fiche
+// vide, sans passer par capture/recadrage/OCR.
+export function startManualEntry(container, { onSaved } = {}) {
+  const colis = {
+    id: uuid(),
+    tracking: null,
+    trackingConfidence: null,
+    nom: "",
+    tel: "",
+    telConfidence: "a_verifier",
+    adresseRaw: { rue: "", cp: "", ville: "" },
+    adresseAffichage: null,
+    geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
+    avant12h: false,
+    typeClient: "particulier",
+    operation: "livraison",
+    quantite: 1,
+    statut: "a_verifier",
+    source: "manuel",
+    ocrRawText: "",
+    dateScan: new Date().toISOString(),
+  };
+  renderReviewForm(container, colis, { isNew: true, duplicate: false, onSaved });
+}
+
+async function showCropStep(container, canvas) {
+  return new Promise((resolve) => {
+    container.innerHTML = `
+      <p class="muted">Recadre l'étiquette si besoin (glisse un rectangle), ou passe directement.</p>
+      <div id="crop-overlay" style="position:relative; touch-action:none;">
+        <canvas id="crop-preview" style="width:100%; display:block; border-radius:12px;"></canvas>
+      </div>
+      <div class="button-row">
+        <button type="button" id="crop-skip">Passer le recadrage</button>
+        <button type="button" class="primary" id="crop-confirm" disabled>Valider le cadrage</button>
+      </div>
+    `;
+    const previewCanvas = container.querySelector("#crop-preview");
+    previewCanvas.width = canvas.width;
+    previewCanvas.height = canvas.height;
+    previewCanvas.getContext("2d").drawImage(canvas, 0, 0);
+
+    const overlay = container.querySelector("#crop-overlay");
+    const confirmBtn = container.querySelector("#crop-confirm");
+    let currentRect = null;
+
+    attachCropSelector(overlay, canvas, (rect) => {
+      currentRect = rect;
+      confirmBtn.disabled = !rect;
+    });
+
+    container.querySelector("#crop-skip").addEventListener("click", () => resolve(null));
+    confirmBtn.addEventListener("click", () => resolve(currentRect));
+  });
+}
+
+async function runOcrPipeline(container, file, { onSaved, barcodeTracking } = {}) {
+  container.innerHTML = loadingHtml("Chargement de la photo…");
+  const rawCanvas = await loadImageToCanvas(file);
+
+  const cropRect = await showCropStep(container, rawCanvas);
+  const working = cropRect ? cropCanvas(rawCanvas, cropRect) : rawCanvas;
+
+  container.innerHTML = loadingHtml("Lecture de l'étiquette (OCR)…");
+  preprocessForOcr(working);
+
+  const ocrLangs = (await getSetting("ocrLangs")) || "fra";
+  const { text, confidence } = await recognizeCanvas(working, { langs: ocrLangs });
+  const parsed = parseUpsLabel(text);
+  // Le code-barres scanne en direct (suite exacte de caracteres) prime sur
+  // le tracking devine par l'OCR (chiffres/lettres facilement confondus) --
+  // voir viewfinder-ui.js.
+  const tracking = barcodeTracking || parsed.tracking;
+
+  const duplicate = tracking ? await isDuplicateTracking(tracking) : false;
+
+  const colis = {
+    id: tracking || uuid(),
+    tracking,
+    trackingConfidence: barcodeTracking ? "code_barre" : parsed.tracking ? "haute" : null,
+    nom: parsed.nom || "",
+    tel: parsed.tel || "",
+    telConfidence: parsed.telConfidence,
+    adresseRaw: { rue: parsed.rue || "", cp: parsed.cp || "", ville: parsed.ville || "" },
+    adresseAffichage: null,
+    geocode: { status: "non_geocode", lat: null, lon: null, candidates: [] },
+    avant12h: false,
+    typeClient: "particulier",
+    operation: "livraison",
+    quantite: 1,
+    statut: "a_verifier",
+    source: "ocr",
+    ocrRawText: text,
+    ocrConfidence: confidence,
+    dateScan: new Date().toISOString(),
+  };
+
+  renderReviewForm(container, colis, { isNew: true, duplicate, onSaved });
+}
+
+// Suggestions d'ADRESSE COMPLETE au fil de la frappe (numero+rue(+ville/CP)
+// en une ligne, adresses connues de la BAN locale) -- retour terrain : "une
+// ligne pour l'adresse ou tu me fais des propositions en fonction de ce qui
+// existent [...] complètement avec l'adresse sur une ligne", meme principe
+// que bindVilleAutocomplete ci-dessous mais sur toute l'adresse plutot que
+// la seule ville. Purement une aide a la saisie (choisir une suggestion
+// remplit les 4 champs details d'un coup, mais ils restent modifiables
+// ensuite) : le geocodage final revalide toujours via matchAddress
+// independamment de ce qui est tape ici.
+//
+// La recherche elle-meme (tolerante a l'ordre des mots, au CP partiel, aux
+// mots-type de voie omis...) vit dans searchAdresses (ban-index.js) --
+// voir son commentaire pour l'historique des 3 correctifs positionnels
+// remplaces par ce mecanisme unique, suite au retour terrain "rien ne
+// marche fais un truc plus simple qui marche mieux un peu comme fonctionne
+// une recherche plan ou google map".
+// initialQuery (optionnel) : declenche la recherche IMMEDIATEMENT au
+// rendu, sans attendre que l'utilisateur tape quoi que ce soit -- retour
+// terrain : "il faudrait qu'après la photo ça démarre directement la
+// recherche d'adresse". Avant ce correctif, l'OCR remplissait deja les
+// champs Numero/Rue/Ville/CP separes, mais le champ "Adresse" (recherche
+// intelligente) restait vide et inerte : il fallait retaper toute
+// l'adresse a la main pour obtenir des suggestions, alors que le texte
+// etait deja disponible.
+// Points autour desquels classer les adresses proposees : position GPS si le
+// livreur est dans sa zone, sinon les points deja installes, sinon le depot
+// (regle et retours terrain dans points-reference.js).
+async function pointsDeReference() {
+  try {
+    const [tour, colis, depotLat, depotLon] = await Promise.all([
+      getActiveTour(),
+      listAllColis(),
+      getSetting("depotLat"),
+      getSetting("depotLon"),
+    ]);
+    return choisirPointsDeReference({
+      gps: dernierePositionConnue(),
+      depot: { lat: depotLat, lon: depotLon },
+      colis,
+      idsTournee: new Set((tour?.stops || []).map((s) => s.colisId)),
+    });
+  } catch (err) {
+    console.warn("[adresse] points de reference indisponibles:", err);
+    return [];
+  }
+}
+
+function bindAdresseAutocomplete(container, { initialQuery = "" } = {}) {
+  // Calcule une fois a l'ouverture de la fiche, pas a chaque frappe.
+  const referenceProche = pointsDeReference();
+  const input = container.querySelector("#f-adresse-complete");
+  const list = container.querySelector("#f-adresse-complete-suggestions");
+  const numeroInput = container.querySelector("#f-numero");
+  const rueInput = container.querySelector("#f-rue");
+  const villeInput = container.querySelector("#f-ville");
+  const cpInput = container.querySelector("#f-cp");
+  let loadingTimer = null;
+  // Identifie la requete de recherche la plus recente -- retour terrain :
+  // "il faut que ca cherche au fur et a mesure pas quand j'arrete
+  // d'ecrire" (le debounce de 200ms donnait l'impression d'attendre une
+  // pause). Chaque frappe lance desormais sa propre recherche IMMEDIATEMENT
+  // (plus de debounce), mais la recherche est asynchrone (async function)
+  // et rien ne garantit qu'une reponse revienne dans l'ordre d'envoi --
+  // sans ce garde-fou, taper vite pourrait afficher une reponse PERIMEE
+  // (correspondant a un texte deja depasse) apres une plus recente.
+  let requestSeq = 0;
+
+  function hide() {
+    clearTimeout(loadingTimer);
+    requestSeq++; // invalide toute recherche encore en vol
+    list.innerHTML = "";
+  }
+
+  async function showMatches(rawInput) {
+    const mySeq = ++requestSeq;
+    // Le tout premier appel de la session charge toute la base en memoire
+    // (voir getAllBanEntriesCached) -- affiche un indicateur si ca prend
+    // plus de 300ms, pour ne jamais laisser l'ecran silencieux pendant ce
+    // chargement ponctuel (peut avoir contribue a un signalement reel
+    // "marche pas bien" sans autre indice : rien a l'ecran, indiscernable
+    // d'un vrai echec).
+    loadingTimer = setTimeout(() => {
+      if (mySeq !== requestSeq) return;
+      list.innerHTML = `<p class="muted" style="padding:8px;">${inlineLoadingHtml("Recherche…")}</p>`;
+    }, 300);
+    let matches;
+    try {
+      matches = await searchAdresses(rawInput, 6, { pres: await referenceProche });
+    } catch (err) {
+      clearTimeout(loadingTimer);
+      if (mySeq !== requestSeq) return; // une frappe plus recente a deja pris le dessus
+      // Ne jamais echouer en silence : sans ce catch, une erreur ici (ex:
+      // IndexedDB indisponible) ne laissait RIEN a l'ecran -- indiscernable
+      // d'une recherche normale sans resultat, ce qui a complique un
+      // signalement reel ("marche pas bien", sans autre indice visible).
+      console.error("[adresse] recherche echouee:", err);
+      list.innerHTML = `<p class="muted" style="padding:8px;">Recherche indisponible pour le moment.</p>`;
+      return;
+    }
+    clearTimeout(loadingTimer);
+    if (mySeq !== requestSeq) return; // reponse perimee, ignoree
+    if (matches.length === 0) {
+      list.innerHTML = "";
+      return;
+    }
+    list.innerHTML = matches
+      .map((entry, i) => `<button type="button" class="candidate-item" data-idx="${i}">${escapeHtml(formatEntry(entry))}</button>`)
+      .join("");
+    list.querySelectorAll(".candidate-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const picked = matches[Number(btn.dataset.idx)];
+        numeroInput.value = picked.n ? `${picked.n}${picked.rep || ""}`.trim() : "";
+        rueInput.value = picked.r || "";
+        villeInput.value = picked.c || "";
+        cpInput.value = picked.cp || "";
+        input.value = formatEntry(picked);
+        hide();
+      });
+    });
+  }
+
+  // Demarre le chargement de la base en arriere-plan des le focus du champ
+  // (voir preloadBanEntries) : le temps que l'utilisateur tape ses
+  // premiers caracteres masque generalement tout le cout du chargement.
+  input.addEventListener("focus", () => preloadBanEntries());
+  input.addEventListener("input", () => {
+    const value = input.value.trim();
+    if (value.length < 4) {
+      hide();
+      return;
+    }
+    showMatches(value);
+  });
+  input.addEventListener("blur", () => {
+    // Laisse le temps au clic sur une suggestion de se declencher avant de
+    // la faire disparaitre (blur tire avant click sinon).
+    setTimeout(hide, 150);
+  });
+
+  if (initialQuery.trim().length >= 4) {
+    preloadBanEntries();
+    showMatches(initialQuery.trim());
+  }
+}
+
+// Suggestions de ville au fil de la frappe (prefixe, communes connues de la
+// BAN locale) : purement une aide a la saisie, ne bloque rien -- le
+// geocodage final revalide toujours via matchAddress independamment de ce
+// qui est tape ici. datalist HTML n'est pas utilisable (pas de suggestions
+// sur Safari iOS), d'ou cette liste custom.
+function bindVilleAutocomplete(container) {
+  const input = container.querySelector("#f-ville");
+  const list = container.querySelector("#f-ville-suggestions");
+  const cpInput = container.querySelector("#f-cp");
+  let debounceTimer = null;
+
+  function hide() {
+    list.innerHTML = "";
+  }
+
+  // Comparaison TOLERANTE des deux cotes (voir looseCommune) : tirets et
+  // apostrophes en espaces, ligature "œ" developpee, "ST" -> "SAINT". Sans
+  // ca, la liste restait vide des que le livreur tapait la forme naturelle --
+  // "st mihiel" (la base ecrit "saint-mihiel"), "saint mihiel" sans le tiret,
+  // ou "koeur" (la base ecrit "kœur-la-grande"). Retour terrain 2026-09-11.
+  // Un mot ENTIER en milieu de nom compte aussi ("mihiel" trouve
+  // Saint-Mihiel), apres les correspondances par le debut.
+  async function showMatches(prefix) {
+    const cities = await listDistinctCities();
+    const debut = [];
+    const dansLeNom = [];
+    for (const c of cities) {
+      const cn = looseCommune(c.cn);
+      if (cn.startsWith(prefix)) debut.push(c);
+      else if (cn.includes(` ${prefix}`)) dansLeNom.push(c);
+    }
+    const matches = [...debut, ...dansLeNom].slice(0, 6);
+    if (matches.length === 0) {
+      hide();
+      return;
+    }
+    list.innerHTML = matches
+      .map((c, i) => `<button type="button" class="candidate-item" data-idx="${i}">${escapeHtml(c.c)} <span class="muted">${escapeHtml(c.cp)}</span></button>`)
+      .join("");
+    list.querySelectorAll(".candidate-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const picked = matches[Number(btn.dataset.idx)];
+        input.value = picked.c;
+        if (!cpInput.value.trim()) cpInput.value = picked.cp;
+        hide();
+      });
+    });
+  }
+
+  input.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    const prefix = looseCommune(normalizeCity(input.value.trim()));
+    if (prefix.length < 2) {
+      hide();
+      return;
+    }
+    debounceTimer = setTimeout(() => showMatches(prefix), 150);
+  });
+  input.addEventListener("blur", () => {
+    // Laisse le temps au clic sur une suggestion de se declencher avant de
+    // la faire disparaitre (blur tire avant click sinon).
+    setTimeout(hide, 150);
+  });
+}
+
+// onCancel (optionnel) : ajoute un bouton "Retour" qui quitte la fiche SANS
+// enregistrer -- utilise par la revision d'un scan de liste, ou une fiche
+// ouverte pour correction (ou ajoutee a la main) doit pouvoir etre refermee
+// pour revenir a la liste, la ou "Rescanner" n'a pas de sens.
+export function renderReviewForm(container, colis, { isNew, duplicate = false, onSaved, onCancel } = {}) {
+  const telBadge =
+    colis.source === "manuel"
+      ? "" // saisie directe par l'utilisateur : pas de validation croisee a afficher
+      : colis.telConfidence === "haute"
+        ? '<span class="badge badge-ok">confiance haute</span>'
+        : '<span class="badge badge-pending">à vérifier</span>';
+
+  // Ordre retour terrain : adresse d'abord (numero -> rue -> ville -> code
+  // postal), le nom en dernier -- seule l'adresse conditionne le geocodage
+  // (voir colis-ready-rule), le nom peut se determiner sur place.
+  const { numero, rue: rueSansNumero } = splitNumeroRue(colis.adresseRaw.rue);
+  // Pre-remplit le champ "Adresse" (recherche intelligente) avec ce que
+  // l'OCR a deja extrait, pour declencher la recherche des le rendu --
+  // voir bindAdresseAutocomplete(initialQuery) plus haut.
+  const initialAdresseQuery = [colis.adresseRaw.rue, colis.adresseRaw.ville, colis.adresseRaw.cp].filter(Boolean).join(" ").trim();
+
+  container.innerHTML = `
+    ${duplicate ? `<div class="card" style="border-color:var(--danger);"><strong>${icon("alert-triangle")}Ce tracking a déjà été scanné.</strong></div>` : ""}
+    <div class="button-row">
+      ${onCancel ? `<button type="button" id="f-cancel">${icon("arrow-left")}Retour</button>` : `<button type="button" id="f-rescan">Rescanner</button>`}
+      <button type="button" class="primary btn-lg" id="f-valider">Valider</button>
+    </div>
+    <button type="button" id="f-gps-direct" class="btn-gps-direct">${icon("navigation")}Placer le point GPS (entreprise, lieu-dit)</button>
+    <div class="field">
+      <label>Adresse</label>
+      <input type="text" id="f-adresse-complete" class="field-lg" placeholder="ex: 12 rue de la Liberté" autocomplete="off" value="${escapeAttr(initialAdresseQuery)}">
+      <div id="f-adresse-complete-suggestions" class="candidate-list"></div>
+      <p class="muted" style="margin-top:4px;">Choisis une suggestion pour remplir les champs ci-dessous d'un coup, ou complète-les toi-même.</p>
+    </div>
+    <div class="field">
+      <label>Numéro</label>
+      <input type="text" id="f-numero" class="field-lg" inputmode="numeric" value="${escapeAttr(numero)}">
+    </div>
+    <div class="field">
+      <label>Rue</label>
+      <input type="text" id="f-rue" class="field-lg" value="${escapeAttr(rueSansNumero)}">
+    </div>
+    <div class="field">
+      <label>Ville</label>
+      <input type="text" id="f-ville" class="field-lg" value="${escapeAttr(colis.adresseRaw.ville)}" autocomplete="off">
+      <div id="f-ville-suggestions" class="candidate-list"></div>
+    </div>
+    <div class="field">
+      <label>Code postal</label>
+      <input type="text" id="f-cp" class="field-lg" inputmode="numeric" value="${escapeAttr(colis.adresseRaw.cp)}">
+    </div>
+    <div class="field">
+      <label>Nombre de colis à cette adresse</label>
+      <input type="number" id="f-quantite" class="field-lg" inputmode="numeric" min="1" step="1" value="${colis.quantite || 1}">
+    </div>
+    <div class="field">
+      <label>Téléphone ${telBadge}</label>
+      <input type="tel" id="f-tel" class="field-lg" value="${escapeAttr(colis.tel)}">
+    </div>
+    <div class="field">
+      <label>Nom</label>
+      <input type="text" id="f-nom" class="field-lg" value="${escapeAttr(colis.nom)}">
+    </div>
+    <div class="segmented-stack">
+      ${segmentedHtml("typeClient", TYPE_CLIENT_OPTIONS, colis.typeClient || "particulier")}
+      ${segmentedHtml("operation", OPERATION_OPTIONS, colis.operation || "livraison")}
+      ${segmentedHtml("avant12h", AVANT12H_OPTIONS, colis.avant12h ? "oui" : "non")}
+    </div>
+  `;
+
+  bindSegmented(container, "typeClient");
+  bindSegmented(container, "operation");
+  bindSegmented(container, "avant12h");
+
+  bindAdresseAutocomplete(container, { initialQuery: initialAdresseQuery });
+  bindVilleAutocomplete(container);
+
+  container.querySelector("#f-rescan")?.addEventListener("click", () =>
+    // onCancelled : si l'utilisateur annule le rescan, revient a CETTE
+    // fiche de revue (pas la liste) -- voir startScanFlow(onCancelled).
+    startScanFlow(container, { onSaved, onCancelled: () => renderReviewForm(container, colis, { isNew, duplicate, onSaved, onCancel }) })
+  );
+  container.querySelector("#f-cancel")?.addEventListener("click", () => onCancel());
+  // Recopie les champs du formulaire dans le colis (partage par "Valider" et
+  // par le raccourci GPS direct ci-dessous).
+  function lireFormulaire() {
+    colis.nom = container.querySelector("#f-nom").value.trim();
+    colis.tel = container.querySelector("#f-tel").value.trim();
+    let numeroField = container.querySelector("#f-numero").value.trim();
+    let rueField = container.querySelector("#f-rue").value.trim();
+    let cpField = container.querySelector("#f-cp").value.trim();
+    const villeField = container.querySelector("#f-ville").value.trim();
+    // Repli : texte tape dans le champ "Adresse" (recherche une ligne) SANS
+    // suggestion choisie -- retour terrain : "je note dans adresse et quand
+    // il trouve pas il ne garde pas ce que j'ai note". Avant ce repli, seuls
+    // les 4 champs detailles comptaient au moment de Valider : tout ce qui
+    // n'avait ete tape QUE dans le champ Adresse (nom d'entreprise, adresse
+    // que la recherche ne reconnait pas...) etait perdu, et le colis se
+    // retrouvait sans la moindre adresse ("(adresse a verifier)" partout, y
+    // compris en titre de carte). Extraction minimale : un groupe de 5
+    // chiffres part en CP, le reste en rue (numero separe via splitNumeroRue
+    // comme pour une saisie normale) -- le texte est ainsi conserve ET
+    // reutilisable tel quel par l'ecran "Adresse a confirmer" (recherche en
+    // ligne pre-remplie avec, voir renderGeocodePicker).
+    if (!rueField) {
+      const adresseLibre = container.querySelector("#f-adresse-complete").value.trim();
+      if (adresseLibre) {
+        const cpMatch = adresseLibre.match(/\b\d{5}\b/);
+        if (cpMatch && !cpField) cpField = cpMatch[0];
+        const sansCp = adresseLibre.replace(/\b\d{5}\b/g, " ").replace(/\s+/g, " ").trim();
+        const { numero: numeroLibre, rue: rueLibre } = splitNumeroRue(sansCp);
+        rueField = rueLibre || sansCp;
+        if (!numeroField && numeroLibre) numeroField = numeroLibre;
+      }
+    }
+    colis.adresseRaw = {
+      rue: joinNumeroRue(numeroField, rueField),
+      cp: cpField,
+      ville: villeField,
+    };
+    // Champs corriges a la main : l'ancienne adresse canonique (si un
+    // geocodage precedent en avait pose une) ne correspond plus forcement,
+    // on la laisse etre recalculee par le prochain geocodage reussi.
+    colis.adresseAffichage = null;
+    // Tracking : plus de champ de saisie manuelle (retour terrain : peu
+    // fiable/peu utile a corriger a la main) -- colis.tracking reste tel
+    // qu'extrait automatiquement par l'OCR (ou null), utilise seulement pour
+    // la detection de doublon (voir isDuplicateTracking).
+    colis.typeClient = readSegmented(container, "typeClient") || "particulier";
+    colis.operation = readSegmented(container, "operation") || "livraison";
+    colis.avant12h = readSegmented(container, "avant12h") === "oui";
+    const quantiteInput = parseInt(container.querySelector("#f-quantite").value, 10);
+    colis.quantite = Number.isFinite(quantiteInput) && quantiteInput > 0 ? quantiteInput : 1;
+  }
+
+  // Journal des corrections OCR (retour terrain : "beaucoup d'erreurs", le
+  // but est d'ameliorer le parser pour les scans suivants, pas juste ce
+  // colis) -- voir ocr-corrections-store.js, no-op silencieux si ce colis n'a
+  // pas de texte OCR ou si rien n'a change par rapport a ce que le parser
+  // produit.
+  function journaliserCorrection() {
+    return recordCorrectionIfNeeded(colis, {
+      nom: colis.nom,
+      tel: colis.tel,
+      rue: colis.adresseRaw.rue,
+      cp: colis.adresseRaw.cp,
+      ville: colis.adresseRaw.ville,
+    });
+  }
+
+  container.querySelector("#f-valider").addEventListener("click", async () => {
+    lireFormulaire();
+    await journaliserCorrection();
+    container.innerHTML = loadingHtml("Géocodage…");
+    await runGeocodeAndSave(container, colis, { onSaved });
+  });
+
+  // Raccourci GPS direct (retour terrain 2026-09-10 : "quand c'est une
+  // entreprise ou une adresse particuliere, mettre le GPS directement sans
+  // avoir a appuyer sur Valider"). Saute le geocodage BAN -- inutile pour un
+  // nom d'entreprise ou un lieu-dit, il n'y est pas -- et ouvre tout de suite
+  // l'ecran de placement (recherche en ligne / coordonnees collees), avec le
+  // NOM du client comme recherche par defaut : c'est lui qu'on cherche, pas
+  // l'adresse brute.
+  container.querySelector("#f-gps-direct").addEventListener("click", async () => {
+    lireFormulaire();
+    await journaliserCorrection();
+    colis.adresseAffichage = null;
+    colis.geocode = { status: "non_geocode", lat: null, lon: null, candidates: [] };
+    colis.statut = statutApresGeocodage(colis.statut, false);
+    await saveColis(colis);
+    renderGeocodePicker(container, colis, {
+      onSaved,
+      onlineQuery: colis.nom || null,
+      focusOnline: true,
+    });
+  });
+}
+
+export async function runGeocodeAndSave(container, colis, { onSaved } = {}) {
+  // Numero retire du texte compare a la BAN (entry.rn n'a jamais le numero,
+  // c'est un champ separe) : le laisser dans `rue` polluait legerement la
+  // similarite de rue (un "6 " ou " 6" en trop compte comme des caracteres
+  // qui ne correspondent a rien), en plus de ne jamais alimenter le bonus
+  // numero pour la forme "rue puis numero" (voir splitNumeroRue).
+  const { numero: extractedNumero, rue: rueSansNumero } = splitNumeroRue(colis.adresseRaw.rue);
+  const numero = extractedNumero || null;
+
+  const { best, candidates } = await matchAddress({
+    rue: rueSansNumero,
+    cp: colis.adresseRaw.cp,
+    commune: colis.adresseRaw.ville,
+    numero,
+  });
+
+  if (best) {
+    colis.geocode = { status: "ok", lat: best.entry.lat, lon: best.entry.lon, candidates: [] };
+    // Adresse canonique de la BAN (bien casee, complete) : remplace
+    // l'affichage par cette forme confirmee plutot que le texte OCR/saisi
+    // brut, qui peut etre tronque ou mal casse. Ne touche jamais adresseRaw
+    // (sert au matching/a l'edition), ni une quelconque forme normalisee.
+    colis.adresseAffichage = formatEntry(best.entry);
+  } else if (candidates.length > 0) {
+    colis.geocode = {
+      status: "ambigu",
+      lat: null,
+      lon: null,
+      candidates: candidates.map((c) => ({ ...c.entry, score: c.score })),
+    };
+  } else {
+    colis.geocode = { status: "non_geocode", lat: null, lon: null, candidates: [] };
+  }
+
+  // Le nom n'est PAS bloquant (retour utilisateur : une adresse correcte
+  // suffit, le nom peut se determiner sur place) -- seul le geocodage
+  // conditionne "pret". Absence de nom : la carte affiche l'adresse en titre
+  // a la place (voir renderPrepCard/renderStopCard/renderHeroCard), simple
+  // repli d'affichage, pas un blocage de statut.
+  // Jamais "pret" impose : un colis livre reste livre, un colis en tournee y
+  // reste (voir statutApresGeocodage).
+  colis.statut = statutApresGeocodage(colis.statut, colis.geocode.status === "ok");
+
+  await saveColis(colis);
+  emit("colis:saved", { colis });
+
+  if (colis.geocode.status === "ok") {
+    await warnIfFavoriMatch(colis);
+    onSaved?.(colis);
+  } else {
+    renderGeocodePicker(container, colis, { onSaved });
+  }
+}
+
+// Alerte le livreur quand un colis fraichement geocode correspond a une
+// adresse deja notee en favori (ex: code portail, consigne de livraison).
+async function warnIfFavoriMatch(colis) {
+  const fav = await findNearbyFavori(colis.geocode.lat, colis.geocode.lon);
+  if (fav && fav.note) {
+    showToast(`Adresse favorite : ${fav.note}`, { variant: "warn", durationMs: 7000 });
+  }
+}
+
+// Parse "48.6921, 6.1844" (ou variantes d'espacement) -- format qu'on
+// retrouve tel quel quand on fait un appui long sur un point Google Maps puis
+// "Copier les coordonnees". Google Maps entoure parfois la paire de
+// parentheses ("(48.6921, 6.1844)", ex: fiche d'un etablissement) -- bug reel
+// corrige ici : parseFloat("(48.6921") echoue silencieusement ("(" n'est pas
+// un debut de nombre valide), le collage direct depuis Google Maps
+// necessitait donc de retirer les parentheses a la main avant de coller.
+// Retourne null si la latitude/longitude n'est pas un nombre plausible
+// plutot que de planter le geocodage manuel.
+function parseLatLon(text) {
+  const cleaned = String(text || "").replace(/[()]/g, "");
+  const parts = cleaned.split(",").map((s) => parseFloat(s.trim()));
+  if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n))) return null;
+  const [lat, lon] = parts;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return { lat, lon };
+}
+
+function renderGeocodePicker(container, colis, { onSaved, onlineQuery = null, focusOnline = false }) {
+  const rawQuery = `${colis.adresseRaw.rue} ${colis.adresseRaw.cp} ${colis.adresseRaw.ville}`.trim();
+  // Une seule sortie, jamais deux : un double appui sur un resultat (ou sur
+  // "Valider ces coordonnees") declenchait deux onSaved -> deux arrets pour le
+  // meme colis dans la tournee (bug reel 2026-09-10, voir aussi
+  // insertStopCheapest). Verrou pose au premier accept, jamais releve : cet
+  // ecran est detruit par le rendu qui suit.
+  let termine = false;
+  container.innerHTML = `
+    <div class="card">
+      <div class="card-title">Adresse à confirmer</div>
+      <p class="muted">${escapeHtml(colis.adresseRaw.rue)}, ${escapeHtml(colis.adresseRaw.cp)} ${escapeHtml(colis.adresseRaw.ville)}</p>
+    </div>
+    <div id="geocode-picker-slot"></div>
+    <div class="card" style="margin-top:8px;">
+      <div class="card-title">Introuvable ? (entreprise, zone industrielle…)</div>
+      <p class="muted">Cherche le nom directement ici (recherche en ligne OpenStreetMap) — la BAN ne connaît que les adresses officielles, pas les noms d'entreprise.</p>
+      <div class="field">
+        <label>Nom / lieu à chercher</label>
+        <input type="text" id="geocode-online-query" class="field-lg" value="${escapeAttr(onlineQuery || rawQuery)}" autocomplete="off">
+      </div>
+      <button type="button" class="primary" id="geocode-online-btn">${icon("search")}Chercher en ligne</button>
+      <div id="geocode-online-results" class="candidate-list" style="margin-top:8px;"></div>
+      <details style="margin-top:10px;">
+        <summary>Toujours introuvable ? Passer par Google Maps</summary>
+        <a class="btn-link" style="margin-top:8px;" href="${googleMapsSearchUrl(rawQuery)}" target="_blank" rel="noopener">${icon("search")}Chercher "${escapeHtml(rawQuery)}" sur Google Maps</a>
+        <ol class="muted" style="margin:6px 0 0; padding-left:18px;">
+          <li>Sur la carte qui s'ouvre, repère l'endroit exact (entrée du bâtiment, portail…).</li>
+          <li>Appui long sur ce point précis : un repère (épingle) apparaît.</li>
+          <li>Les coordonnées GPS s'affichent — en bas de l'écran sous le nom du lieu, ou en remontant la fiche du repère si besoin. Appuie dessus pour les copier ("Copier les coordonnées" ou une pression longue sur le texte).</li>
+          <li>Reviens ici et colle-les dans le champ ci-dessous.</li>
+        </ol>
+        <div class="field" style="margin-top:10px;">
+          <label>Coordonnées GPS collées</label>
+          <input type="text" id="geocode-manual-coords" class="field-lg" placeholder="ex: 48.6921, 6.1844" inputmode="decimal">
+        </div>
+        <button type="button" id="geocode-manual-coords-btn">Valider ces coordonnées</button>
+      </details>
+    </div>
+    <div class="button-row">
+      <button type="button" id="geocode-later">Plus tard (revoir dans la liste)</button>
+    </div>
+  `;
+  const slot = container.querySelector("#geocode-picker-slot");
+
+  async function acceptEntry(entry) {
+    if (termine) return;
+    termine = true;
+    colis.geocode = { status: "ok", lat: entry.lat, lon: entry.lon, candidates: [] };
+    colis.adresseAffichage = formatEntry(entry);
+    colis.statut = statutApresGeocodage(colis.statut, true); // adresse confirmee ici (choix manuel/candidat) -> le nom n'est pas bloquant
+    await saveColis(colis);
+    emit("colis:saved", { colis });
+    await warnIfFavoriMatch(colis);
+    onSaved?.(colis);
+  }
+
+  // Meme chemin que acceptEntry mais sans entree BAN (pas de nom d'entreprise
+  // dans ce registre) : adresseAffichage reste null, formatAdresseAffichage()
+  // se rabat alors sur adresseRaw (le texte scanne/tape, ex: le nom de
+  // l'entreprise) pour l'affichage.
+  async function acceptManualCoords(lat, lon) {
+    if (termine) return;
+    termine = true;
+    colis.geocode = { status: "ok", lat, lon, candidates: [], manual: true };
+    colis.statut = statutApresGeocodage(colis.statut, true);
+    await saveColis(colis);
+    emit("colis:saved", { colis });
+    await warnIfFavoriMatch(colis);
+    onSaved?.(colis);
+  }
+
+  function showManual() {
+    renderManualAddressSearch(slot, {
+      initialQuery: `${colis.adresseRaw.rue} ${colis.adresseRaw.cp}`.trim(),
+      onPick: acceptEntry,
+      onCancel: () => renderGeocodePicker(container, colis, { onSaved }),
+    });
+  }
+
+  if (colis.geocode.candidates.length > 0) {
+    renderCandidatePicker(slot, {
+      candidates: colis.geocode.candidates.map((c) => ({ entry: c, score: c.score })),
+      onPick: acceptEntry,
+      onManual: showManual,
+    });
+  } else {
+    showManual();
+  }
+
+  // Recherche en ligne du nom d'entreprise/lieu (voir online-search.js) --
+  // resultats affiches directement ici, un tap = coordonnees posees. Meme
+  // chemin de sortie que le collage manuel de coordonnees (acceptManualCoords,
+  // geocode.manual=true : pas d'entree BAN correspondante).
+  const onlineBtn = container.querySelector("#geocode-online-btn");
+  const onlineResults = container.querySelector("#geocode-online-results");
+  onlineBtn.addEventListener("click", async () => {
+    const query = container.querySelector("#geocode-online-query").value.trim();
+    if (query.length < 3) {
+      showToast("Tape au moins le nom de l'entreprise ou du lieu.");
+      return;
+    }
+    onlineBtn.disabled = true;
+    onlineResults.innerHTML = `<p class="muted" style="padding:8px;">${inlineLoadingHtml("Recherche en ligne…")}</p>`;
+    let places;
+    try {
+      places = await searchOnlinePlaces(query);
+    } catch (err) {
+      console.error("[geocode] Recherche en ligne echouee:", err);
+      onlineResults.innerHTML = `<p class="muted" style="padding:8px;">Recherche en ligne impossible (hors ligne ?). Réessaie, ou passe par Google Maps ci-dessous.</p>`;
+      onlineBtn.disabled = false;
+      return;
+    }
+    onlineBtn.disabled = false;
+    if (places.length === 0) {
+      onlineResults.innerHTML = `<p class="muted" style="padding:8px;">Rien trouvé pour "${escapeHtml(query)}" — essaie avec le nom + la ville, ou passe par Google Maps ci-dessous.</p>`;
+      return;
+    }
+    onlineResults.innerHTML = places
+      .map((p, i) => `<button type="button" class="candidate-item" data-idx="${i}">${escapeHtml(p.label)}</button>`)
+      .join("");
+    onlineResults.querySelectorAll(".candidate-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const picked = places[Number(btn.dataset.idx)];
+        // Le nom retenu est ce que le livreur vient de TAPER pour trouver le
+        // lieu (retour terrain : "mets le dernier nom mis pour la recherche,
+        // pas celui que l'app a note") -- ce que l'OCR ou la saisie d'origine
+        // avaient produit etait justement ce qui ne permettait pas de trouver
+        // l'adresse. Seulement s'il a change le texte : la valeur par defaut
+        // du champ est l'adresse brute, pas un nom.
+        const saisi = container.querySelector("#geocode-online-query").value.trim();
+        if (saisi && saisi !== rawQuery) colis.nom = saisi;
+        acceptManualCoords(picked.lat, picked.lon);
+      });
+    });
+  });
+
+  container.querySelector("#geocode-manual-coords-btn").addEventListener("click", () => {
+    const parsed = parseLatLon(container.querySelector("#geocode-manual-coords").value);
+    if (!parsed) {
+      showToast("Coordonnées invalides (format attendu : 48.6921, 6.1844)");
+      return;
+    }
+    acceptManualCoords(parsed.lat, parsed.lon);
+  });
+  container.querySelector("#geocode-later").addEventListener("click", () => {
+    if (termine) return;
+    termine = true;
+    onSaved?.(colis);
+  });
+  if (focusOnline) container.querySelector("#geocode-online-query")?.focus();
+}

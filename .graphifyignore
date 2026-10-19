@@ -1,0 +1,7 @@
+# Bibliotheque tierce vendue (Tesseract.js, minifiee) : bruit pur pour un
+# graphe de connaissance du CODE DU PROJET (noms a une lettre, aucune valeur
+# de navigation). Le reste du repo (js/, css/, tools/...) est le vrai code.
+lib/tesseract/
+
+# Sortie de Graphify lui-meme : jamais se scanner soi-meme.
+graphify-out/

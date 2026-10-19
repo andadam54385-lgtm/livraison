@@ -1,0 +1,176 @@
+// Tests unitaires du parser d'etiquette UPS. Aucun framework (coherent avec
+// le "pas de build complexe" du projet) : execute directement via
+// `node js/scan/parse-ups-label.test.mjs` (extension .mjs pour forcer le
+// mode ES module sans avoir besoin d'un package.json).
+import { parseUpsLabel } from "./parse-ups-label.js";
+
+let failures = 0;
+
+function assertEqual(actual, expected, label) {
+  const ok = actual === expected;
+  if (!ok) failures++;
+  console.log(`${ok ? "OK  " : "FAIL"} ${label} (attendu: ${JSON.stringify(expected)}, obtenu: ${JSON.stringify(actual)})`);
+}
+
+// --- Cas 1 (etiquette reelle) : nom duplique, telephone propre ---
+console.log("\n=== Cas 1 : nom duplique, tel propre ===");
+{
+  const text = [
+    "LUCAS VERNIER",
+    "0639980001",
+    "LUCAS VERNIER",
+    "RUE DES JARDINS 14",
+    "54470 ANSAUVILLE",
+  ].join("\n");
+  const r = parseUpsLabel(`SHIP TO:\n${text}`);
+  assertEqual(r.nom, "LUCAS VERNIER", "nom");
+  assertEqual(r.tel, "0639980001", "tel");
+  assertEqual(r.telConfidence, "haute", "telConfidence");
+  assertEqual(r.rue, "RUE DES JARDINS 14", "rue");
+  assertEqual(r.cp, "54470", "cp");
+  assertEqual(r.ville, "ANSAUVILLE", "ville");
+}
+
+// --- Cas 2 (etiquette reelle) : societe avant le vrai nom, tel ambigu ---
+console.log("\n=== Cas 2 : societe avant le nom, tel sans marqueur (ambigu) ===");
+{
+  const text = [
+    "NIKE DIGITAL",
+    "639980002",
+    "GARNIER PASCAL",
+    "5 RUE DES VIGNES",
+    "55260 RUPT DEVANT SAINT MIHIEL",
+  ].join("\n");
+  const r = parseUpsLabel(`SHIP TO:\n${text}`);
+  assertEqual(r.nom, "GARNIER PASCAL", "nom (pas NIKE DIGITAL)");
+  assertEqual(r.tel, "0639980002", "tel (9 derniers chiffres + 0)");
+  assertEqual(r.telConfidence, "a_verifier", "telConfidence (aucun marqueur -> a verifier)");
+  assertEqual(r.rue, "5 RUE DES VIGNES", "rue");
+  assertEqual(r.cp, "55260", "cp");
+  assertEqual(r.ville, "RUPT DEVANT SAINT MIHIEL", "ville");
+}
+
+// --- Cas 3 (etiquette reelle) : nom abrege puis complet, societe intercalee, rue sur 2 lignes ---
+console.log("\n=== Cas 3 : nom abrege + complet, societe intercalee, rue sur 2 lignes ===");
+{
+  const text = [
+    "M.CHAPUIS",
+    "+33639980003",
+    "ROYAL CANIN CHAMPAGNE LORRAINE",
+    "DAMIEN CHAPUIS",
+    "ZONE D'ACTIVITE DES SOUHESMES",
+    "ZI LIEU-DIT L'ATRIE",
+    "55220 LES SOUHESMES RAMPONT",
+  ].join("\n");
+  const r = parseUpsLabel(`SHIP TO:\n${text}`);
+  assertEqual(r.nom, "DAMIEN CHAPUIS", "nom (dernier candidat avant la rue)");
+  assertEqual(r.tel, "0639980003", "tel (prefixe +33 elimine)");
+  assertEqual(r.telConfidence, "haute", "telConfidence (marqueur +)");
+  assertEqual(r.rue, "ZONE D'ACTIVITE DES SOUHESMES ZI LIEU-DIT L'ATRIE", "rue (2 lignes concatenees)");
+  assertEqual(r.cp, "55220", "cp");
+  assertEqual(r.ville, "LES SOUHESMES RAMPONT", "ville");
+}
+
+// --- Regression : bloc expediteur ignore, tracking hors bloc, Ref.1 TEL concordant ---
+console.log("\n=== Regression : expediteur ignore + tracking + Ref.1 TEL concordant ===");
+{
+  const text = [
+    "ACME DISTRIBUTION",
+    "5 RUE DE LA GARE",
+    "54000 NANCY",
+    "",
+    "SHIP TO:",
+    "CLAIRE JACQUOT",
+    "1 AVENUE DE L EUROPE",
+    "55300 SAINT-MIHIEL",
+    "",
+    "1Z444XY50987654321",
+    "",
+    "Ref.1: TEL 0639980004",
+  ].join("\n");
+  const r = parseUpsLabel(text);
+  assertEqual(r.nom, "CLAIRE JACQUOT", "nom (expediteur ignore)");
+  assertEqual(r.tracking, "1Z444XY50987654321", "tracking");
+  assertEqual(r.rue, "1 AVENUE DE L EUROPE", "rue");
+  assertEqual(r.cp, "55300", "cp");
+  assertEqual(r.ville, "SAINT-MIHIEL", "ville");
+  // Pas de tel dans le bloc SHIP TO ici -> tel vient uniquement de Ref.1, non
+  // cross-validable contre lui-meme -> reste "a verifier" (comportement
+  // attendu : Ref.1 seul ne suffit jamais a etablir une confiance haute).
+  assertEqual(r.tel, null, "tel (aucun candidat dans le bloc SHIP TO)");
+}
+
+// --- Regression : prefixes internationaux varies sur un numero propre ---
+console.log("\n=== Regression : prefixes internationaux varies ===");
+{
+  const cases = [
+    ["TEL 0639980005", "0639980005"],
+    ["TEL +33639980005", "0639980005"],
+    ["TEL 0033639980005", "0639980005"],
+    ["TEL 00336639980005", "0639980005"], // prefixe parasite double, toujours les 9 derniers chiffres
+  ];
+  for (const [line, expected] of cases) {
+    const text = `SHIP TO:\nJEAN DUPONT\n${line}\n3 IMPASSE DES LILAS\n55300 SAINT MIHIEL`;
+    const r = parseUpsLabel(text);
+    assertEqual(r.tel, expected, `tel pour "${line}"`);
+  }
+}
+
+// --- Regression : bruit OCR (chiffre isole dans le nom, confusion O/0)
+// faisait disparaitre le nom avant ce correctif (toute la ligne partait en
+// "rue" a cause d'un test /\d/ trop large -- voir historique de discussion,
+// bug terrain "(nom inconnu)" systematique) ---
+console.log("\n=== Regression : bruit OCR O/0 dans le nom (ne doit plus le faire disparaitre) ===");
+{
+  const text = ["MARTIN S0PHIE", "0639980005", "14 RUE DES JARDINS", "54470 ANSAUVILLE"].join("\n");
+  const r = parseUpsLabel(`SHIP TO:\n${text}`);
+  assertEqual(r.nom, "MARTIN S0PHIE", "nom (present malgre le chiffre parasite)");
+  assertEqual(r.rue, "14 RUE DES JARDINS", "rue (pas contaminee par le nom)");
+  assertEqual(r.cp, "54470", "cp");
+  assertEqual(r.ville, "ANSAUVILLE", "ville");
+}
+
+// --- Regression : mots-cles de rue courts (AV, BD, TER, BIS, VOIE) trouves
+// par SOUS-CHAINE dans des noms/prenoms francais courants -- meme symptome
+// que le bug O/0 ci-dessus (le nom bascule en "rue" et disparait) mais via un
+// chemin de code different (STREET_KEYWORDS.some(... .includes(k)), pas le
+// test /\d/). Trouve par analyse statique (pas encore vu dans le journal de
+// corrections OCR), corrige en exigeant un mot ENTIER (lineHasStreetWord) ---
+console.log("\n=== Regression : mots-cles de rue courts trouves par erreur DANS un nom ===");
+{
+  const cases = [
+    ["DAVID MARTIN", "AV dans DAVID"],
+    ["ABDALLAH NASSER", "BD dans ABDALLAH"],
+    ["SAVOIE JULIE", "VOIE dans SAVOIE"],
+    ["GUSTAVE LEROY", "AV dans GUSTAVE"],
+    ["AVRIL SOPHIE", "AV dans AVRIL"],
+    ["STERN MARC", "TER dans STERN"],
+  ];
+  for (const [nomLigne, label] of cases) {
+    const text = [nomLigne, "0639980005", "14 RUE DES JARDINS", "54470 ANSAUVILLE"].join("\n");
+    const r = parseUpsLabel(`SHIP TO:\n${text}`);
+    assertEqual(r.nom, nomLigne, `nom present malgre ${label}`);
+    assertEqual(r.rue, "14 RUE DES JARDINS", `rue non contaminee (${label})`);
+  }
+}
+
+// --- Regression (non-regression) : les memes mots-cles courts doivent
+// toujours declencher la classification "rue" quand ils apparaissent comme
+// mot entier (abreviation reelle sur une etiquette), pas seulement en toutes
+// lettres ---
+console.log("\n=== Non-regression : mots-cles courts comme mot entier restent classes en rue ===");
+{
+  const cases = [
+    ["6 BD JOFFRE", "BD abrege"],
+    ["12 AV DE LA LIBERATION", "AV abrege"],
+  ];
+  for (const [rueLigne, label] of cases) {
+    const text = ["JEAN DUPONT", "0639980005", rueLigne, "54000 NANCY"].join("\n");
+    const r = parseUpsLabel(`SHIP TO:\n${text}`);
+    assertEqual(r.rue, rueLigne, `rue toujours detectee (${label})`);
+    assertEqual(r.nom, "JEAN DUPONT", `nom toujours correct (${label})`);
+  }
+}
+
+console.log(`\n${failures === 0 ? "TOUS LES TESTS SONT PASSES" : `${failures} ECHEC(S)`}`);
+process.exit(failures === 0 ? 0 : 1);

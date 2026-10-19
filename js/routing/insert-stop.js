@@ -1,0 +1,131 @@
+import { getDb } from "../db/schema.js";
+import { loadCsrFromDb } from "./graph-loader.js";
+import { buildSpatialGrid, findNearestNode } from "./spatial-index.js";
+import { dijkstraNodeToNode, createDijkstraScratch } from "./dijkstra.js";
+import { getColis } from "../scan/colis-store.js";
+import { saveTour } from "./tour-store.js";
+import { dernierEnQueue } from "./dernier-arret.js";
+import { estimationVolOiseauSec } from "./trajet-secours.js";
+
+// Insertion au moindre detour : quand un colis "oublie" est retrouve et
+// scanne en cours de tournee (Etat B), plutot que d'attendre un recalcul
+// complet (qui re-optimiserait TOUT, y compris les arrets deja traites),
+// on l'insere directement a l'endroit qui allonge le moins le trajet
+// restant. Pas de re-optimisation globale : les arrets existants gardent
+// leur ordre relatif, seul le nouveau s'intercale.
+
+function isPendingStop(stop) {
+  return stop.statutLivraison !== "livre" && stop.statutLivraison !== "echec";
+}
+
+// Injoignable sur le graphe (bout de rue a sens unique, point hors reseau) :
+// estimation a vol d'oiseau plutot qu'Infinity, qui rendrait toutes les
+// insertions equivalentes (voir trajet-secours.js).
+function travelSeconds(csr, grid, scratch, from, to) {
+  const fromNode = findNearestNode(grid, csr.nodeLat, csr.nodeLon, from.lat, from.lon).nodeIndex;
+  const toNode = findNearestNode(grid, csr.nodeLat, csr.nodeLon, to.lat, to.lon).nodeIndex;
+  if (fromNode === -1 || toNode === -1) return estimationVolOiseauSec(from, to);
+  const result = dijkstraNodeToNode(csr, fromNode, [toNode], scratch, { maxSeconds: 3600 });
+  const t = result.get(toNode);
+  return Number.isFinite(t) ? t : estimationVolOiseauSec(from, to);
+}
+
+/**
+ * @returns {Promise<{tour: object, position: number} | null>} null si le
+ * graphe routier n'est pas disponible (le caller doit alors se rabattre sur
+ * un simple statut "pret", inclus au prochain recalcul complet).
+ */
+export async function insertStopCheapest(tour, colis) {
+  // Idempotent : un colis deja dans la tournee n'y est jamais insere une 2e
+  // fois. Bug reel (2026-09-10) : un point ajoute par recherche GPS est
+  // apparu en DOUBLE -- deux arrets pour un seul colis (double appui sur le
+  // resultat, deux onSaved en course) -- et supprimer "l'un" supprimait les
+  // deux, puisque c'etait le meme colis.
+  const dejaLa = tour.stops.find((s) => s.colisId === colis.id);
+  if (dejaLa) return { tour, position: dejaLa.ordre, dejaPresent: true };
+  const db = await getDb();
+  const csr = await loadCsrFromDb(db);
+  if (!csr || colis.geocode?.lat == null) return null;
+
+  const allStops = tour.stops.slice();
+  const doneStops = allStops.filter((s) => !isPendingStop(s)).sort((a, b) => a.ordre - b.ordre);
+  const pendingStops = allStops.filter(isPendingStop).sort((a, b) => a.ordre - b.ordre);
+
+  // Point de reference "ou en est le livreur" : le dernier arret traite s'il
+  // y en a un, sinon le point de depart d'origine -- pas de suivi GPS
+  // continu, c'est la meilleure approximation disponible sans ca.
+  let referencePoint = tour.depot;
+  if (doneStops.length > 0) {
+    const lastDoneColis = await getColis(doneStops[doneStops.length - 1].colisId);
+    if (lastDoneColis?.geocode?.lat != null) {
+      referencePoint = { lat: lastDoneColis.geocode.lat, lon: lastDoneColis.geocode.lon };
+    }
+  }
+
+  // Correctif d'audit : un arret en attente dont le colis n'a plus de
+  // geocodage (adresse modifiee apres coup et nouveau match introuvable,
+  // colis supprime...) etait auparavant simplement absent de la liste
+  // reconstruite plus bas -- il DISPARAISSAIT silencieusement de la tournee
+  // a la prochaine insertion. Ces arrets sont maintenant conserves
+  // (pendingSansGeocode) : exclus du calcul d'itineraire (impossible sans
+  // coordonnees) mais raccroches en fin de tournee, jamais perdus.
+  const pendingWithColis = [];
+  const pendingSansGeocode = [];
+  for (const stop of pendingStops) {
+    const c = await getColis(stop.colisId);
+    if (c?.geocode?.lat != null) pendingWithColis.push({ stop, colis: c });
+    else pendingSansGeocode.push(stop);
+  }
+
+  const points = [
+    referencePoint,
+    ...pendingWithColis.map(({ colis: c }) => ({ lat: c.geocode.lat, lon: c.geocode.lon })),
+    ...(tour.returnToDepot && tour.depotArrivee ? [tour.depotArrivee] : []),
+  ];
+  const newPoint = { lat: colis.geocode.lat, lon: colis.geocode.lon };
+
+  const grid = buildSpatialGrid(csr.nodeLat, csr.nodeLon);
+  const scratch = createDijkstraScratch(csr.edgeCount);
+
+  // Arret marque "dernier" en queue (voir dernier-arret.js) : l'emplacement
+  // qui le suit (entre lui et le retour au depot) est interdit -- un colis
+  // ajoute en route ne passe jamais apres lui.
+  const garderDernier = dernierEnQueue(pendingWithColis.map((x) => x.colis));
+  const nbEmplacements = points.length - 1 - (garderDernier && tour.returnToDepot && tour.depotArrivee ? 1 : 0);
+
+  // bestIdx = inserer juste apres points[bestIdx] (0 = tout en tete, juste
+  // apres le point de reference).
+  let bestIdx = 0;
+  let bestExtraSec = Infinity;
+  for (let i = 0; i < nbEmplacements; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const aToB = travelSeconds(csr, grid, scratch, a, b);
+    const aToNew = travelSeconds(csr, grid, scratch, a, newPoint);
+    const newToB = travelSeconds(csr, grid, scratch, newPoint, b);
+    const extra = aToNew + newToB - aToB;
+    if (extra < bestExtraSec) {
+      bestExtraSec = extra;
+      bestIdx = i;
+    }
+  }
+
+  const doneMaxOrdre = doneStops.reduce((m, s) => Math.max(m, s.ordre), 0);
+  const newStop = { colisId: colis.id, ordre: 0, statutLivraison: "a_livrer", heureLivraison: null, legDureeSec: null };
+  const newPendingOrder = pendingWithColis.map((x) => x.stop);
+  newPendingOrder.splice(bestIdx, 0, newStop);
+  // Les arrets sans geocodage sont raccroches en fin de parcours (voir
+  // pendingSansGeocode plus haut) -- pas de position optimale calculable
+  // pour eux, mais ils restent dans la tournee.
+  // ...mais toujours avant un arret marque "dernier".
+  const finalPending = garderDernier
+    ? [...newPendingOrder.slice(0, -1), ...pendingSansGeocode, newPendingOrder[newPendingOrder.length - 1]]
+    : [...newPendingOrder, ...pendingSansGeocode];
+  finalPending.forEach((s, i) => {
+    s.ordre = doneMaxOrdre + i + 1;
+  });
+
+  tour.stops = [...doneStops, ...finalPending];
+  await saveTour(tour);
+  return { tour, position: newStop.ordre };
+}
