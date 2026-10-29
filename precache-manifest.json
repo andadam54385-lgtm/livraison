@@ -1,6 +1,6 @@
 {
-  "version": "7871269d6b61",
-  "generatedAt": "2026-10-09T19:43:35.239Z",
+  "version": "0a50bcb66f7d",
+  "generatedAt": "2026-10-29T20:07:11.454Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -178,8 +178,8 @@
     "./js/routing/tour-store.js": "82c9d124c68a25c8",
     "./js/routing/trajet-secours.js": "bd0e1facc4f1e814",
     "./js/routing/trajet-secours.test.mjs": "c14720bfb6764d60",
-    "./js/routing/tsp.js": "987fe35208ba719a",
-    "./js/routing/tsp.test.mjs": "4adadb5a7b7f9ffa",
+    "./js/routing/tsp.js": "e13510653155906c",
+    "./js/routing/tsp.test.mjs": "16ef6d6a9aa6f82b",
     "./js/routing/zones-effectives.js": "96b3088249b16ae6",
     "./js/routing/zones-effectives.test.mjs": "eff95e03df6ec262",
     "./js/scan/barcode.js": "cd08027609183f44",
@@ -214,7 +214,7 @@
     "./js/ui/icons.js": "01850ab503e6f3b0",
     "./js/ui/photo-viewer.js": "62aba866a5a5fb3c",
     "./js/ui/segmented.js": "d68a585c517ee60c",
-    "./js/version.js": "482db43c38fc4a9d",
+    "./js/version.js": "4a8b7e039d88c42f",
     "./lib/maplibre/LICENSE-maplibre-gl.txt": "b0d2e08b85de5940",
     "./lib/maplibre/LICENSE-pmtiles.txt": "a3378c46a15ffd9d",
     "./lib/maplibre/basemap-assets/fonts/Noto Sans Italic/0-255.pbf": "087b2484de911904",
@@ -243,6 +243,6 @@
     "./lib/zxing/zxing-reader.js": "14d9ae7753136475",
     "./lib/zxing/zxing_reader.wasm": "9678b0ccf938a6c3",
     "./manifest.webmanifest": "5837ab48326dbdff",
-    "./sw.js": "3df3da281005d505"
+    "./sw.js": "e353997355d588c8"
   }
 }

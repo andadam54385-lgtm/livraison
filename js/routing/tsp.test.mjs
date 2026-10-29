@@ -6,7 +6,7 @@
 // c'est precisement ce que l'ancienne penalite de position ne savait pas
 // faire (elle poussait le colis marque en tete de tournee coute que coute).
 
-import { tourCost, optimizeTourOrder, orOpt, twoOpt, nearestNeighborOrder, ameliorerOrdre } from "./tsp.js";
+import { tourCost, optimizeTourOrder, orOpt, twoOpt, nearestNeighborOrder, ameliorerOrdre, relancer } from "./tsp.js";
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -276,12 +276,65 @@ console.log("\n=== Un arret inatteignable n aveugle plus le 2-opt ===");
     const idx = pts.map((_, i) => i).slice(1);
     const timing = { departureSec: H(8), dwellSec: 180 };
     const ancien = twoOpt(nearestNeighborOrder(m, 0, idx), m, 0, { timing, timeBudgetMs: 2000 });
-    const nouveau = optimizeTourOrder(m, 0, idx, { timing, timeBudgetMs: 2000 });
+    // ameliorerOrdre = optimizeTourOrder sans les relances : celles-ci ne gardent
+    // que ce qui baisse le cout (testees plus bas), et utilisent tout le budget
+    // sur 40 arrets -- 50 x 2 s rendrait ce test interminable.
+    const nouveau = ameliorerOrdre(nearestNeighborOrder(m, 0, idx), m, 0, { timing, timeBudgetMs: 2000 });
     if (nouveau.cost > ancien.cost + 1e-6) pire++;
     if (nouveau.cost < ancien.cost - 1e-6) meilleur++;
   }
   check("propriete : 0 tournee pire qu'avec le 2-opt seul (sur 50)", pire, 0);
   checkTrue(`propriete : l'Or-opt ameliore la plupart des tournees (${meilleur}/50)`, meilleur >= 25);
+}
+
+// --- Relances : 40 villages ecartes, la recherche locale seule plafonne ------
+// Mesure reelle 2026-10-29 (graphe routier 54-55, 40 villages a 10-16 min les
+// uns des autres) : 2-opt + Or-opt seuls s'arretaient a 3-4,5 % au-dessus du
+// meilleur ordre. Meme situation simulee ici : 40 points sur 60 x 60 km.
+function villagesEcartes(n, graine) {
+  let s = graine;
+  const r = () => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const p = Array.from({ length: n }, () => [r() * 60, r() * 60]);
+  // km x 1,3 de detour, 50 km/h -> secondes
+  return p.map((a) => p.map((b) => Math.round(((Math.hypot(a[0] - b[0], a[1] - b[1]) * 1.3) / 50) * 3600)));
+}
+{
+  const m = villagesEcartes(41, 1);
+  const idx = [...Array(41).keys()].slice(1);
+  const seul = ameliorerOrdre(nearestNeighborOrder(m, 0, idx), m, 0, { timeBudgetMs: 3000 });
+  const relance = relancer(seul, m, 0, { timeBudgetMs: 3000 });
+  checkTrue(`relances : >= 2 % de trajet en moins sur 40 villages (${Math.round(seul.cost / 60)} -> ${Math.round(relance.cost / 60)} min)`, relance.cost <= seul.cost * 0.98);
+  check("relances : aucun arret perdu ni duplique", relance.order.slice().sort((a, b) => a - b), idx);
+}
+
+// --- Relances : retour au depot toujours en dernier ---------------------------
+{
+  const m = villagesEcartes(22, 5);
+  const idx = [...Array(21).keys()].slice(1);
+  const { order } = optimizeTourOrder(m, 0, [...idx, 21], { fixedTail: [21], timeBudgetMs: 2000 });
+  check("relances : le retour au depot reste en dernier", order[order.length - 1], 21);
+  check("relances : tous les arrets presents une fois", order.slice().sort((a, b) => a - b), [...idx, 21]);
+}
+
+// --- Relances : memes arrets -> meme ordre (graine fixe) ----------------------
+// Budget large : sur 20 arrets les relances s'arretent d'elles-memes (trop de
+// relances sans gain), jamais sur l'horloge -- le resultat ne depend pas de la
+// vitesse du telephone.
+{
+  const m = villagesEcartes(21, 9);
+  const idx = [...Array(21).keys()].slice(1);
+  const a = optimizeTourOrder(m, 0, idx, { timeBudgetMs: 20000 });
+  const b = optimizeTourOrder(m, 0, idx, { timeBudgetMs: 20000 });
+  check("relances : deux calculs identiques donnent le meme ordre", a.order, b.order);
+}
+
+// --- Relances : contrainte "avant 12h" toujours tenue -------------------------
+{
+  const m = villagesEcartes(31, 3);
+  const idx = [...Array(31).keys()].slice(1);
+  const timing = { departureSec: H(8), dwellSec: 180, deadlines: { 17: H(8, 30) } };
+  const { order } = optimizeTourOrder(m, 0, idx, { timing, timeBudgetMs: 2000 });
+  checkTrue("relances : l'avant-8h30 n'a aucun retard", tourCost(order, m, 0, timing) === tourCost(order, m, 0, { ...timing, deadlines: {} }));
 }
 
 console.log(failures === 0 ? "\nTOUS LES TESTS SONT PASSES" : `\n${failures} TEST(S) EN ECHEC`);

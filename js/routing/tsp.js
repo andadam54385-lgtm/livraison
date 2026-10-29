@@ -229,14 +229,82 @@ export function ameliorerOrdre(initialOrder, matrix, startIdx, options = {}) {
   return res;
 }
 
+// Relances ("recherche locale iteree") : ameliorerOrdre s'arrete au premier
+// ordre qu'aucun petit mouvement n'ameliore, en ~50-200 ms sur 40 arrets, et
+// laissait le reste du budget inutilise. Mesure 2026-10-29 sur le vrai graphe
+// 54-55, 40 villages a 10-16 min les uns des autres : 3,3 % et 4,5 % de route
+// en trop (17 et 28 min, ~40 km) par rapport au meilleur ordre trouve. Ici on
+// "secoue" la meilleure tournee (double-pont : trois morceaux echanges, le
+// mouvement que 2-opt et Or-opt ne savent pas defaire) puis on la re-ameliore ;
+// on ne garde que ce qui baisse le cout (contraintes horaires comprises), donc
+// jamais pire qu'avant. Generateur pseudo-aleatoire a graine fixe : memes
+// arrets -> meme ordre, d'un calcul a l'autre. S'arrete au budget, ou apres
+// RELANCES_PAR_ARRET x (nombre d'arrets) relances de suite sans gain, pour ne
+// pas faire attendre le livreur 5 s sur une petite tournee deja optimale
+// (mesure : le meilleur ordre des jeux de 40 arrets tombe en < 500 ms sur PC).
+const RELANCES_PAR_ARRET = 2;
+
+function genAleatoire(graine) {
+  let s = graine >>> 0 || 1;
+  return () => {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    return (s >>> 0) / 4294967296;
+  };
+}
+
+function doublePont(order, limit, alea) {
+  // Coupes dans [0, limit] : le premier arret peut bouger, la queue
+  // verrouillee (au-dela de limit) reste toujours en fin.
+  const coupes = [0, 0, 0].map(() => Math.floor(alea() * (limit + 1))).sort((a, b) => a - b);
+  const [p1, p2, p3] = coupes;
+  if (p1 === p2 || p2 === p3) return null;
+  return order.slice(0, p1).concat(order.slice(p2, p3), order.slice(p1, p2), order.slice(p3));
+}
+
+export function relancer(res, matrix, startIdx, options = {}) {
+  const { timeBudgetMs = 3000, lockTailCount = 0, ...rest } = options;
+  const limit = res.order.length - lockTailCount;
+  if (limit < 8) return res; // ameliorerOrdre trouve deja l'optimum a cette taille
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const fin = now() + timeBudgetMs;
+  const alea = genAleatoire(limit * 7919 + 17);
+  let meilleur = res;
+  let sansGain = 0;
+  while (sansGain < RELANCES_PAR_ARRET * limit && now() < fin) {
+    const secoue = doublePont(meilleur.order, limit, alea);
+    if (!secoue) continue;
+    const essai = ameliorerOrdre(secoue, matrix, startIdx, {
+      ...rest,
+      lockTailCount,
+      timeBudgetMs: Math.max(0, fin - now()),
+    });
+    if (essai.cost < meilleur.cost - 1e-9) {
+      meilleur = essai;
+      sansGain = 0;
+    } else {
+      sansGain++;
+    }
+  }
+  return meilleur;
+}
+
 // fixedEndIdx (optionnel) : cet index (ex: point "retour au depot") reste
 // toujours le dernier arret ; seul l'ordre des autres arrets est optimise.
 // fixedTail (optionnel) : plusieurs points fixes en fin, dans l'ordre donne
 // (ex: [arret marque "dernier", retour depot]) -- le reste de la tournee est
 // optimise EN SACHANT qu'elle finit la (le cout compte le trajet jusqu'a eux).
 export function optimizeTourOrder(matrix, startIdx, stopIndices, options = {}) {
-  const { fixedEndIdx = null, fixedTail = null, ...rest } = options;
+  const { fixedEndIdx = null, fixedTail = null, timeBudgetMs = 4000, ...rest } = options;
   const queue = queueFixe({ fixedEndIdx, fixedTail });
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const fin = now() + timeBudgetMs;
   const nnOrder = nearestNeighborOrder(matrix, startIdx, stopIndices, { fixedTail: queue });
-  return ameliorerOrdre(nnOrder, matrix, startIdx, { ...rest, lockTailCount: queue.length });
+  const premier = ameliorerOrdre(nnOrder, matrix, startIdx, { ...rest, timeBudgetMs, lockTailCount: queue.length });
+  return relancer(premier, matrix, startIdx, {
+    ...rest,
+    lockTailCount: queue.length,
+    timeBudgetMs: Math.max(0, fin - now()),
+  });
 }
