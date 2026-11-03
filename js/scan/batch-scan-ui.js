@@ -4,7 +4,7 @@ import { matchAddress, looseCommune } from "../geocode/match-address.js";
 import { formatEntry } from "../geocode/geocode-ui.js";
 import { normalizeCity } from "../geocode/normalize-address.js";
 import { listDistinctCities } from "../geocode/ban-index.js";
-import { saveColis } from "./colis-store.js";
+import { saveColis, getColis } from "./colis-store.js";
 import { splitNumeroRue, renderReviewForm } from "./scan-ui.js";
 import { getSetting } from "../settings/settings-store.js";
 import { uuid } from "../lib/id.js";
@@ -843,6 +843,72 @@ export function startBatchScan(container) {
   );
 }
 
+// Revision en cours SAUVEGAREE a chaque changement (retour terrain
+// 2026-11-03 : "parfois la page se ferme quand je passe sur Google Maps pour
+// chercher des coordonnees, et je perds tout, sauf ce que j'avais valide
+// moi-meme"). iOS ferme une PWA passee en arriere-plan quand il manque de
+// memoire : la liste ne vivait qu'en memoire, seules les lignes deja
+// enregistrees une a une survivaient. Au retour, l'ecran Tournee propose
+// "Reprendre la verification" (voir revisionEnAttente/reprendreRevision).
+// localStorage : quelques Ko de texte, ecriture synchrone -- rien n'est perdu
+// meme si l'app est tuee juste apres.
+const CLE_REVISION = "revisionScanListe";
+const REVISION_MAX_AGE_MS = 36 * 3600 * 1000;
+
+function sauverRevision(state) {
+  // Une ligne "Ajouter" encore vide (fiche ouverte, rien tape) n'est pas a
+  // reprendre.
+  const lignes = state.filter(
+    (s) => s.status !== "pending" || [s.draft.nom, s.draft.rue, s.draft.cp, s.draft.ville].some((v) => (v || "").trim())
+  );
+  try {
+    localStorage.setItem(CLE_REVISION, JSON.stringify({ date: Date.now(), lignes }));
+  } catch (err) {
+    console.error("[batch-scan] Sauvegarde de la revision impossible:", err);
+  }
+}
+
+function effacerRevision() {
+  try {
+    localStorage.removeItem(CLE_REVISION);
+  } catch {
+    // stockage indisponible : rien a effacer
+  }
+}
+
+// Revision interrompue a reprendre, ou null. "restantes" = lignes pas encore
+// enregistrees (celles enregistrees une a une sont deja en base).
+export function revisionEnAttente() {
+  let data = null;
+  try {
+    data = JSON.parse(localStorage.getItem(CLE_REVISION) || "null");
+  } catch {
+    return null;
+  }
+  if (!data || !Array.isArray(data.lignes) || Date.now() - data.date > REVISION_MAX_AGE_MS) return null;
+  const restantes = data.lignes.filter((s) => s.status === "pending").length;
+  if (restantes === 0) return null;
+  return { ...data, restantes };
+}
+
+export async function reprendreRevision(container) {
+  const reprise = revisionEnAttente();
+  if (!reprise) return [];
+  // Lignes deja enregistrees : relues en base (le colis a pu etre modifie,
+  // optimise ou supprime depuis) -- jamais la copie gardee dans la sauvegarde,
+  // qui ecraserait ces changements a la fin de la revision.
+  const lignes = [];
+  for (const ligne of reprise.lignes) {
+    if (ligne.status === "saved") {
+      const frais = ligne.savedColis?.id ? await getColis(ligne.savedColis.id) : null;
+      if (!frais) continue;
+      ligne.savedColis = frais;
+    }
+    lignes.push(ligne);
+  }
+  return renderReviewList(container, null, { reprise: { ...reprise, lignes } });
+}
+
 // Ecran de revision post-scan : une ligne par adresse detectee, correction
 // (reutilise le meme formulaire que le scan normal) ou suppression
 // possibles avant l'enregistrement groupe -- rien n'est enregistre tant que
@@ -851,9 +917,14 @@ export function startBatchScan(container) {
 // comportement que "Corriger ce colis" dans le debug OCR).
 // Exportee pour la verification en navigateur (fixtures) : l'ecran ne
 // s'atteint sinon qu'au bout d'un vrai scan de photos.
-export function renderReviewList(container, drafts) {
-  return new Promise((resolve) => {
-    const state = drafts.map((d) => ({ draft: d, status: "pending", savedColis: null }));
+export function renderReviewList(container, drafts, { reprise = null } = {}) {
+  return new Promise((resolveListe) => {
+    const state = reprise ? reprise.lignes : drafts.map((d) => ({ draft: d, status: "pending", savedColis: null }));
+    // Fin de la revision (Enregistrer / Tout annuler) : plus rien a reprendre.
+    const resolve = (colisList) => {
+      effacerRevision();
+      resolveListe(colisList);
+    };
     // Ligne a remettre sous les yeux au prochain rendu (retour terrain : "on
     // reste sur le point qu'on vient de modifier, on ne retourne pas en haut
     // de la liste"). Le rendu remplace tout le HTML, donc le defilement
@@ -894,6 +965,7 @@ export function renderReviewList(container, drafts) {
     }
 
     function render() {
+      sauverRevision(state);
       const visible = state.filter((s) => s.status !== "discarded");
       const rows = visible
         .map((item) => {
@@ -1043,6 +1115,7 @@ export function renderReviewList(container, drafts) {
             await bulkGeocodeAndSave(colis);
             item.status = "saved";
             item.savedColis = colis;
+            sauverRevision(state);
           }
         }
         resolve(state.filter((s) => s.status === "saved").map((s) => s.savedColis));

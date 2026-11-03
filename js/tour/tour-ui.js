@@ -7,7 +7,7 @@ import { computeEtas, normalisePauses } from "./eta.js";
 import { formatDurationShort } from "../lib/geo-utils.js";
 import { runSort, runRecalculate } from "../routing/routing-ui.js";
 import { startScanFlow, startManualEntry } from "../scan/scan-ui.js";
-import { startBatchScan } from "../scan/batch-scan-ui.js";
+import { startBatchScan, revisionEnAttente, reprendreRevision } from "../scan/batch-scan-ui.js";
 import { renderColisDetail, saveFavoriInfo } from "../scan/colis-detail-ui.js";
 import { findNearbyFavori } from "../favoris/favoris-store.js";
 import { horairesOf } from "../favoris/horaires.js";
@@ -416,14 +416,27 @@ async function handleColisSavedBatch(colisList) {
   await render();
 }
 
-function openBatchScan() {
+// Verification d'un scan de liste interrompue (app fermee par iOS pendant un
+// detour par Google Maps) : bouton bien visible en tete de la feuille, dans
+// les deux etats, jusqu'a "Enregistrer" ou "Tout annuler".
+function repriseRevisionHtml() {
+  const reprise = revisionEnAttente();
+  if (!reprise) return "";
+  return `<button type="button" class="primary" id="reprendre-revision" style="width:100%;margin-bottom:12px;">${icon("rotate-ccw")}Reprendre la vérification (${reprise.restantes} adresse${reprise.restantes > 1 ? "s" : ""} non enregistrée${reprise.restantes > 1 ? "s" : ""})</button>`;
+}
+
+function bindRepriseRevision() {
+  containerRef.querySelector("#reprendre-revision")?.addEventListener("click", () => openBatchScan({ reprendre: true }));
+}
+
+function openBatchScan({ reprendre = false } = {}) {
   sheetControl?.applyState("full");
   view = "list";
   // FAB masque pendant le scan de liste : il recouvrait "Enregistrer" dans la
   // barre d'actions toujours visible en bas de la revision.
   const fab = document.getElementById("scan-fab");
   if (fab) fab.hidden = true;
-  startBatchScan(containerRef)
+  (reprendre ? reprendreRevision(containerRef) : startBatchScan(containerRef))
     .finally(() => {
       if (fab) fab.hidden = false;
     })
@@ -628,6 +641,7 @@ async function renderEtatA() {
             .join("");
 
   containerRef.innerHTML = `
+    ${repriseRevisionHtml()}
     <div class="button-row" style="margin-bottom:14px;">
       <button type="button" class="btn-compact" id="etatA-manual">${icon("pencil")}Saisie manuelle</button>
       <button type="button" class="btn-compact" id="etatA-batch-scan">${icon("camera")}Scanner une liste</button>
@@ -745,6 +759,7 @@ async function renderEtatA() {
 
   containerRef.querySelector("#etatA-manual").addEventListener("click", () => openManualEntry());
   containerRef.querySelector("#etatA-batch-scan").addEventListener("click", () => openBatchScan());
+  bindRepriseRevision();
 
   containerRef.querySelectorAll("[data-report-colis]").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -1401,6 +1416,7 @@ async function renderEtatB(tour) {
       </div>
       <button type="button" id="reorder-toggle" style="margin-left:8px;flex-shrink:0;">${reorderMode ? `${icon("check")}Terminé` : `${icon("move-vertical")}Réordonner`}</button>
     </div>
+    ${repriseRevisionHtml()}
     <div class="button-row" style="margin:-4px 0 10px;">
       <button type="button" class="btn-compact" id="etatB-manual">${icon("plus")}Ajouter une adresse</button>
       <button type="button" class="btn-compact" id="etatB-batch-scan">${icon("camera")}Scanner une liste</button>
@@ -1432,6 +1448,7 @@ async function renderEtatB(tour) {
   // l'insertion au meilleur endroit sans recalcul complet, voir plus haut).
   containerRef.querySelector("#etatB-manual").addEventListener("click", () => openManualEntry());
   containerRef.querySelector("#etatB-batch-scan").addEventListener("click", () => openBatchScan());
+  bindRepriseRevision();
 
   containerRef.querySelector("#reorder-toggle").addEventListener("click", () => {
     reorderMode = !reorderMode;
