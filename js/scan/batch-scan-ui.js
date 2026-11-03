@@ -16,6 +16,8 @@ import { saveScanReport } from "./scan-reports-store.js";
 import { ingestDrafts } from "./dedup-drafts.js";
 import { loadImageToCanvas } from "./preprocess.js";
 import { showToast } from "../lib/toast.js";
+import { findFavoriParTexte, chercherFavoris, listFavoris } from "../favoris/favoris-store.js";
+import { libelleFavori } from "../favoris/favori-texte.js";
 
 // Scan en rafale : filme un ECRAN affichant plusieurs adresses a la fois
 // (ex: appli/portail du transporteur listant une tournee), par opposition au
@@ -512,6 +514,9 @@ function communeCoherente(draft, entry) {
 
 export async function computeGeocodePreview(draft) {
   try {
+    // Favori reconnu par le texte : c'est SON point qui sera livre.
+    const favori = await findFavoriParTexte(draft);
+    if (favori) return { status: "ok", choix: `Favori : ${libelleFavori(favori)}` };
     const { numero, rue: rueSansNumero } = splitNumeroRue(draft.rue || "");
     const { best, candidates } = await matchAddress({ rue: rueSansNumero, cp: draft.cp, commune: draft.ville, numero });
     if (best) {
@@ -553,6 +558,15 @@ function draftToColis(draft) {
 // rule) : il reste modifiable ensuite comme n'importe quel colis "a
 // verifier", pas besoin d'un circuit de resolution dedie ici.
 async function bulkGeocodeAndSave(colis) {
+  // Favori reconnu par le texte (nom d'entreprise, rue) : son point, place a
+  // la main un jour precedent, prime sur la BAN -- voir favori-texte.js.
+  const favori = await findFavoriParTexte({ nom: colis.nom, ...colis.adresseRaw });
+  if (favori) {
+    colis.geocode = { status: "ok", lat: favori.lat, lon: favori.lon, candidates: [], favoriId: favori.id };
+    colis.statut = "pret";
+    await saveColis(colis);
+    return colis;
+  }
   const { numero, rue: rueSansNumero } = splitNumeroRue(colis.adresseRaw.rue);
   const { best, candidates } = await matchAddress({
     rue: rueSansNumero,
@@ -948,11 +962,14 @@ export function renderReviewList(container, drafts) {
             la ligne « → » est l'adresse qui sera livrée. Corrige ou supprime celles qui ne sont pas bonnes.
           </p>
           <div>${rows || `<p class="muted">Plus rien à enregistrer.</p>`}</div>
-          <button type="button" id="batch-review-add" style="width:100%;margin-top:12px;">${icon("plus")}Ajouter une adresse manquante</button>
           <div class="button-row" style="margin-top:10px;">
             <button type="button" id="batch-review-cancel">Tout annuler</button>
-            <button type="button" class="primary" id="batch-review-save">${icon("check")}Enregistrer (${pendingCount})</button>
           </div>
+        </div>
+        <div class="review-action-bar">
+          <button type="button" id="batch-review-add">${icon("plus")}Ajouter</button>
+          <button type="button" id="batch-review-fav">${icon("star")}Favori</button>
+          <button type="button" class="primary" id="batch-review-save">${icon("check")}Enregistrer (${pendingCount})</button>
         </div>
       `;
 
@@ -994,6 +1011,25 @@ export function renderReviewList(container, drafts) {
         colis.ocrRawText = "";
         ouvrirFiche(idx, colis, { annulationSupprime: true });
       });
+      // Adresse prise dans les favoris (retour terrain 2026-11-03 : "en scan
+      // multiple, la possibilite d'acceder aux favoris") : le colis part avec
+      // le point du favori, deja localise, et s'ajoute en fin de liste.
+      container.querySelector("#batch-review-fav").addEventListener("click", () => {
+        choisirFavori(container, {
+          onPick: async (fav) => {
+            const colis = draftToColis({ nom: fav.nom, rue: fav.rue, cp: fav.cp, ville: fav.ville });
+            colis.source = "favori";
+            colis.ocrRawText = "";
+            colis.geocode = { status: "ok", lat: fav.lat, lon: fav.lon, candidates: [], favoriId: fav.id };
+            colis.statut = "pret";
+            await saveColis(colis);
+            state.push({ draft: { nom: fav.nom, rue: fav.rue, cp: fav.cp, ville: fav.ville }, status: "saved", savedColis: colis });
+            focusIdx = state.length - 1;
+            render();
+          },
+          onCancel: () => render(),
+        });
+      });
       container.querySelector("#batch-review-cancel").addEventListener("click", () => {
         resolve(state.filter((s) => s.status === "saved").map((s) => s.savedColis));
       });
@@ -1015,4 +1051,41 @@ export function renderReviewList(container, drafts) {
 
     render();
   });
+}
+
+// Liste des favoris avec recherche (nom, rue, commune, note), pour ajouter un
+// arret connu sans le retaper. Sans recherche : tous les favoris, par commune.
+function choisirFavori(container, { onPick, onCancel }) {
+  container.innerHTML = `
+    <div class="import-screen" style="text-align:left;justify-content:flex-start;">
+      <h1>${icon("star")}Ajouter depuis les favoris</h1>
+      <div class="field">
+        <input type="text" id="fav-pick-query" class="field-lg" placeholder="Nom, rue ou commune" autocomplete="off">
+      </div>
+      <div id="fav-pick-list" class="candidate-list"></div>
+      <div class="button-row"><button type="button" id="fav-pick-cancel">${icon("arrow-left")}Retour</button></div>
+    </div>
+  `;
+  const input = container.querySelector("#fav-pick-query");
+  const list = container.querySelector("#fav-pick-list");
+  let termine = false;
+  async function afficher() {
+    const query = input.value.trim();
+    const favoris = query.length >= 2 ? await chercherFavoris(query, 30) : (await listFavoris()).filter((f) => f.lat != null && f.lon != null);
+    if (input.value.trim() !== query) return;
+    list.innerHTML = favoris.length
+      ? favoris.map((f, i) => `<button type="button" class="candidate-item" data-idx="${i}">${escapeHtml(libelleFavori(f))}</button>`).join("")
+      : `<p class="muted">${query ? "Aucun favori ne correspond." : "Aucun favori pour l'instant."}</p>`;
+    list.querySelectorAll("[data-idx]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (termine) return; // double appui = un seul arret
+        termine = true;
+        onPick(favoris[Number(btn.dataset.idx)]);
+      });
+    });
+  }
+  input.addEventListener("input", afficher);
+  container.querySelector("#fav-pick-cancel").addEventListener("click", onCancel);
+  afficher();
+  input.focus();
 }

@@ -10,7 +10,8 @@ import { renderCandidatePicker, renderManualAddressSearch, formatEntry } from ".
 import { listDistinctCities, searchAdresses, preloadBanEntries } from "../geocode/ban-index.js";
 import { normalizeCity } from "../geocode/normalize-address.js";
 import { getSetting } from "../settings/settings-store.js";
-import { findNearbyFavori } from "../favoris/favoris-store.js";
+import { findNearbyFavori, findFavoriParTexte, chercherFavoris, memoriserPosition } from "../favoris/favoris-store.js";
+import { libelleFavori } from "../favoris/favori-texte.js";
 import { googleMapsSearchUrl } from "../tour/deep-links.js";
 import { searchOnlinePlaces } from "../geocode/online-search.js";
 import { statutApresGeocodage } from "./colis-store.js";
@@ -608,14 +609,22 @@ export async function runGeocodeAndSave(container, colis, { onSaved } = {}) {
   const { numero: extractedNumero, rue: rueSansNumero } = splitNumeroRue(colis.adresseRaw.rue);
   const numero = extractedNumero || null;
 
-  const { best, candidates } = await matchAddress({
-    rue: rueSansNumero,
-    cp: colis.adresseRaw.cp,
-    commune: colis.adresseRaw.ville,
-    numero,
-  });
+  // Favori reconnu par le texte (nom d'entreprise, rue) : son point, place a
+  // la main un jour precedent, prime sur la BAN -- voir favori-texte.js.
+  const favori = await findFavoriParTexte({ nom: colis.nom, ...colis.adresseRaw });
+  const { best, candidates } = favori
+    ? { best: null, candidates: [] }
+    : await matchAddress({
+        rue: rueSansNumero,
+        cp: colis.adresseRaw.cp,
+        commune: colis.adresseRaw.ville,
+        numero,
+      });
 
-  if (best) {
+  if (favori) {
+    colis.geocode = { status: "ok", lat: favori.lat, lon: favori.lon, candidates: [], favoriId: favori.id };
+    colis.adresseAffichage = null;
+  } else if (best) {
     colis.geocode = { status: "ok", lat: best.entry.lat, lon: best.entry.lon, candidates: [] };
     // Adresse canonique de la BAN (bien casee, complete) : remplace
     // l'affichage par cette forme confirmee plutot que le texte OCR/saisi
@@ -696,11 +705,12 @@ function renderGeocodePicker(container, colis, { onSaved, onlineQuery = null, fo
     <div id="geocode-picker-slot"></div>
     <div class="card" style="margin-top:8px;">
       <div class="card-title">Introuvable ? (entreprise, zone industrielle…)</div>
-      <p class="muted">Cherche le nom directement ici (recherche en ligne OpenStreetMap) — la BAN ne connaît que les adresses officielles, pas les noms d'entreprise.</p>
+      <p class="muted">Tape le nom : tes favoris s'affichent tout de suite ; sinon « Chercher en ligne » (OpenStreetMap) — la BAN ne connaît que les adresses officielles, pas les noms d'entreprise.</p>
       <div class="field">
         <label>Nom / lieu à chercher</label>
         <input type="text" id="geocode-online-query" class="field-lg" value="${escapeAttr(onlineQuery || rawQuery)}" autocomplete="off">
       </div>
+      <div id="geocode-fav-results" class="candidate-list" style="margin-bottom:8px;"></div>
       <button type="button" class="primary" id="geocode-online-btn">${icon("search")}Chercher en ligne</button>
       <div id="geocode-online-results" class="candidate-list" style="margin-top:8px;"></div>
       <details style="margin-top:10px;">
@@ -741,13 +751,16 @@ function renderGeocodePicker(container, colis, { onSaved, onlineQuery = null, fo
   // dans ce registre) : adresseAffichage reste null, formatAdresseAffichage()
   // se rabat alors sur adresseRaw (le texte scanne/tape, ex: le nom de
   // l'entreprise) pour l'affichage.
-  async function acceptManualCoords(lat, lon) {
+  async function acceptManualCoords(lat, lon, { favoriId = null } = {}) {
     if (termine) return;
     termine = true;
     colis.geocode = { status: "ok", lat, lon, candidates: [], manual: true };
     colis.statut = statutApresGeocodage(colis.statut, true);
     await saveColis(colis);
     emit("colis:saved", { colis });
+    // Point place a la main = retenu en favori (nom + adresse + GPS) : le
+    // meme texte scanne demain retombera directement dessus.
+    await memoriserPosition(colis, { favoriId });
     await warnIfFavoriMatch(colis);
     onSaved?.(colis);
   }
@@ -774,6 +787,31 @@ function renderGeocodePicker(container, colis, { onSaved, onlineQuery = null, fo
   // resultats affiches directement ici, un tap = coordonnees posees. Meme
   // chemin de sortie que le collage manuel de coordonnees (acceptManualCoords,
   // geocode.manual=true : pas d'entree BAN correspondante).
+  // Favoris d'abord (retour terrain 2026-11-03 : "la recherche des
+  // entreprises c'est chiant") : filtres a chaque frappe, sans reseau, un tap
+  // pose le point du favori. La recherche en ligne ne sert qu'au premier
+  // passage chez une entreprise.
+  const queryInput = container.querySelector("#geocode-online-query");
+  const favResults = container.querySelector("#geocode-fav-results");
+  async function afficherFavoris() {
+    const query = queryInput.value.trim();
+    const favoris = query.length >= 2 ? await chercherFavoris(query) : [];
+    if (queryInput.value.trim() !== query) return; // frappe plus recente en cours
+    favResults.innerHTML = favoris.length
+      ? `<p class="muted" style="margin:0 0 4px;">${icon("star")}Dans tes favoris</p>` +
+        favoris.map((f, i) => `<button type="button" class="candidate-item" data-fav="${i}">${escapeHtml(libelleFavori(f))}</button>`).join("")
+      : "";
+    favResults.querySelectorAll("[data-fav]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const fav = favoris[Number(btn.dataset.fav)];
+        if (!colis.nom && fav.nom) colis.nom = fav.nom;
+        acceptManualCoords(fav.lat, fav.lon, { favoriId: fav.id });
+      });
+    });
+  }
+  queryInput.addEventListener("input", afficherFavoris);
+  afficherFavoris();
+
   const onlineBtn = container.querySelector("#geocode-online-btn");
   const onlineResults = container.querySelector("#geocode-online-results");
   onlineBtn.addEventListener("click", async () => {

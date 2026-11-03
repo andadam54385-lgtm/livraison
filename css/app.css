@@ -266,6 +266,30 @@ a { color: var(--accent-strong); }
   transition: transform 0.12s var(--ease);
 }
 .fab:active { transform: scale(0.92); }
+.fab[hidden] { display: none; }
+
+/* Revision d'un scan de liste : Ajouter / Favori / Enregistrer restent sous
+   le doigt meme en bas d'une longue liste (retour terrain 2026-11-03 : "faut
+   qu'il reste visible meme quand on descend"). Collee au bas de la zone qui
+   defile (#tour-content). */
+.review-action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  margin: 0 -16px;
+  padding: 10px 16px calc(10px + var(--safe-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+/* La reserve du FAB (padding-bottom de #tour-content) decollait la barre de
+   100 px du bas : un element colle respecte le padding de la zone qui
+   defile. Le FAB est masque pendant la revision, la reserve n'a plus lieu
+   d'etre. */
+#tour-content.view-content:has(.review-action-bar) { padding-bottom: 0; }
+.review-action-bar button { flex: 1; min-width: 0; padding-left: 6px; padding-right: 6px; }
+.review-action-bar button.primary { flex: 1.6; }
 
 .progress-bar {
   height: 8px;

@@ -55,6 +55,7 @@ export async function saveFavoriInfo(colis, patch, { creer = false } = {}) {
   const utile = creer || (patch.note || "").trim() || patch.fermeDebut || patch.fermeFin || patch.horaires;
   if (!utile) return null;
   const created = await addFavori({
+    nom: colis.nom || "",
     rue: colis.adresseRaw.rue,
     cp: colis.adresseRaw.cp,
     ville: colis.adresseRaw.ville,

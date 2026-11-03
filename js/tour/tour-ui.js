@@ -419,7 +419,15 @@ async function handleColisSavedBatch(colisList) {
 function openBatchScan() {
   sheetControl?.applyState("full");
   view = "list";
-  startBatchScan(containerRef).then(handleColisSavedBatch, () => render()); // annulation : juste revenir a la liste
+  // FAB masque pendant le scan de liste : il recouvrait "Enregistrer" dans la
+  // barre d'actions toujours visible en bas de la revision.
+  const fab = document.getElementById("scan-fab");
+  if (fab) fab.hidden = true;
+  startBatchScan(containerRef)
+    .finally(() => {
+      if (fab) fab.hidden = false;
+    })
+    .then(handleColisSavedBatch, () => render()); // annulation : juste revenir a la liste
 }
 
 function openDetail(colisId) {
