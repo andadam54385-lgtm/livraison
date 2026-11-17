@@ -1,18 +1,12 @@
 import { getAllSettings, setSetting, DEFAULTS } from "./settings-store.js";
 import { getDb } from "../db/schema.js";
 import { clear, get } from "../lib/idb.js";
-import { listFavoris, updateFavori, deleteFavori } from "../favoris/favoris-store.js";
-import { horairesOf } from "../favoris/horaires.js";
-import { renderHorairesEditor } from "../favoris/horaires-ui.js";
 import { getToursGroupedByDay, deleteArchivedTours } from "../routing/tour-store.js";
-import { saveColis } from "../scan/colis-store.js";
 import { showToast } from "../lib/toast.js";
 import { renderOcrDebug } from "../scan/ocr-debug-ui.js";
 import { renderBugReports } from "../debug/bug-reports-ui.js";
 import { exportToursCsv } from "../export/export-tours.js";
 import { renderManualAddressSearch, formatEntry } from "../geocode/geocode-ui.js";
-import { getActiveTour } from "../routing/tour-store.js";
-import { insertStopCheapest } from "../routing/insert-stop.js";
 import { icon } from "../ui/icons.js";
 import { escapeHtml } from "../lib/escape.js";
 import { inlineLoadingHtml } from "../lib/loading.js";
@@ -71,31 +65,6 @@ async function render() {
   const graphInfo = graphMeta
     ? `Graphe routier : ${graphMeta.nodeCount.toLocaleString("fr-FR")} nœuds / ${graphMeta.edgeCount.toLocaleString("fr-FR")} arêtes (version ${graphMeta.version.slice(0, 8)})`
     : "Graphe routier : non chargé.";
-
-  const favoris = await listFavoris();
-  const favorisHtml =
-    favoris.length === 0
-      ? `<p class="muted">Aucune adresse favorite pour l'instant. Tape une note sur la fiche d'un colis géocodé pour l'enregistrer ici automatiquement.</p>`
-      : favoris
-          .map(
-            (f) => `
-        <div class="card" data-favori-id="${escapeHtml(f.id)}" style="margin-top:8px;">
-          <div class="card-title">${escapeHtml(f.rue) || "(adresse)"}</div>
-          <p class="muted">${escapeHtml(f.cp)} ${escapeHtml(f.ville)}</p>
-          <div class="field" style="margin-top:8px;margin-bottom:0;">
-            <textarea data-favori-note class="field-lg" rows="2" style="min-height:0;" placeholder="Code portail, chien, consigne...">${escapeHtml(f.note)}</textarea>
-          </div>
-          <div class="field" style="margin-top:8px;margin-bottom:0;">
-            <label>Horaires d'ouverture (la tournée évitera les heures fermées)</label>
-            <div data-favori-horaires></div>
-          </div>
-          <div class="button-row" style="margin-top:8px;">
-            <button type="button" data-favori-addtour>${icon("plus")}Ajouter à la tournée</button>
-            <button type="button" class="danger" data-favori-delete>${icon("trash-2")}Supprimer</button>
-          </div>
-        </div>`
-          )
-          .join("");
 
   containerRef.innerHTML = `
     <div class="card">
@@ -165,12 +134,6 @@ async function render() {
     </div>
     <div class="button-row">
       <button type="button" class="primary" id="s-save">Enregistrer</button>
-    </div>
-    <div class="card" style="margin-top:20px;">
-      <div class="card-title">Adresses favorites</div>
-      <p class="muted">Conservées même après "Effacer tous les colis et tournées".</p>
-      <input type="search" id="favoris-search" placeholder="Rechercher (rue, ville, note)..." style="margin-bottom:4px;">
-      <div id="favoris-list-wrap">${favorisHtml}</div>
     </div>
     <div class="card" style="margin-top:20px;">
       <div class="card-row" style="cursor:pointer;" id="debug-ocr-toggle">
@@ -379,44 +342,6 @@ async function render() {
     render();
   });
 
-  containerRef.querySelectorAll("[data-favori-addtour]").forEach((el) => {
-    el.addEventListener("click", async () => {
-      const id = el.closest("[data-favori-id]").dataset.favoriId;
-      const favori = favoris.find((f) => f.id === id);
-      if (!favori) return;
-      const colis = await saveColis({
-        nom: favori.rue || "Favori",
-        adresseRaw: { rue: favori.rue, cp: favori.cp, ville: favori.ville },
-        geocode: { lat: favori.lat, lon: favori.lon, status: "ok" },
-        statut: "pret",
-        dateScan: new Date().toISOString(),
-        tel: "",
-        quantite: 1,
-        avant12h: false,
-        sourceFavoriId: favori.id,
-      });
-      // Bug reel corrige ici : ce bouton creait le colis mais ne l'inserait
-      // jamais dans une tournee deja en cours (contrairement au scan, voir
-      // tour-ui.js's handleColisSaved) -- il restait "pret" hors-tournee
-      // jusqu'au prochain recalcul complet, invisible entre-temps.
-      const activeTour = await getActiveTour();
-      if (activeTour) {
-        const result = await insertStopCheapest(activeTour, colis);
-        if (result) {
-          await saveColis({ ...colis, statut: "en_tournee" });
-          showToast(`"${favori.rue || "Favori"}" ajouté à la tournée en cours (position ${result.position}).`);
-          return;
-        }
-      }
-      showToast(`"${favori.rue || "Favori"}" ajouté aux colis à trier.`);
-    });
-  });
-
-  // Enregistrement silencieux en quittant le champ (pas de bouton dedie, pas
-  // de boite de dialogue) : uniquement si le texte a change.
-  // Recherche dans les favoris (retour terrain) : filtre client sur tout le
-  // texte de chaque carte (rue, ville, CP, note) -- la liste grossit vite a
-  // l'usage, la faire defiler entiere ne tient plus.
   // Historique des journees (chantier F) : groupe par jour, secteur affiche
   // quand il a ete saisi a la cloture. Rendu paresseux au premier depli --
   // getToursGroupedByDay parcourt tout l'historique, inutile de le payer a
@@ -454,49 +379,6 @@ async function render() {
         .join("");
     });
   }
-
-  const favSearch = containerRef.querySelector("#favoris-search");
-  if (favSearch) {
-    favSearch.addEventListener("input", () => {
-      const q = favSearch.value.trim().toLowerCase();
-      containerRef.querySelectorAll("#favoris-list-wrap [data-favori-id]").forEach((card) => {
-        card.style.display = !q || card.textContent.toLowerCase().includes(q) ? "" : "none";
-      });
-    });
-  }
-
-  containerRef.querySelectorAll("[data-favori-note]").forEach((el) => {
-    const initialNote = el.value;
-    el.addEventListener("blur", async () => {
-      if (el.value === initialNote) return;
-      const id = el.closest("[data-favori-id]").dataset.favoriId;
-      await updateFavori(id, { note: el.value });
-      showToast("Note enregistrée.");
-    });
-  });
-  // Horaires jour par jour : meme editeur que la fiche colis (voir
-  // favoris/horaires-ui.js), un par adresse favorite.
-  containerRef.querySelectorAll("[data-favori-id]").forEach((card) => {
-    const host = card.querySelector("[data-favori-horaires]");
-    if (!host) return;
-    const id = card.dataset.favoriId;
-    const favori = favoris.find((f) => f.id === id);
-    renderHorairesEditor(host, horairesOf(favori), {
-      onChange: async (horaires) => {
-        await updateFavori(id, { horaires, fermeDebut: "", fermeFin: "" });
-        showToast("Horaires enregistrés.");
-      },
-    });
-  });
-
-  containerRef.querySelectorAll("[data-favori-delete]").forEach((el) => {
-    el.addEventListener("click", async () => {
-      const id = el.closest("[data-favori-id]").dataset.favoriId;
-      if (!confirm("Supprimer cette adresse favorite ?")) return;
-      await deleteFavori(id);
-      render();
-    });
-  });
 
   containerRef.querySelector("#debug-ocr-toggle").addEventListener("click", () => {
     showDebugOcr = !showDebugOcr;

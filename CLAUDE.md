@@ -667,6 +667,14 @@ les pros) et les Réglages (avec recherche).
   `input, select, textarea` peignait aussi les cases à cocher (fond sombre, 44 px de haut,
   coins arrondis, aucune coche visible) — d'où les « cadres bizarres » signalés. Elle exclut
   désormais `checkbox`/`radio`, qui gardent leur rendu natif teinté par `accent-color`.
+  **Écran Favoris dédié** (build 169, 2026-11-17, « pas dans les Réglages, en haut avec
+  l'étoile, un par un, tout déplié ça prend trop de place ») : bouton ⭐ dans l'en-tête de
+  la Tournée → vue `#favoris` (`js/favoris/favoris-ui.js`). Liste compacte, une ligne par
+  favori (nom en titre s'il existe, sinon la rue ; repères note/horaires), **une seule
+  ouverte à la fois**, panneau construit à l'ouverture, horaires eux-mêmes repliés dans un
+  `<details>`. Recherche multi-mots sans accents (`favoris-liste.js`, testé). La section a
+  quitté les Réglages. Même écran porté dans tourneo (build 123). `listFavoris` trie en
+  numérique (« 2 Rue » avant « 10 Rue »).
   **Position GPS** : le `GeolocateControl` de MapLibre est le **seul** consommateur de la
   géolocalisation de l'appli — `trackUserLocation` suit déjà la position en continu et
   affiche le point du livreur en permanence après le premier appui. Une surveillance maison

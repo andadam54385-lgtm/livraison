@@ -31,6 +31,7 @@
     <div class="view-header-row">
       <h1 id="tour-header-title" style="flex:1;">Tournée</h1>
       <button type="button" id="tour-recalc-btn" class="icon-btn" aria-label="Recalculer la tournée" hidden></button>
+      <button type="button" id="tour-favoris-btn" class="icon-btn" aria-label="Favoris"></button>
       <button type="button" id="tour-settings-btn" class="icon-btn" aria-label="Réglages"></button>
     </div>
     <div class="stats-row" id="tour-header-stats" style="flex-wrap:wrap;"></div>
@@ -59,6 +60,16 @@
     </div>
   </header>
   <div id="settings-content" class="view-content"></div>
+</div>
+
+<div id="favoris-view" class="view" data-view="favoris" hidden>
+  <header class="view-header">
+    <div class="view-header-row">
+      <button type="button" id="favoris-back" class="icon-btn" aria-label="Retour"></button>
+      <h1>Favoris</h1>
+    </div>
+  </header>
+  <div id="favoris-content" class="view-content"></div>
 </div>
 
 <div id="toast-container" class="toast-container" aria-live="polite"></div>

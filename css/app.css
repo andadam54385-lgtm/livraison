@@ -1067,3 +1067,32 @@ button .spinner-inline,
   height: 100%;
   pointer-events: none;
 }
+
+/* Ecran Favoris (js/favoris/favoris-ui.js) : une ligne par adresse, repliee ;
+   un seul panneau d'edition ouvert a la fois. */
+.fav-liste { display: flex; flex-direction: column; gap: 6px; padding-bottom: 24px; }
+.fav-item { background: var(--bg-card); border-radius: 14px; overflow: hidden; }
+.fav-item.ouvert { box-shadow: 0 0 0 2px var(--accent-strong); }
+.fav-ligne {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  text-align: left;
+  color: var(--text);
+}
+.fav-ligne-texte { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fav-titre { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fav-sous-titre { font-size: 0.85rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fav-repere { color: var(--accent-strong); display: inline-flex; }
+.fav-panneau { padding: 4px 14px 14px; border-top: 1px solid var(--border-soft); }
+.fav-horaires { margin: 0 0 12px; border: 1px solid var(--border-soft); border-radius: 12px; padding: 0 12px; }
+.fav-horaires > summary { min-height: 48px; display: flex; align-items: center; gap: 4px; cursor: pointer; font-weight: 600; list-style: none; }
+.fav-horaires > summary::-webkit-details-marker { display: none; }
+.fav-horaires[open] { padding-bottom: 12px; }

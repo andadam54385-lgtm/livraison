@@ -30,7 +30,7 @@ function installGlobalErrorCapture() {
 // Tournee est l'ecran d'accueil et heberge le scan (bouton flottant camera,
 // voir tour-ui.js) : machine a 2 etats (preparation/execution), plus de tab
 // Scan separe. Carte/Reglages restent a 1 tap.
-const VIEWS = ["tour", "settings"];
+const VIEWS = ["tour", "settings", "favoris"];
 const viewModules = {};
 
 async function loadViewModule(name) {
@@ -38,6 +38,7 @@ async function loadViewModule(name) {
   let mod;
   if (name === "tour") mod = await import("./tour/tour-ui.js");
   else if (name === "settings") mod = await import("./settings/settings-ui.js");
+  else if (name === "favoris") mod = await import("./favoris/favoris-ui.js");
   viewModules[name] = mod;
   return mod;
 }
@@ -175,13 +176,15 @@ async function boot() {
   // fois, au demarrage.
   document.getElementById("scan-fab").innerHTML = icon("camera", { spaced: false, size: 26 });
   document.getElementById("settings-back").innerHTML = icon("arrow-left", { spaced: false });
-  document.getElementById("settings-back").addEventListener("click", () => {
-    // Reglages n'est pas un onglet de la nav du bas (accessible depuis le
-    // menu de l'ecran Carte) : history.back() ramene a l'ecran d'ou on vient
-    // plutot que vers une destination fixe supposee.
+  // Reglages et Favoris ne sont pas des onglets : history.back() ramene a
+  // l'ecran d'ou on vient plutot que vers une destination fixe supposee.
+  const retour = () => {
     if (history.length > 1) history.back();
     else location.hash = "#tour";
-  });
+  };
+  document.getElementById("settings-back").addEventListener("click", retour);
+  document.getElementById("favoris-back").innerHTML = icon("arrow-left", { spaced: false });
+  document.getElementById("favoris-back").addEventListener("click", retour);
 
   await openDb();
   await runImportIfNeeded(renderImportProgress);

@@ -79,6 +79,11 @@ export async function mount(container) {
     const settingsBtn = document.getElementById("tour-settings-btn");
     settingsBtn.innerHTML = icon("settings", { spaced: false, size: 20 });
     settingsBtn.addEventListener("click", () => { location.hash = "#settings"; });
+    // Favoris : etoile a cote des Reglages (retour terrain 2026-11-17, ils
+    // etaient enfouis dans les Reglages), voir js/favoris/favoris-ui.js.
+    const favorisBtn = document.getElementById("tour-favoris-btn");
+    favorisBtn.innerHTML = icon("star", { spaced: false, size: 20 });
+    favorisBtn.addEventListener("click", () => { location.hash = "#favoris"; });
     // Recalcul dans le header (retour terrain : "a cote de Reglages en
     // haut") : toujours accessible sans deplier la feuille. Visible en Etat
     // B uniquement (voir render()) ; le retour visuel (statut + barre de

@@ -43,7 +43,9 @@ export async function deleteFavori(id) {
 export async function listFavoris() {
   const db = await getDb();
   const all = await getAll(db, "favoris");
-  return all.sort((a, b) => (a.ville || "").localeCompare(b.ville || "") || (a.rue || "").localeCompare(b.rue || ""));
+  // Tri numerique : « 2 Rue X » avant « 10 Rue X » (et pas l'inverse).
+  const cmp = (x, y) => (x || "").localeCompare(y || "", "fr", { numeric: true, sensitivity: "base" });
+  return all.sort((a, b) => cmp(a.ville, b.ville) || cmp(a.rue, b.rue));
 }
 
 // Cherche un favori proche d'un point (lat/lon), pour alerter automatiquement
