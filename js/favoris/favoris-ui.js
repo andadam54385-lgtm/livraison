@@ -1,7 +1,9 @@
 import { listFavoris, updateFavori, deleteFavori } from "./favoris-store.js";
 import { horairesOf } from "./horaires.js";
 import { renderHorairesEditor } from "./horaires-ui.js";
-import { filtrerFavoris, resumeFavori } from "./favoris-liste.js";
+import { filtrerFavoris, resumeFavori, adresseDepuisEntree } from "./favoris-liste.js";
+import { renderManualAddressSearch } from "../geocode/geocode-ui.js";
+import { boutonPositionHtml, brancherBoutonPosition } from "../geocode/position-actuelle.js";
 import { saveColis } from "../scan/colis-store.js";
 import { getActiveTour } from "../routing/tour-store.js";
 import { insertStopCheapest } from "../routing/insert-stop.js";
@@ -89,7 +91,22 @@ function renderListe() {
 
 function renderPanneau(panneau, favori) {
   if (!favori) return;
+  const adresseTexte = [favori.rue, [favori.cp, favori.ville].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   panneau.innerHTML = `
+    <div class="field" style="margin-bottom:10px;">
+      <label>Nom (client, entreprise…)</label>
+      <input type="text" data-fav-nom class="field-lg" value="${escapeHtml(favori.nom || "")}" placeholder="Ex : Garage Martin">
+    </div>
+    <div class="field" style="margin-bottom:10px;">
+      <label>Adresse</label>
+      <p style="margin:0 0 6px;">${escapeHtml(adresseTexte || "(aucune)")}</p>
+      <button type="button" data-fav-adresse style="width:100%;">${icon("pencil")}Modifier l'adresse</button>
+      <div data-fav-adresse-slot hidden style="margin-top:8px;">
+        ${boutonPositionHtml("fav-gps")}
+        <p class="muted" style="margin:0 0 6px;">Le point GPS est placé là où tu te trouves ; l'adresse écrite ne change pas. Ou cherche une autre adresse :</p>
+        <div data-fav-recherche></div>
+      </div>
+    </div>
     <div class="field" style="margin-bottom:10px;">
       <label>Note (code portail, chien, consigne…)</label>
       <textarea data-fav-note class="field-lg" rows="2" style="min-height:0;">${escapeHtml(favori.note)}</textarea>
@@ -102,6 +119,45 @@ function renderPanneau(panneau, favori) {
     <button type="button" class="primary" data-fav-addtour style="width:100%;">${icon("plus")}Ajouter à la tournée</button>
     <button type="button" class="danger" data-fav-delete style="width:100%;margin-top:8px;">${icon("trash-2")}Supprimer ce favori</button>
   `;
+
+  // Nom : enregistre en quittant le champ ; la ligne de la liste (titre) suit.
+  const nom = panneau.querySelector("[data-fav-nom]");
+  nom.addEventListener("change", async () => {
+    const valeur = nom.value.trim();
+    if (valeur === (favori.nom || "")) return;
+    await updateFavori(favori.id, { nom: valeur });
+    favori.nom = valeur;
+    showToast("Nom enregistré.");
+    renderListe();
+  });
+
+  // Adresse : recherche BAN (le point GPS suit l'adresse choisie), ou point
+  // pose sur la position actuelle (devant le client) sans toucher au texte.
+  const slot = panneau.querySelector("[data-fav-adresse-slot]");
+  panneau.querySelector("[data-fav-adresse]").addEventListener("click", () => {
+    slot.hidden = !slot.hidden;
+    if (slot.hidden || slot.dataset.construit === "1") return;
+    slot.dataset.construit = "1";
+    renderManualAddressSearch(slot.querySelector("[data-fav-recherche]"), {
+      initialQuery: [favori.rue, favori.cp].filter(Boolean).join(" "),
+      onPick: async (entree) => {
+        const patch = adresseDepuisEntree(entree);
+        await updateFavori(favori.id, patch);
+        Object.assign(favori, patch);
+        showToast("Adresse enregistrée.");
+        renderListe();
+      },
+      onCancel: () => {
+        slot.hidden = true;
+      },
+    });
+    brancherBoutonPosition(slot, "fav-gps", async ({ lat, lon }) => {
+      await updateFavori(favori.id, { lat, lon });
+      Object.assign(favori, { lat, lon });
+      showToast("Point GPS placé sur ta position.");
+      slot.hidden = true;
+    });
+  });
 
   // Note : enregistree en quittant le champ, seulement si elle a change.
   const note = panneau.querySelector("[data-fav-note]");

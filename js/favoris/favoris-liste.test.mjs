@@ -2,7 +2,7 @@
 //
 // Lancer : node js/favoris/favoris-liste.test.mjs
 
-import { filtrerFavoris, resumeFavori } from "./favoris-liste.js";
+import { filtrerFavoris, resumeFavori, adresseDepuisEntree } from "./favoris-liste.js";
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -48,6 +48,10 @@ check("favori vide -> titre de repli", resumeFavori({}).titre, "(adresse sans ru
   check("recherche par le nom", ids(filtrerFavoris([...favs, garage], "garage")), ["g"]);
   check("nom fait d'espaces -> titre = rue", resumeFavori({ ...garage, nom: "  " }).titre, "4 Rue Carnot");
 }
+
+// 4. Adresse choisie dans la recherche -> favori.
+check("adresse avec numero et indice", adresseDepuisEntree({ n: 12, rep: "bis", r: "Rue de Metz", cp: "54200", c: "Toul", lat: 48.68, lon: 5.89 }), { rue: "12bis Rue de Metz", cp: "54200", ville: "Toul", lat: 48.68, lon: 5.89 });
+check("lieu-dit sans numero", adresseDepuisEntree({ r: "Ferme de la Cote", cp: "55300", c: "Ranzieres", lat: 49, lon: 5.5 }).rue, "Ferme de la Cote");
 
 if (failures > 0) {
   console.log(`\n${failures} TEST(S) EN ECHEC`);

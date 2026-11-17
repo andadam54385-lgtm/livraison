@@ -1,6 +1,6 @@
 {
-  "version": "97333383fbbf",
-  "generatedAt": "2026-11-17T14:31:51.261Z",
+  "version": "4ad4cff9c2be",
+  "generatedAt": "2026-11-17T15:22:50.315Z",
   "assets": [
     "./",
     "./CLAUDE.md",
@@ -33,6 +33,8 @@
     "./js/geocode/match-address.test.mjs",
     "./js/geocode/normalize-address.js",
     "./js/geocode/online-search.js",
+    "./js/geocode/position-actuelle.js",
+    "./js/geocode/position-actuelle.test.mjs",
     "./js/import/import-data.js",
     "./js/import/import-ui.js",
     "./js/lib/derniere-position.js",
@@ -130,7 +132,7 @@
   ],
   "files": {
     "./": "5727f9f3a9e5e665",
-    "./CLAUDE.md": "d1562a89fd47648b",
+    "./CLAUDE.md": "288f83b0d4ad96bf",
     "./README.md": "5c0141359e012b32",
     "./assets/manifest-content.json": "9b1852ddc3c4ddae",
     "./css/app.css": "2592f545879886ff",
@@ -146,10 +148,10 @@
     "./js/export/export-tours.js": "51a6fa7e451da62d",
     "./js/favoris/favori-texte.js": "9ed23c6169e2a5e7",
     "./js/favoris/favori-texte.test.mjs": "d2548d6fda72b1ba",
-    "./js/favoris/favoris-liste.js": "6f37c072729e85cb",
-    "./js/favoris/favoris-liste.test.mjs": "8a1fde0a2df4e5d8",
+    "./js/favoris/favoris-liste.js": "cf4a2c0943d96e5e",
+    "./js/favoris/favoris-liste.test.mjs": "e25c52fbaedc3081",
     "./js/favoris/favoris-store.js": "17acbc17fcd2ac59",
-    "./js/favoris/favoris-ui.js": "714a3623fa163600",
+    "./js/favoris/favoris-ui.js": "59a6522c0de804ee",
     "./js/favoris/horaires-ui.js": "2fae0574ae5e3ed7",
     "./js/favoris/horaires.js": "856cba84890b3286",
     "./js/favoris/horaires.test.mjs": "58ca4c75ad880234",
@@ -160,6 +162,8 @@
     "./js/geocode/match-address.test.mjs": "ca8826521cc06ca4",
     "./js/geocode/normalize-address.js": "e80ccd4beef477a7",
     "./js/geocode/online-search.js": "4376ea73fdb77257",
+    "./js/geocode/position-actuelle.js": "6c83c0dbfc8b98d3",
+    "./js/geocode/position-actuelle.test.mjs": "f1c9d916ea30a044",
     "./js/import/import-data.js": "489f496de6b47022",
     "./js/import/import-ui.js": "e7f3e959280bdc16",
     "./js/lib/derniere-position.js": "c6c1ff0375d157be",
@@ -224,7 +228,7 @@
     "./js/ui/icons.js": "01850ab503e6f3b0",
     "./js/ui/photo-viewer.js": "62aba866a5a5fb3c",
     "./js/ui/segmented.js": "d68a585c517ee60c",
-    "./js/version.js": "f1e6469fa809edbc",
+    "./js/version.js": "8a9b2dfc548cd106",
     "./lib/maplibre/LICENSE-maplibre-gl.txt": "b0d2e08b85de5940",
     "./lib/maplibre/LICENSE-pmtiles.txt": "a3378c46a15ffd9d",
     "./lib/maplibre/basemap-assets/fonts/Noto Sans Italic/0-255.pbf": "087b2484de911904",
@@ -253,6 +257,6 @@
     "./lib/zxing/zxing-reader.js": "14d9ae7753136475",
     "./lib/zxing/zxing_reader.wasm": "9678b0ccf938a6c3",
     "./manifest.webmanifest": "5837ab48326dbdff",
-    "./sw.js": "470a335631f48cbd"
+    "./sw.js": "a6f1f7ef27f9ed59"
   }
 }

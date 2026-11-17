@@ -44,3 +44,10 @@ export function resumeFavori(f) {
     aHoraires: !horairesSontVides(horairesOf(f)),
   };
 }
+
+// Adresse choisie dans la recherche BAN (entree {n, rep, r, cp, c, lat, lon},
+// voir geocode-ui.js) -> champs d'un favori. Le point GPS suit l'adresse.
+export function adresseDepuisEntree(entree) {
+  const numero = entree.n ? `${entree.n}${entree.rep || ""} ` : "";
+  return { rue: `${numero}${entree.r || ""}`.trim(), cp: entree.cp || "", ville: entree.c || "", lat: entree.lat, lon: entree.lon };
+}
